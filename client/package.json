@@ -1,0 +1,20 @@
+{
+  "name": "@nfbmc/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@colyseus/sdk": "^0.18.6",
+    "@nfbmc/shared": "*"
+  },
+  "devDependencies": {
+    "@nfbmc/server": "*",
+    "vite": "^8.3.5"
+  }
+}

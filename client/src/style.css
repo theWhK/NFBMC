@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  background: #1d1a17;
+  color: #f5ebe0;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+h1 {
+  font-size: 1.4rem;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #2b2622;
+  border-radius: 8px;
+}
+
+.hint {
+  opacity: 0.7;
+  font-size: 0.9rem;
+}

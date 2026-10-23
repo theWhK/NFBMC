@@ -1,0 +1,13 @@
+[Unit]
+Description=NFBMC: puxa a imagem nova do GHCR e reinicia o que mudou
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/nfbmc
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml pull --quiet
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d --remove-orphans
+ExecStartPost=/usr/bin/docker image prune -f

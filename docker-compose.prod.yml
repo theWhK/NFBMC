@@ -1,0 +1,65 @@
+# Produção (nfbmc-prod, em /opt/nfbmc). Segredos vêm do .env ao lado deste arquivo,
+# que nunca vai para o repositório. Veja deploy/README.md.
+#
+# IMPORTANTE: nenhum serviço tem "ports". O Docker ignora o ufw para portas publicadas;
+# o único caminho de entrada é o cloudflared, que fala com o servidor pela rede interna.
+name: nfbmc
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  nfbmc-server:
+    image: ghcr.io/thewhk/nfbmc:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://nfbmc:${POSTGRES_PASSWORD:?defina no .env}@postgres:5432/nfbmc
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+    logging: *logging
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nfbmc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina no .env}
+      POSTGRES_DB: nfbmc
+    # Ajustado para uma VM de 2 GB dividida com o servidor do jogo.
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c effective_cache_size=256MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c max_connections=20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nfbmc -d nfbmc"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 384m
+    logging: *logging
+
+  cloudflared:
+    # Versão fixa; atualize manualmente quando quiser.
+    image: cloudflare/cloudflared:2026.10.3
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?defina no .env}
+    depends_on:
+      - nfbmc-server
+    mem_limit: 128m
+    logging: *logging
+
+volumes:
+  pgdata:

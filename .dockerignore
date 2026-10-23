@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+.git
+.github
+.env*
+test-results
+playwright-report
+deploy
+e2e

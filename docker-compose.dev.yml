@@ -1,0 +1,23 @@
+# Postgres para desenvolvimento local. O servidor e o cliente rodam fora do Docker (npm run dev).
+# Credenciais fixas de propósito: este banco não tem nada de produção.
+name: nfbmc-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: nfbmc
+      POSTGRES_PASSWORD: nfbmc
+      POSTGRES_DB: nfbmc
+    ports:
+      - "127.0.0.1:${DEV_PG_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nfbmc -d nfbmc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

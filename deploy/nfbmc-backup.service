@@ -1,0 +1,9 @@
+[Unit]
+Description=NFBMC: pg_dump diário
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+ExecStart=/opt/nfbmc/nfbmc-backup.sh
