@@ -1,13 +1,58 @@
 import { schema, t, type SchemaType } from "@colyseus/schema";
 
 export const Player = schema({
-  x: t.number().default(0),
-  y: t.number().default(0),
+  name: t.string().default(""),
   color: t.string().default("#ffffff"),
+  x: t.number().default(0),
+  z: t.number().default(0),
+  heading: t.number().default(0),
+  speed: t.number().default(0),
+  /** Fora da corrida atual (entrou no meio): espera a próxima. */
+  racing: t.boolean().default(false),
+  /** Volta em que o jogador está (0 = ainda no grid, antes de cruzar a linha). */
+  lap: t.uint8().default(0),
+  /** Metros percorridos na corrida, para calcular a posição. */
+  progress: t.number().default(0),
+  /** Posição atual na corrida (1 = primeiro). */
+  place: t.uint8().default(0),
+  calories: t.uint32().default(0),
+  boost: t.number().default(0),
+  finished: t.boolean().default(false),
+  /** Segundos desde a largada até cruzar a chegada da última volta. */
+  finishTime: t.number().default(0),
 });
 export type Player = SchemaType<typeof Player>;
 
+export const Food = schema({
+  kind: t.string().default("burger"),
+  x: t.number().default(0),
+  z: t.number().default(0),
+  active: t.boolean().default(true),
+});
+export type Food = SchemaType<typeof Food>;
+
+/** Linha do placar final. Fica guardada mesmo se o jogador sair da sala. */
+export const Result = schema({
+  sessionId: t.string().default(""),
+  name: t.string().default(""),
+  color: t.string().default("#ffffff"),
+  /** Colocação na chegada (0 = não terminou). */
+  place: t.uint8().default(0),
+  calories: t.uint32().default(0),
+  bonus: t.uint32().default(0),
+  total: t.uint32().default(0),
+});
+export type Result = SchemaType<typeof Result>;
+
 export const RaceState = schema({
+  phase: t.string().default("lobby"),
+  /** Segundos restantes da contagem, da tolerância de chegada ou da tela de resultado. */
+  timer: t.number().default(0),
+  /** Segundos desde a largada. */
+  raceTime: t.number().default(0),
   players: t.map(Player),
+  foods: t.array(Food),
+  /** Placar da última corrida, do mais calórico para o menos. */
+  results: t.array(Result),
 });
 export type RaceState = SchemaType<typeof RaceState>;

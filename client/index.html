@@ -7,15 +7,56 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <main>
-      <h1>🍔 Need for Burgers: Most Calories</h1>
-      <p>
-        <span id="status" data-testid="status">Conectando…</span>
-        · Jogadores: <span id="player-count" data-testid="player-count">0</span>
-      </p>
-      <canvas id="game" width="800" height="600"></canvas>
-      <p class="hint">Use as setas ou WASD para mover o seu quadrado (o de borda branca).</p>
-    </main>
+    <canvas id="game"></canvas>
+
+    <div id="topbar">
+      🍔 <strong>Need for Burgers</strong>
+      · <span id="status" data-testid="status">Digite seu apelido</span>
+      · Jogadores: <span id="player-count" data-testid="player-count">0</span>
+    </div>
+
+    <form id="join" class="panel center">
+      <h1>🍔 Need for Burgers<br /><small>Most Calories</small></h1>
+      <p>Corra 3 voltas comendo tudo o que aparecer na pista.<br />Ganha quem terminar com mais calorias!</p>
+      <label>
+        Seu apelido
+        <input id="name" data-testid="name-input" maxlength="16" autocomplete="off" placeholder="ex.: Rei do X-Tudo" />
+      </label>
+      <button type="submit" data-testid="join-button">Entrar</button>
+    </form>
+
+    <div id="lobby" class="panel side" hidden>
+      <h2>Lobby</h2>
+      <p class="hint">Dirija à vontade enquanto a galera chega.</p>
+      <ul id="lobby-list" data-testid="lobby-list"></ul>
+      <button id="start" data-testid="start-button">Começar corrida</button>
+    </div>
+
+    <div id="hud" hidden>
+      <div class="stat"><span>Volta</span><strong id="lap" data-testid="lap">1/3</strong></div>
+      <div class="stat"><span>Posição</span><strong id="place" data-testid="place">1º</strong></div>
+      <div class="stat big"><span>Calorias</span><strong id="calories" data-testid="calories">0</strong></div>
+      <div class="stat"><span>km/h</span><strong id="speed">0</strong></div>
+      <div id="turbo" hidden>TURBO!</div>
+    </div>
+
+    <div id="countdown" data-testid="countdown" hidden></div>
+    <div id="message" data-testid="message" hidden></div>
+    <div id="popups"></div>
+
+    <div id="results" class="panel center" data-testid="results" hidden>
+      <h2 id="winner"></h2>
+      <table>
+        <thead><tr><th>#</th><th>Jogador</th><th>Chegada</th><th>Comeu</th><th>Bônus</th><th>Total</th></tr></thead>
+        <tbody id="results-body"></tbody>
+      </table>
+      <p class="hint" id="results-timer"></p>
+    </div>
+
+    <canvas id="minimap" width="180" height="180" hidden></canvas>
+
+    <p id="controls" class="hint" hidden>↑/W acelera · ↓/S freia e dá ré · ←→/AD vira · comida dá calorias e turbo</p>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

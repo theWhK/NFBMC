@@ -18,7 +18,7 @@ Fale com o Will em português do Brasil. Comentários de código, títulos e des
 ```
 shared/   constantes e tipos usados pelo servidor e pelo cliente (@nfbmc/shared)
 server/   servidor Node + Colyseus 0.18, porta 2567 (@nfbmc/server)
-client/   cliente Vite + TypeScript, canvas 2D por enquanto (@nfbmc/client)
+client/   cliente Vite + TypeScript + Three.js (@nfbmc/client)
 e2e/      testes Playwright (duas abas = dois jogadores)
 deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo agente)
 ```
@@ -27,7 +27,9 @@ deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo a
 - O estado da sala usa a API `schema({...})` do `@colyseus/schema` 5, sem decorators.
 - O servidor é autoritativo: o cliente manda só a intenção (por exemplo, a direção), e o servidor calcula as posições.
 - Em produção, o servidor também entrega o build do cliente (`client/dist`), então tudo sai pela porta 2567.
-- A engine gráfica ainda não foi escolhida (Three.js ou Phaser, depende de o jogo ser 3D ou 2D). Não introduza uma sem combinar com o Will.
+- O jogo é 3D com **Three.js** (decidido com o Will). Os modelos são feitos com formas simples do próprio Three.js, sem arquivos externos. Não troque a engine nem adicione outra biblioteca grande sem combinar.
+- O mundo fica no plano XZ (Y para cima). A pista, a física do carro e as regras (voltas, comida, bônus) ficam em `shared/` para o servidor e o cliente usarem as mesmas contas.
+- Fluxo da sala (`server/src/rooms/RaceRoom.ts`): `lobby` → alguém aperta "Começar" → `countdown` → `racing` → `results` → `lobby`. Quem entra no meio espera a próxima corrida.
 
 ## Comandos
 
@@ -49,5 +51,6 @@ O Will acessa pelo Tailscale: http://nfbmc-dev:5173 (Vite), que conecta no servi
 ## Testes com Playwright
 
 - Os testes ficam em `e2e/`. Use um `browser.newContext()` por jogador.
-- O cliente expõe `window.__nfbmc` (`sessionId` e `players()`) para os testes lerem o estado sem depender do canvas. Mantenha esse gancho funcionando quando mexer no cliente.
+- O cliente expõe `window.__nfbmc` (`sessionId`, `phase()` e `players()`) para os testes lerem o estado sem depender do canvas. Mantenha esse gancho funcionando quando mexer no cliente.
+- Para entrar no jogo, o teste preenche `name-input` e clica em `join-button` (veja `join()` em `e2e/corrida.spec.ts`).
 - Prefira `expect.poll` e `toHaveText` a `waitForTimeout` para esperar a sincronização.
