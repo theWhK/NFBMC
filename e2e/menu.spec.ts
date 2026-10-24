@@ -16,11 +16,11 @@ test("menu: navega pelo teclado, mostra os rivais e guarda a cor da garagem", as
   await page.getByTestId("garage-menu").click();
   const swatch = page.getByTestId("swatches").locator("button").nth(2);
   await swatch.click();
-  await expect(swatch).toHaveClass(/selected/);
+  await expect(swatch).toHaveClass(/chosen/);
   const color = await swatch.getAttribute("data-color");
   await page.reload();
   await page.getByTestId("garage-menu").click();
-  await expect(page.getByTestId("swatches").locator(`button[data-color="${color}"]`)).toHaveClass(/selected/);
+  await expect(page.getByTestId("swatches").locator(`button[data-color="${color}"]`)).toHaveClass(/chosen/);
 
   await context.close();
 });

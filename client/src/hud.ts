@@ -1,55 +1,77 @@
 // Partes do HUD desenhadas em canvas 2D: conta-giros e minimapa.
-import { LAKE, QUAY_Z, RACES, RACE_IDS, ROADS, raceMarker, type RaceId, type Track } from "@nfbmc/shared";
+import { LAKE, QUAY_Z, RACES, RACE_IDS, ROADS, carSpec, raceMarker, type RaceId, type Track } from "@nfbmc/shared";
 
-import { gearFor } from "./audio.ts";
 import type { CarView } from "./scene.ts";
 
-/** Conta-giros redondo com velocidade digital e marcha, no canto da tela. */
+export interface TachoData {
+  speed: number;
+  rpm: number;
+  gear: number;
+  car: string;
+  manual: boolean;
+}
+
+/**
+ * Conta-giros redondo, como no painel do carro: a escala vai até um pouco além
+ * da faixa vermelha de cada motor, com luz de troca de marcha, a marcha atual
+ * (R na ré) e a velocidade em km/h.
+ */
 export function createTacho(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext("2d")!;
   const size = canvas.width;
   const c = size / 2;
   const radius = size / 2 - 14;
-  // O ponteiro vai de 135° a 405° (sentido horário), como num painel de carro.
+  // O ponteiro vai de 135° a 405° (sentido horário).
   const start = Math.PI * 0.75;
   const sweep = Math.PI * 1.5;
 
-  return (speed: number) => {
-    const { gear, rpm } = gearFor(speed);
+  return ({ speed, rpm, gear, car, manual }: TachoData) => {
+    const spec = carSpec(car);
+    const max = Math.ceil((spec.redline + 1000) / 1000) * 1000;
+    const angle = (value: number) => start + (value / max) * sweep;
     ctx.clearRect(0, 0, size, size);
 
     ctx.beginPath();
     ctx.arc(c, c, radius + 8, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(22, 17, 13, 0.72)";
+    ctx.fillStyle = "rgba(22, 17, 13, 0.78)";
     ctx.fill();
 
-    // Marcações de 0 a 9 (x1000 rpm) e faixa vermelha no fim.
-    for (let i = 0; i <= 9; i++) {
-      const a = start + (i / 9) * sweep;
-      const inner = radius - 14;
-      ctx.strokeStyle = i >= 8 ? "#ff3b30" : "#f5ebe0";
-      ctx.lineWidth = 3;
+    // Faixa vermelha.
+    ctx.beginPath();
+    ctx.arc(c, c, radius - 4, angle(spec.redline), angle(max));
+    ctx.strokeStyle = "#c1121f";
+    ctx.lineWidth = 7;
+    ctx.stroke();
+
+    // Marcações a cada 1000 rpm (números) e a cada 500 (tracinhos).
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (let value = 0; value <= max; value += 500) {
+      const a = angle(value);
+      const major = value % 1000 === 0;
+      const inner = radius - (major ? 15 : 9);
+      ctx.strokeStyle = value >= spec.redline ? "#ff5c5c" : "#f5ebe0";
+      ctx.lineWidth = major ? 3 : 1.5;
       ctx.beginPath();
       ctx.moveTo(c + Math.cos(a) * inner, c + Math.sin(a) * inner);
       ctx.lineTo(c + Math.cos(a) * radius, c + Math.sin(a) * radius);
       ctx.stroke();
-      ctx.fillStyle = "#f5ebe0";
-      ctx.font = "13px 'Russo One', sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(i), c + Math.cos(a) * (radius - 26), c + Math.sin(a) * (radius - 26));
+      if (major) {
+        ctx.fillStyle = "#f5ebe0";
+        ctx.font = "13px 'Russo One', sans-serif";
+        ctx.fillText(String(value / 1000), c + Math.cos(a) * (radius - 27), c + Math.sin(a) * (radius - 27));
+      }
     }
 
     // Arco aceso até o giro atual.
-    const value = 0.12 + rpm * 0.82;
     ctx.beginPath();
-    ctx.arc(c, c, radius - 3, start, start + value * sweep);
-    ctx.strokeStyle = value > 0.85 ? "#ff3b30" : "#ff7a00";
-    ctx.lineWidth = 6;
+    ctx.arc(c, c, radius - 3, start, angle(Math.min(rpm, max)));
+    ctx.strokeStyle = rpm > spec.redline * 0.9 ? "#ff3b30" : "#ff7a00";
+    ctx.lineWidth = 4;
     ctx.stroke();
 
     // Ponteiro.
-    const a = start + value * sweep;
+    const a = angle(Math.min(rpm, max));
     ctx.strokeStyle = "#ff3b30";
     ctx.lineWidth = 4;
     ctx.beginPath();
@@ -61,15 +83,27 @@ export function createTacho(canvas: HTMLCanvasElement) {
     ctx.fillStyle = "#16110d";
     ctx.fill();
 
+    // Luz de troca: acende perto da faixa vermelha e pisca no limitador.
+    const shiftNow = rpm > spec.redline * 0.9;
+    const blink = rpm >= spec.redline - 300 && Math.floor(performance.now() / 80) % 2 === 0;
+    ctx.beginPath();
+    ctx.arc(c, c - radius * 0.55, 7, 0, Math.PI * 2);
+    ctx.fillStyle = shiftNow && !blink ? "#7dff6a" : "rgba(125, 255, 106, 0.12)";
+    ctx.fill();
+
+    // Velocidade, marcha e tipo de câmbio.
     ctx.fillStyle = "#ffffff";
     ctx.font = "italic 44px 'Russo One', sans-serif";
     ctx.fillText(String(Math.round(Math.abs(speed) * 3.6)), c, c + 44);
     ctx.font = "12px 'Russo One', sans-serif";
     ctx.fillStyle = "#ffc42e";
     ctx.fillText("KM/H", c, c + 70);
-    ctx.font = "20px 'Russo One', sans-serif";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(speed < -0.5 ? "R" : String(gear), c, c - 38);
+    ctx.font = "26px 'Russo One', sans-serif";
+    ctx.fillStyle = gear < 0 ? "#ff9a1f" : "#ffffff";
+    ctx.fillText(gear < 0 ? "R" : String(gear), c, c - 26);
+    ctx.font = "11px 'Russo One', sans-serif";
+    ctx.fillStyle = "rgba(245, 235, 224, 0.7)";
+    ctx.fillText(manual ? "MANUAL" : "AUTO", c, c - 8);
   };
 }
 

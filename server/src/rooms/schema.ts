@@ -5,6 +5,11 @@ export const Player = schema({
   color: t.string().default("#ffffff"),
   /** Piloto controlado pelo servidor. */
   bot: t.boolean().default(false),
+  /** Carro (id em CARS), giro do motor, marcha (-1 = ré) e câmbio manual. */
+  car: t.string().default("civic"),
+  rpm: t.uint16().default(0),
+  gear: t.int8().default(1),
+  manual: t.boolean().default(false),
   x: t.number().default(0),
   z: t.number().default(0),
   heading: t.number().default(0),
@@ -75,6 +80,10 @@ export type RaceState = SchemaType<typeof RaceState>;
 export const WorldPlayer = schema({
   name: t.string().default(""),
   color: t.string().default("#ffffff"),
+  car: t.string().default("civic"),
+  rpm: t.uint16().default(0),
+  gear: t.int8().default(1),
+  manual: t.boolean().default(false),
   x: t.number().default(0),
   z: t.number().default(0),
   heading: t.number().default(0),
@@ -101,6 +110,7 @@ export const Cop = schema({
   boost: t.number().default(0),
   /** Sessão do jogador perseguido. */
   target: t.string().default(""),
+  car: t.string().default("viatura"),
 });
 export type Cop = SchemaType<typeof Cop>;
 
