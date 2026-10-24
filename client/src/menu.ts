@@ -197,6 +197,23 @@ export function createMenu(options: MenuOptions) {
     optSfx.textContent = `Efeitos: ${sound.prefs.sfx ? "ligados" : "desligados"}`;
     optGearbox.textContent = `Câmbio: ${manual ? "manual (E/Q)" : "automático"}`;
   };
+  // Gráficos: automático → alto → médio → baixo. Recarrega para aplicar (muda o jeito de desenhar).
+  const optQuality = document.getElementById("opt-quality") as HTMLButtonElement;
+  const QUALITY_KEY = "nfbmc:quality";
+  const qualityOrder = ["", "alto", "medio", "baixo"];
+  const qualityLabel: Record<string, string> = {
+    "": `automático (${scene?.quality === "medio" ? "médio" : scene?.quality ?? "baixo"})`,
+    alto: "alto (contorno + sombras)",
+    medio: "médio (contorno)",
+    baixo: "baixo (mais leve)",
+  };
+  const currentQuality = storage.get(QUALITY_KEY);
+  optQuality.textContent = `Gráficos: ${qualityLabel[currentQuality] ?? qualityLabel[""]}`;
+  optQuality.addEventListener("click", () => {
+    const next = qualityOrder[(qualityOrder.indexOf(currentQuality) + 1) % qualityOrder.length];
+    storage.set(QUALITY_KEY, next);
+    location.reload();
+  });
   optGearbox.addEventListener("click", () => {
     manual = !manual;
     storage.set(GEARBOX_KEY, manual ? "1" : "0");

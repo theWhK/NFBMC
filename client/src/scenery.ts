@@ -255,8 +255,13 @@ function buildSkyline(scene: THREE.Scene) {
 /** Faixa ao longo de uma linha (rua): `half` metros para cada lado. */
 function stripGeometry(points: [number, number][], half: number, y: number) {
   const positions: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
+  let travelled = 0;
   points.forEach(([x, z], i) => {
+    if (i > 0) travelled += Math.hypot(x - points[i - 1][0], z - points[i - 1][1]);
+    // Textura: atravessa a rua de 0 a 1 e repete a cada 8 m ao longo dela.
+    uvs.push(0, travelled / 8, 1, travelled / 8);
     const [px, pz] = points[Math.max(0, i - 1)];
     const [nx, nz] = points[Math.min(points.length - 1, i + 1)];
     const len = Math.hypot(nx - px, nz - pz) || 1;
@@ -271,6 +276,7 @@ function stripGeometry(points: [number, number][], half: number, y: number) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(positions.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   return geometry;
 }
@@ -282,13 +288,150 @@ function discGeometry(x: number, z: number, radius: number, y: number) {
   return geometry.toNonIndexed();
 }
 
+// --- Texturas "pintadas à mão" (desenhadas em canvas, sem arquivos) ----------
+
+function paintedTexture(size: number, draw: (ctx: CanvasRenderingContext2D, size: number, random: () => number) => void, seed: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  draw(canvas.getContext("2d")!, size, seeded(seed));
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+/** Asfalto: grão, remendos mais escuros e rachaduras traçadas a "nanquim". */
+function asphaltTexture() {
+  return paintedTexture(256, (ctx, size, random) => {
+    ctx.fillStyle = "#5c5b63";
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 2200; i++) {
+      const v = 70 + Math.floor(random() * 40);
+      ctx.fillStyle = `rgb(${v},${v},${v + 6})`;
+      ctx.fillRect(random() * size, random() * size, 2, 2);
+    }
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = "rgba(25, 24, 28, 0.35)";
+      ctx.beginPath();
+      ctx.ellipse(random() * size, random() * size, 14 + random() * 26, 8 + random() * 14, random() * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(15, 12, 10, 0.75)";
+    ctx.lineWidth = 1.6;
+    for (let i = 0; i < 5; i++) {
+      let x = random() * size;
+      let y = random() * size;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 6; k++) {
+        x += (random() - 0.5) * 30;
+        y += random() * 18;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  }, 11);
+}
+
+/** Calçada: lajotas com rejunte escuro e umas manchas. */
+function sidewalkTexture() {
+  return paintedTexture(256, (ctx, size, random) => {
+    ctx.fillStyle = "#a39a8c";
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 10; i++) {
+      ctx.fillStyle = `rgba(90, 80, 70, ${0.1 + random() * 0.15})`;
+      ctx.beginPath();
+      ctx.arc(random() * size, random() * size, 6 + random() * 18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(40, 32, 26, 0.6)";
+    ctx.lineWidth = 2;
+    for (let p = 0; p <= size; p += 64) {
+      ctx.beginPath();
+      ctx.moveTo(p, 0);
+      ctx.lineTo(p, size);
+      ctx.moveTo(0, p);
+      ctx.lineTo(size, p);
+      ctx.stroke();
+    }
+  }, 12);
+}
+
+/** Chão dos bairros (em tons de cinza; a cor do bairro tinge por cima): manchas e tufos. */
+const groundTexture = (() => {
+  const texture = paintedTexture(256, (ctx, size, random) => {
+    ctx.fillStyle = "#f2f2f2";
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 40; i++) {
+      const v = 200 + Math.floor(random() * 55);
+      ctx.fillStyle = `rgba(${v},${v},${v},0.6)`;
+      ctx.beginPath();
+      ctx.arc(random() * size, random() * size, 10 + random() * 30, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(60, 60, 60, 0.35)";
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 160; i++) {
+      const x = random() * size;
+      const y = random() * size;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (random() - 0.5) * 4, y - 4 - random() * 4);
+      ctx.stroke();
+    }
+  }, 13);
+  // A forma do bairro tem UV em metros: uma repetição a cada 24 m.
+  texture.repeat.set(1 / 24, 1 / 24);
+  return texture;
+})();
+
+/** Nuvens de desenho animado: bolhas brancas com contorno escuro, bem no alto. */
+function buildClouds() {
+  const group = new THREE.Group();
+  const random = seeded(5);
+  const makeTexture = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    const blobs = Array.from({ length: 6 }, () => [90 + random() * 330, 120 + random() * 40, 50 + random() * 50] as const);
+    // Primeiro o contorno (bolhas um pouco maiores e escuras), depois o recheio.
+    for (const [pass, grow, color] of [[0, 7, "#3a2a24"], [1, 0, "#fff4e6"]] as const) {
+      void pass;
+      ctx.fillStyle = color;
+      for (const [x, y, r] of blobs) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + grow, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // Sombra alaranjada embaixo (pôr do sol).
+    ctx.globalCompositeOperation = "source-atop";
+    ctx.fillStyle = "rgba(255, 150, 80, 0.45)";
+    ctx.fillRect(0, 150, 512, 106);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  };
+  for (let i = 0; i < 9; i++) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeTexture(), fog: false, depthWrite: false }));
+    const angle = (i / 9) * Math.PI * 2 + random();
+    const radius = 650 + random() * 300;
+    sprite.position.set(Math.cos(angle) * radius, 170 + random() * 110, Math.sin(angle) * radius);
+    sprite.scale.set(220 + random() * 120, 110 + random() * 50, 1);
+    group.add(sprite);
+  }
+  return group;
+}
+
 /** Chão dos bairros, ruas com calçada, faixa tracejada e o mar. */
 function buildGround(scene: THREE.Scene) {
   // Chão de cada bairro, com a sua cor (grama, calçadão, concreto do porto...).
   for (const district of DISTRICTS) {
     const shape = new THREE.Shape(district.polygon.map(([x, z]) => new THREE.Vector2(x, -z)));
     const geometry = new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2);
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color: district.ground }));
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color: district.ground, map: groundTexture }));
     mesh.position.y = -0.05;
     scene.add(mesh);
   }
@@ -311,8 +454,8 @@ function buildGround(scene: THREE.Scene) {
     asphaltParts.push(discGeometry(node.x, node.z, radius, 0.05));
   }
   const offset = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
-  scene.add(new THREE.Mesh(mergeGeometries(sidewalkParts.map(stripUv)), new THREE.MeshLambertMaterial({ color: "#9a9184" })));
-  scene.add(new THREE.Mesh(mergeGeometries(asphaltParts.map(stripUv)), new THREE.MeshLambertMaterial({ color: "#3f3f45", ...offset })));
+  scene.add(new THREE.Mesh(mergeGeometries(sidewalkParts), new THREE.MeshLambertMaterial({ color: "#ffffff", map: sidewalkTexture() })));
+  scene.add(new THREE.Mesh(mergeGeometries(asphaltParts), new THREE.MeshLambertMaterial({ color: "#ffffff", map: asphaltTexture(), ...offset })));
 
   // Faixa tracejada no meio das avenidas e ruas (vielas não têm), longe dos cruzamentos.
   const dashes: THREE.Matrix4[] = [];
@@ -355,12 +498,6 @@ function buildGround(scene: THREE.Scene) {
   lake.scale.set(LAKE.rx, 1, LAKE.rz);
   lake.position.set(LAKE.x, 0.03, LAKE.z);
   scene.add(shore, lake);
-}
-
-/** mergeGeometries exige os mesmos atributos: as faixas não têm "uv", os discos têm. */
-function stripUv(geometry: THREE.BufferGeometry) {
-  geometry.deleteAttribute("uv");
-  return geometry;
 }
 
 /** Guindastes do porto (só enfeite, na beira do cais). */
@@ -547,7 +684,7 @@ export function buildScenery(scene: THREE.Scene) {
   scene.add(new THREE.HemisphereLight("#ffd9a8", "#4a3b2a", 1.4));
   const sun = new THREE.DirectionalLight("#ffb36b", 2.4);
   sun.position.copy(SUN_DIRECTION).multiplyScalar(200);
-  scene.add(sun);
+  scene.add(sun, sun.target);
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(3000, 3000),
@@ -558,6 +695,8 @@ export function buildScenery(scene: THREE.Scene) {
   scene.add(ground);
 
   const { sky, sun: sunSprite } = buildSky(scene);
+  const clouds = buildClouds();
+  scene.add(clouds);
   buildSkyline(scene);
   buildGround(scene);
   buildBuildings(scene);
@@ -566,5 +705,5 @@ export function buildScenery(scene: THREE.Scene) {
   buildBillboards(scene);
   buildTrees(scene);
   scene.add(buildTrackMesh(RACES.autodromo.track, { asphalt: true }));
-  return { sky, sun: sunSprite };
+  return { sky, sun: sunSprite, light: sun, clouds };
 }
