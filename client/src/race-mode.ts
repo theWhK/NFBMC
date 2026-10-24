@@ -118,7 +118,7 @@ export class RaceMode {
       boost: me.boost > 0,
     } : null);
     ctx.updateOtherEngines(cars, room.sessionId, me);
-    ctx.drawMinimap({ cars, myId: room.sessionId, race: this.raceId });
+    ctx.drawMinimap({ cars, myId: room.sessionId, race: this.raceId, foods: [...(room.state.foods ?? [])] });
     this.updateUi();
   }
 

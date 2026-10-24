@@ -34,6 +34,8 @@ deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo a
 - Ambientação: paródia do Need for Speed Most Wanted (fim de tarde alaranjado, cidade, "Lista Gorda", Vigilância Sanitária no lugar da polícia). Logo em `client/src/logo.ts` (SVG feito à mão, sem copiar marca de ninguém).
 - Som e música são **sintetizados no código** com Web Audio (`client/src/audio.ts` e `client/src/music.ts`), sem arquivos de áudio nem música de terceiros. Fontes: Russo One e Black Ops One (OFL), via `@fontsource`.
 - A cena reduz a resolução sozinha quando o FPS cai.
+- Movimento dos carros no cliente: extrapolação (`GameScene.render`). Entre as atualizações do servidor (30 por segundo) o carro anda com a velocidade e a direção recebidas e o erro é corrigido aos poucos; não volte a só amortecer até a última posição recebida, que faz a câmera tremer.
+- No jogo: Esc abre a pausa (o jogo continua rodando por trás) e Tab abre o mapa em tela cheia (`createFullMap` em `client/src/hud.ts`, com zoom e arrasto).
 - A simulação do servidor avança pelo tempo real em passos de até 50 ms (`server/src/rooms/tick.ts`): servidor sobrecarregado não deixa o jogo em câmera lenta.
 - O mundo fica no plano XZ (Y para cima). A pista, a física do carro e as regras (voltas, comida, bônus) ficam em `shared/` para o servidor e o cliente usarem as mesmas contas.
 - Fluxo da sala (`server/src/rooms/RaceRoom.ts`): `lobby` → alguém aperta "Começar" → `countdown` → `racing` → `results` → `lobby`. Quem entra no meio espera a próxima corrida.

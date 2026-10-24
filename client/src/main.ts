@@ -14,7 +14,7 @@ import {
 } from "@nfbmc/shared";
 
 import { Sound } from "./audio.ts";
-import { createMinimap, createTacho } from "./hud.ts";
+import { createFullMap, createMinimap, createTacho, type MinimapView } from "./hud.ts";
 import { LOGO_SVG } from "./logo.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import { createMenu, type MenuEntry } from "./menu.ts";
@@ -132,7 +132,14 @@ function currentInput(): InputMessage {
 // --- Contexto dos modos ----------------------------------------------------
 
 const drawTacho = createTacho(ui.tacho);
-const drawMinimap = createMinimap(ui.minimap);
+const minimap = createMinimap(ui.minimap);
+const fullMap = createFullMap($<HTMLCanvasElement>("fullmap-canvas"));
+/** Último quadro do minimapa: o mapa grande desenha a mesma coisa. */
+let lastMapView: MinimapView | null = null;
+const drawMinimap = (view: MinimapView) => {
+  lastMapView = view;
+  minimap(view);
+};
 
 const ctx: ModeContext = {
   scene,
@@ -186,6 +193,8 @@ function setMode(next: WorldMode | RaceMode | null) {
   touchControls.reset();
   $("touch").hidden = !(touch && next);
   $("to-menu").hidden = !next;
+  $("open-map").hidden = !next;
+  closeOverlays();
   $("touch").classList.toggle("manual", menu.manual());
   mode = next;
   updateRotateHint();
@@ -377,8 +386,91 @@ function shift(direction: number) {
   mode.sendShift(direction);
 }
 
+// --- Pausa e mapa ------------------------------------------------------------
+
+const pause = $("pause");
+const fullMapEl = $("fullmap");
+const overlayOpen = () => !pause.hidden || !fullMapEl.hidden;
+
+/** Ao abrir a pausa ou o mapa, solta tudo (o carro não fica acelerando sozinho). */
+function releaseControls() {
+  keys.clear();
+  touchControls.reset();
+  sendInput();
+}
+
+function refreshPauseLabels() {
+  $("pause-music").textContent = `Música: ${sound.prefs.music ? "ligada" : "desligada"}`;
+  $("pause-sfx").textContent = `Efeitos: ${sound.prefs.sfx ? "ligados" : "desligados"}`;
+}
+
+function openPause() {
+  if (!mode) return;
+  fullMapEl.hidden = true;
+  pause.hidden = false;
+  refreshPauseLabels();
+  releaseControls();
+  $<HTMLButtonElement>("pause-resume").focus();
+}
+
+function openMap() {
+  if (!mode || !lastMapView) return;
+  pause.hidden = true;
+  fullMapEl.hidden = false;
+  const me = lastMapView.cars.get(lastMapView.myId);
+  fullMap.focus(me?.x ?? 0, me?.z ?? 0);
+  releaseControls();
+}
+
+function closeOverlays() {
+  pause.hidden = true;
+  fullMapEl.hidden = true;
+}
+
+$("to-menu").addEventListener("click", openPause);
+$("open-map").addEventListener("click", openMap);
+$("pause-resume").addEventListener("click", closeOverlays);
+$("pause-map").addEventListener("click", openMap);
+$("fullmap-close").addEventListener("click", closeOverlays);
+$("pause-music").addEventListener("click", () => {
+  sound.toggle("music");
+  refreshAudioButtons();
+  refreshPauseLabels();
+});
+$("pause-sfx").addEventListener("click", () => {
+  sound.toggle("sfx");
+  refreshAudioButtons();
+  refreshPauseLabels();
+});
+$("pause-quit").addEventListener("click", () => {
+  closeOverlays();
+  void returnToMenu();
+});
+
 window.addEventListener("keydown", (e) => {
   if (document.activeElement === ui.name) return;
+  if (mode && e.code === "Escape") {
+    e.preventDefault();
+    if (overlayOpen()) closeOverlays();
+    else openPause();
+    return;
+  }
+  if (mode && e.code === "Tab") {
+    e.preventDefault();
+    if (!fullMapEl.hidden) closeOverlays();
+    else openMap();
+    return;
+  }
+  // Na pausa, ↑↓ andam entre as opções (Enter aperta a que estiver em foco).
+  if (!pause.hidden && (e.code === "ArrowUp" || e.code === "ArrowDown")) {
+    e.preventDefault();
+    const buttons = [...pause.querySelectorAll<HTMLButtonElement>("button")];
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    buttons[(index + (e.code === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length].focus();
+    return;
+  }
+  // Com a pausa ou o mapa aberto, nada de dirigir.
+  if (overlayOpen()) return;
   if (e.code === "KeyM") {
     sound.toggle("music");
     refreshAudioButtons();
@@ -405,6 +497,7 @@ window.addEventListener("blur", () => {
 function frame() {
   if (mode) mode.frame();
   else scene?.render(new Map(), undefined);
+  if (!fullMapEl.hidden && lastMapView) fullMap.draw(lastMapView);
   requestAnimationFrame(frame);
 }
 frame();
@@ -494,7 +587,6 @@ $("story-car").addEventListener("click", () => {
   scene?.setShowcase(menu.color(), story.story.car);
   renderStoryScreen(story.story);
 });
-$("to-menu").addEventListener("click", () => void returnToMenu());
 
 // --- Gancho para os testes e2e ---------------------------------------------
 

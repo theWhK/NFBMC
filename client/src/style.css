@@ -1769,3 +1769,90 @@ body.touch .panel.side {
     min-height: 70vh;
   }
 }
+
+/* --- Menu de pausa e mapa em tela cheia --------------------------------- */
+
+.pause {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 8vw;
+  background: linear-gradient(90deg, rgba(10, 8, 6, 0.95) 0%, rgba(10, 8, 6, 0.7) 45%, rgba(10, 8, 6, 0.2) 80%);
+}
+
+.pause h2 {
+  font-size: 2.4rem;
+}
+
+.pause .mw-list.sub {
+  width: min(380px, 80vw);
+}
+
+.fullmap {
+  position: fixed;
+  inset: 0;
+  z-index: 36;
+  background: #0f1b24;
+  touch-action: none;
+}
+
+.fullmap canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+.fullmap-legend {
+  position: absolute;
+  left: 16px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 8px 12px;
+  background: rgba(10, 8, 6, 0.8);
+  border-left: 3px solid var(--mustard);
+  font-size: 0.85rem;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+}
+
+.fullmap-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.fullmap-legend .me {
+  background: #ffffff;
+}
+
+.fullmap-legend .other {
+  background: #ff9a1f;
+}
+
+.fullmap-legend .cop {
+  background: linear-gradient(90deg, #ff2a2a 50%, #2a6bff 50%);
+}
+
+.fullmap .close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  font-size: 1.6rem;
+  color: #fff;
+}
+
+.pause .mw-list.sub button:focus-visible,
+.pause .mw-list.sub button:focus {
+  outline: none;
+  color: #16110d;
+  background: linear-gradient(90deg, var(--mustard), #ff9a1f 70%, transparent);
+}
