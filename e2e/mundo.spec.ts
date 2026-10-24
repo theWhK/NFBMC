@@ -28,6 +28,8 @@ test("mundo aberto: a galera se encontra, anda pela cidade e vê a Lista Gorda",
     await expect(page.getByTestId("leaderboard")).toContainText("Alice");
     await expect(page.getByTestId("leaderboard")).toContainText("Bob");
     expect(await mode(page)).toBe("world");
+    // Nasce no Centro: aparece a placa do bairro.
+    await expect(page.getByTestId("district")).toHaveText("Centro");
   }
 
   // Alice acelera e Bob vê o carro dela andar pela cidade.
