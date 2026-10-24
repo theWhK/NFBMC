@@ -1,6 +1,7 @@
 // Modo mundo aberto: dirigir por Porto Gordo, comer nas barraquinhas e
 // disparar corridas nos pontos de encontro.
 import {
+  carSpec,
   DIFFICULTY_LABELS,
   DISTRICTS,
   districtAt,
@@ -22,6 +23,11 @@ import type { WorldRoom } from "./net.ts";
 import type { CarView } from "./scene.ts";
 import { escapeHtml, foodByCalories, kcal, setHtml, showPopup, ui } from "./ui.ts";
 
+export interface WorldHooks {
+  onCalories?: (gained: number) => void;
+  onEscape?: (stars: number, bonus: number) => void;
+}
+
 export class WorldMode {
   readonly room: WorldRoom;
   private ctx: ModeContext;
@@ -33,9 +39,19 @@ export class WorldMode {
   /** Bairro onde o carro estava no quadro anterior (para mostrar a placa ao trocar). */
   private district: string | null = null;
 
-  constructor(room: WorldRoom, ctx: ModeContext, onGoRace: (message: GoRaceMessage) => void, onToken: (token: string) => void) {
+  /** Ganchos do modo história (calorias ganhas e fugas da Vigilância). */
+  private hooks: WorldHooks;
+
+  constructor(
+    room: WorldRoom,
+    ctx: ModeContext,
+    onGoRace: (message: GoRaceMessage) => void,
+    onToken: (token: string) => void,
+    hooks: WorldHooks = {},
+  ) {
     this.room = room;
     this.ctx = ctx;
+    this.hooks = hooks;
     room.onMessage("profile", (message: { token: string; races: number; wins: number; bestRace: number }) => {
       onToken(message.token);
       ui.worldStats.textContent = message.races > 0
@@ -48,6 +64,8 @@ export class WorldMode {
       // O número que sobe/desce aqui já é o da Vigilância; não é comida.
       this.previous.calories = -1;
       if (message.result === "escaped") {
+        // O prêmio é 300 kcal por estrela: daí sai o nível da fuga.
+        this.hooks.onEscape?.(Math.round(message.calories / POLICE.escapeBonusPerStar), message.calories);
         ctx.sound.escaped();
         this.showBanner("escaped", "Escapou!", `A Vigilância perdeu você de vista. +${kcal(message.calories)} kcal`);
       } else {
@@ -113,7 +131,7 @@ export class WorldMode {
     }
     const cars = new Map<string, CarView>();
     room.state.players?.forEach((p, id) => {
-      cars.set(id, { name: p.name, color: p.color, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, visible: true });
+      cars.set(id, { name: p.name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, visible: true });
     });
     room.state.traffic?.forEach((n, id) => {
       cars.set(`npc:${id}`, {
@@ -124,7 +142,7 @@ export class WorldMode {
     room.state.cops?.forEach((c, id) => {
       cars.set(`cop:${id}`, {
         name: "🚨 Vigilância", color: "#f4f4f0", x: c.x, z: c.z, heading: c.heading,
-        speed: c.speed, boost: c.boost, visible: true, cop: true,
+        speed: c.speed, boost: c.boost, visible: true, cop: true, car: c.car,
       });
     });
     const me = room.state.players?.get(room.sessionId);
@@ -140,6 +158,8 @@ export class WorldMode {
     this.updatePursuitUi(me, myCops.length > 0);
     ctx.sound.updateMine(followed ? {
       speed: me.speed,
+      rpm: me.rpm,
+      redline: carSpec(me.car).redline,
       throttle: ctx.input().throttle,
       skid: followed.skid,
       offroad: followed.offroad,
@@ -147,7 +167,7 @@ export class WorldMode {
     } : null);
     ctx.updateOtherEngines(cars, room.sessionId, me);
     ctx.drawMinimap({ cars, myId: room.sessionId, race: null });
-    ctx.drawTacho(me.speed);
+    ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
     ui.nitroFill.style.width = `${Math.min(100, (me.boost / 2.5) * 100)}%`;
     ui.speedlines.hidden = !(me.boost > 0);
 
@@ -197,6 +217,7 @@ export class WorldMode {
       const food = foodByCalories(gained);
       ctx.sound.eat(food?.kind);
       showPopup(`+${kcal(gained)} kcal${food ? ` ${food.label.toLowerCase()}` : ""}`);
+      this.hooks.onCalories?.(gained);
     }
     if (me.boost > this.previous.boost + 0.9) ctx.sound.boost();
     ctx.detectBump(this.previous, me.speed);
@@ -241,11 +262,15 @@ export class WorldMode {
     this.room.send("input", input);
   }
 
+  sendShift(direction: number) {
+    this.room.send("shift", { direction });
+  }
+
   snapshot() {
     const result: Record<string, PlayerSnapshot> = {};
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
-        name: p.name, bot: false, x: p.x, z: p.z, speed: p.speed, racing: false,
+        name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: false, x: p.x, z: p.z, speed: p.speed, racing: false,
         lap: 0, place: 0, calories: p.calories, finished: false,
       };
     });

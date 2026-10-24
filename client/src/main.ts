@@ -1,7 +1,17 @@
 import "@fontsource/russo-one/latin-400.css";
 import "@fontsource/black-ops-one/latin-400.css";
 
-import { isRaceId, type GoRaceMessage, type InputMessage, type Phase, type RaceId } from "@nfbmc/shared";
+import {
+  EPILOGUE,
+  PROLOGUE,
+  carSpec,
+  currentRival,
+  isRaceId,
+  type GoRaceMessage,
+  type InputMessage,
+  type Phase,
+  type RaceId,
+} from "@nfbmc/shared";
 
 import { Sound } from "./audio.ts";
 import { createMinimap, createTacho } from "./hud.ts";
@@ -9,10 +19,11 @@ import { LOGO_SVG } from "./logo.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import { createMenu, type MenuEntry } from "./menu.ts";
 import { joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
-import { RaceMode } from "./race-mode.ts";
+import { RaceMode, type RaceFinish } from "./race-mode.ts";
+import { StoryTracker, loadStory, playComic, renderObjective, renderStoryScreen, showRivalIntro } from "./story.ts";
 import { bindTouchControls, isPortrait, isTouchDevice, requestLandscape } from "./touch.ts";
 import { GameScene } from "./scene.ts";
-import { $, hideModeUi, ui } from "./ui.ts";
+import { $, hideModeUi, showPopup, ui } from "./ui.ts";
 import { WorldMode } from "./world-mode.ts";
 
 ui.logo.innerHTML = LOGO_SVG;
@@ -83,6 +94,14 @@ const STEER: Record<string, number> = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, 
 const touch = isTouchDevice();
 document.body.classList.toggle("touch", touch);
 const touchControls = bindTouchControls($("touch"), keys, () => sendInput());
+// Botões + e − de marcha (aparecem só com câmbio manual).
+for (const button of document.querySelectorAll<HTMLButtonElement>("#touch [data-shift]")) {
+  button.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    navigator.vibrate?.(10);
+    shift(Number(button.dataset.shift));
+  });
+}
 const rotateHint = $("rotate");
 
 /** No jogo, com o celular em pé: pede para girar (o layout foi feito para a tela deitada). */
@@ -166,11 +185,119 @@ function setMode(next: WorldMode | RaceMode | null) {
   sound.updateSiren(null);
   touchControls.reset();
   $("touch").hidden = !(touch && next);
+  $("to-menu").hidden = !next;
+  $("touch").classList.toggle("manual", menu.manual());
   mode = next;
   updateRotateHint();
   lastSent = "";
   sendInput();
   publishTestHook();
+}
+
+/** Nome, cor, carro e câmbio escolhidos no menu: vão junto ao entrar em qualquer sala. */
+function carOptions() {
+  // No modo história, o carro é o escolhido entre os liberados na carreira.
+  return { name: playerName, color: menu.color(), car: storyMode ? story.story.car : menu.car(), manual: menu.manual() };
+}
+
+// --- Modo história ---------------------------------------------------------
+
+const story = new StoryTracker(loadStory());
+let storyMode = false;
+
+/** Desafio liberado: avisa com destaque. */
+function announceReady(ready: boolean) {
+  if (!ready) return;
+  const rival = currentRival(story.story);
+  sound.lap();
+  showStoryBanner(`Desafio liberado: #${rival?.rank} ${rival?.name}! ☰ Menu → Modo história`);
+}
+
+function showStoryBanner(text: string) {
+  ui.district.hidden = true;
+  ui.district.textContent = text;
+  void ui.district.offsetWidth;
+  ui.district.hidden = false;
+}
+
+const storyHooks = () => storyMode ? {
+  onCalories: (gained: number) => {
+    announceReady(story.addBounty(gained));
+    renderObjective(story.story);
+  },
+  onEscape: (stars: number, bonus: number) => {
+    announceReady(story.addBounty(bonus) || story.addEscape(stars));
+    renderObjective(story.story);
+  },
+} : {};
+
+/** Fim de corrida de evento no modo história: calorias da corrida e, se venceu, uma vitória. */
+function storyRaceFinished(result: RaceFinish) {
+  if (!storyMode || !result.event) return;
+  let ready = story.addBounty(result.total);
+  if (result.place === 1) {
+    ready = story.addWin() || ready;
+    showPopup("Vitória! Conta para a Lista Gorda 🏆");
+  }
+  announceReady(ready);
+}
+
+/** Fim do duelo contra o rival (uma vez por duelo). */
+let duelDone = false;
+function duelFinished(result: RaceFinish) {
+  const rival = currentRival(story.story);
+  if (!rival || duelDone) return;
+  duelDone = true;
+  const won = result.place === 1;
+  const stamp = $("duel-stamp");
+  if (won) {
+    story.defeat();
+    const prizes = [carSpec(rival.car).name, ...(rival.bonusCar ? [carSpec(rival.bonusCar).name] : [])];
+    stamp.textContent = "Nota fiscal";
+    $("duel-title").textContent = `Você derrotou ${rival.name}!`;
+    $("duel-text").textContent = rival.rank === 1
+      ? "Você é o novo Número 1 da Lista Gorda."
+      : `Na sua garagem agora: ${prizes.join(" e ")}. Próximo alvo: #${rival.rank - 1}.`;
+    sound.finish();
+  } else {
+    stamp.textContent = "Derrota";
+    $("duel-title").textContent = `${rival.name} levou essa.`;
+    $("duel-text").textContent = "Os requisitos continuam cumpridos: dá para desafiar de novo quando quiser.";
+  }
+  $("duel-result").hidden = false;
+  const button = $<HTMLButtonElement>("duel-continue");
+  button.focus();
+  button.onclick = async () => {
+    $("duel-result").hidden = true;
+    await returnToMenu();
+    if (won) {
+      await playComic(rival.defeat);
+      if (rival.rank === 1) await playComic(EPILOGUE);
+      renderStoryScreen(story.story);
+    }
+  };
+}
+
+/** Sai da sala atual e volta para o menu principal. */
+async function returnToMenu() {
+  if (switching) return;
+  switching = true;
+  const room = mode?.room as { leave: () => Promise<unknown> } | undefined;
+  setMode(null);
+  storyMode = false;
+  try {
+    await room?.leave();
+  } catch {
+    // Já tinha caído: tudo bem.
+  }
+  switching = false;
+  ui.join.hidden = false;
+  ui.minimap.hidden = true;
+  $("story-objective").hidden = true;
+  renderStoryScreen(story.story);
+  menu.show();
+  sound.song("lobby");
+  ui.status.textContent = "Digite seu apelido";
 }
 
 function setLoading(text: string | null) {
@@ -179,14 +306,15 @@ function setLoading(text: string | null) {
 }
 
 async function enterWorld(spawn?: RaceId) {
-  const room = await joinWorld({ name: playerName, token, solo: soloWorld, spawn, color: menu.color() });
+  const room = await joinWorld({ ...carOptions(), token, solo: soloWorld, spawn });
   room.onLeave(() => {
     if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
   });
   setMode(new WorldMode(room, ctx, goRace, (newToken) => {
     token = newToken;
     storage.set("nfbmc:token", newToken);
-  }));
+  }, storyHooks()));
+  if (storyMode) renderObjective(story.story);
 }
 
 /** O mundo chamou para uma corrida: sai do mundo e entra na sala dela. */
@@ -198,11 +326,11 @@ async function goRace(message: GoRaceMessage) {
     const world = mode.room;
     setMode(null);
     await world.leave();
-    const room = await joinEventRace(message.roomId, { name: playerName, token, color: menu.color() });
+    const room = await joinEventRace(message.roomId, { ...carOptions(), token });
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });
-    setMode(new RaceMode(room, ctx, backToWorld));
+    setMode(new RaceMode(room, ctx, backToWorld, storyRaceFinished));
   } catch (err) {
     console.error(err);
     await enterWorld().catch(() => (ui.status.textContent = "Não foi possível conectar ao servidor."));
@@ -243,12 +371,20 @@ function sendInput() {
   mode.sendInput(input);
 }
 
+/** Troca de marcha no câmbio manual (teclado ou botões da tela). */
+function shift(direction: number) {
+  if (!mode || !menu.manual()) return;
+  mode.sendShift(direction);
+}
+
 window.addEventListener("keydown", (e) => {
   if (document.activeElement === ui.name) return;
   if (e.code === "KeyM") {
     sound.toggle("music");
     refreshAudioButtons();
   }
+  if (!e.repeat && (e.code === "KeyE" || e.code === "ShiftLeft" || e.code === "ShiftRight")) shift(1);
+  if (!e.repeat && (e.code === "KeyQ" || e.code === "ControlLeft" || e.code === "ControlRight")) shift(-1);
   if (mode instanceof WorldMode) mode.handleKey(e.code);
   if (!(e.code in THROTTLE) && !(e.code in STEER)) return;
   e.preventDefault();
@@ -278,13 +414,29 @@ frame();
 async function start(entry: MenuEntry) {
   // Saiu do menu: a vitrine sai de cena.
   scene?.setShowcase(null);
-  if (entry === "world" || entry === "world-solo") {
-    soloWorld = entry === "world-solo";
+  storyMode = entry === "story" || entry === "challenge";
+  if (entry === "challenge") {
+    // Duelo: apresentação do rival, a provocação dele e a corrida 1x1.
+    const rival = currentRival(story.story);
+    if (!rival) return;
+    await showRivalIntro(rival);
+    await playComic(rival.taunt);
+    const room = await joinQuickRace({
+      ...carOptions(), raceId: rival.race, rival: { name: rival.name, car: rival.car, skill: rival.skill },
+    }, true);
+    room.onLeave(() => {
+      if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
+    });
+    duelDone = false;
+    setMode(new RaceMode(room, ctx, undefined, duelFinished));
+  } else if (entry === "world" || entry === "world-solo" || entry === "story") {
+    // O modo história acontece num Porto Gordo só seu.
+    soloWorld = entry !== "world";
     // ?spawn=centro na URL nasce direto num ponto de encontro (atalho para testes).
     const spawn = new URLSearchParams(location.search).get("spawn");
     await enterWorld(isRaceId(spawn) ? spawn : undefined);
   } else {
-    const room = await joinQuickRace(playerName, entry === "solo", menu.color());
+    const room = await joinQuickRace(carOptions(), entry === "solo");
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });
@@ -300,19 +452,21 @@ function enter(entry: MenuEntry) {
   if (touch) void requestLandscape();
   sound.unlock();
   sound.click();
-  const buttons = [...ui.join.querySelectorAll("button")];
-  if (buttons.some((b) => b.disabled)) return;
-  buttons.forEach((b) => (b.disabled = true));
+  // Trava própria (o botão "Desafiar" pode estar desabilitado por outro motivo).
+  if (entering) return;
+  entering = true;
   playerName = ui.name.value.trim();
   storage.set("nfbmc:name", playerName);
   ui.status.textContent = "Conectando…";
-  start(entry).catch((err) => {
-    console.error(err);
-    ui.status.textContent = "Não foi possível conectar ao servidor.";
-    buttons.forEach((b) => (b.disabled = false));
-    menu.show();
-  });
+  start(entry)
+    .catch((err) => {
+      console.error(err);
+      ui.status.textContent = "Não foi possível conectar ao servidor.";
+      menu.show();
+    })
+    .finally(() => (entering = false));
 }
+let entering = false;
 
 ui.name.value = storage.get("nfbmc:name");
 
@@ -323,7 +477,24 @@ const menu = createMenu({
   token: () => token,
   onEnter: enter,
   onAudioChange: refreshAudioButtons,
+  onScreen: (id) => {
+    if (id !== "story") return;
+    renderStoryScreen(story.story);
+    if (!story.story.seenPrologue) void playComic(PROLOGUE).then(() => story.markPrologueSeen());
+  },
 });
+
+$("story-go").addEventListener("click", () => enter("story"));
+$("story-challenge").addEventListener("click", () => enter("challenge"));
+$("story-prologue").addEventListener("click", () => void playComic(PROLOGUE));
+$("story-car").addEventListener("click", () => {
+  // Alterna entre os carros liberados na carreira (e mostra na vitrine).
+  const cars = story.story.unlocked;
+  story.setCar(cars[(cars.indexOf(story.story.car) + 1) % cars.length]);
+  scene?.setShowcase(menu.color(), story.story.car);
+  renderStoryScreen(story.story);
+});
+$("to-menu").addEventListener("click", () => void returnToMenu());
 
 // --- Gancho para os testes e2e ---------------------------------------------
 

@@ -3,10 +3,12 @@
 // sozinho quando bate ou sai da pista. Eles "apertam os mesmos botões" que um
 // jogador: a saída é um DriveInput, e a física é a mesma de todo mundo.
 import {
-  CAR,
   RIVALS,
+  cachedTopSpeed,
+  cornerSpeed,
   nearestSample,
   pointOnTrack,
+  type CarSpec,
   type CarState,
   type Difficulty,
   type DriveInput,
@@ -14,13 +16,13 @@ import {
 } from "@nfbmc/shared";
 
 /** Nomes dos bots: os rivais da Lista Gorda (lista no shared, que o menu também mostra). */
-export const BOT_NAMES = RIVALS.map((r) => r.name);
+export const BOT_NAMES: string[] = RIVALS.map((r) => r.name);
 
 /**
  * Por dificuldade: quanto da velocidade máxima o bot usa e quanto ele vai atrás
  * de comida (comida dá turbo e calorias, então gula também é habilidade).
  */
-const SKILL: Record<Difficulty, number> = { facil: 0.76, medio: 0.88, dificil: 0.98 };
+const SKILL: Record<Difficulty, number> = { facil: 0.82, medio: 0.9, dificil: 0.97 };
 const GREED: Record<Difficulty, [number, number]> = { facil: [0.1, 0.3], medio: [0.35, 0.6], dificil: [0.65, 0.9] };
 
 export interface FoodSpot {
@@ -62,18 +64,42 @@ export function createBrain(difficulty: Difficulty, random: () => number = Math.
   };
 }
 
-/** Quanto a pista vira (em radianos) entre `from` e `from + ahead` metros. */
-function turnAhead(track: Track, fromIndex: number, ahead: number) {
+/** Raio da curva (m) em cada ponto da pista, calculado uma vez por pista. */
+const radiusCache = new WeakMap<Track, Float32Array>();
+function trackRadii(track: Track) {
+  let radii = radiusCache.get(track);
+  if (radii) return radii;
   const samples = track.samples;
-  const spacing = track.length / samples.length;
-  const a = samples[fromIndex];
-  let worst = 0;
-  for (let d = 8; d <= ahead; d += 8) {
-    const b = samples[(fromIndex + Math.round(d / spacing)) % samples.length];
+  const n = samples.length;
+  const spacing = track.length / n;
+  const span = 4; // ±4 amostras ≈ ±6,4 m
+  radii = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = samples[(i - span + n) % n];
+    const b = samples[(i + span) % n];
     const turn = Math.abs(Math.atan2(a.tx * b.tz - a.tz * b.tx, a.tx * b.tx + a.tz * b.tz));
-    worst = Math.max(worst, turn);
+    radii[i] = turn < 1e-3 ? 9999 : (span * 2 * spacing) / turn;
   }
-  return worst;
+  radiusCache.set(track, radii);
+  return radii;
+}
+
+/**
+ * Velocidade alvo agora: o mínimo entre a final do carro e, para cada trecho à
+ * frente, a velocidade de curva dele mais o que dá para frear até lá.
+ */
+function plannedSpeed(track: Track, fromIndex: number, spec: CarSpec, speed: number, skill: number) {
+  const radii = trackRadii(track);
+  const spacing = track.length / track.samples.length;
+  const brake = spec.brake * 0.75;
+  const look = Math.max(30, (speed * speed) / (2 * brake) + 25);
+  let desired = cachedTopSpeed(spec) * skill;
+  for (let d = 0; d <= look; d += 5) {
+    const radius = radii[(fromIndex + Math.round(d / spacing)) % radii.length];
+    const corner = cornerSpeed(spec, radius) * skill;
+    desired = Math.min(desired, Math.sqrt(corner * corner + 2 * brake * d));
+  }
+  return desired;
 }
 
 /**
@@ -85,6 +111,7 @@ export function botInput(
   brain: Brain,
   track: Track,
   car: CarState,
+  spec: CarSpec,
   dt: number,
   foods: FoodSpot[],
   others: CarState[],
@@ -154,17 +181,15 @@ export function botInput(
   const wobble = Math.sin(brain.time * 2.3) * brain.wobble;
   const steer = clamp(-want * 3 + wobble, -1, 1);
 
-  // Velocidade alvo: mais devagar quanto mais a pista vira à frente.
-  const turn = turnAhead(track, near.index, 24 + Math.max(0, speed) * 0.9);
-  // Esquina de 90° (rua) pede bem mais freio que as curvas abertas do autódromo.
-  const corner = 1 - clamp((turn - 0.4) * 0.5, 0, 0.6);
+  // Velocidade alvo pela física do carro (curvas à frente e espaço para frear).
   const offTrack = near.distance > track.width / 2 + 1;
-  const desired = (offTrack ? CAR.grassMaxSpeed : CAR.maxSpeed) * brain.skill * corner * pace;
+  let desired = plannedSpeed(track, near.index, spec, speed, brain.skill) * pace;
+  if (offTrack) desired = Math.min(desired, 18);
 
-  let throttle = 0;
+  let throttle = 0.35;
   if (blocked) throttle = 0;
   else if (speed < desired - 1) throttle = 1;
-  else if (speed > desired + 4) throttle = -1;
+  else if (speed > desired + 1.5) throttle = -1;
   // Mirando muito torto (rodou): alivia para conseguir virar.
   if (Math.abs(want) > 1.2 && speed > 10) throttle = 0;
 

@@ -2,7 +2,7 @@
 import type { InputMessage } from "@nfbmc/shared";
 
 import type { Sound } from "./audio.ts";
-import type { MinimapView } from "./hud.ts";
+import type { MinimapView, TachoData } from "./hud.ts";
 import type { CarView, GameScene } from "./scene.ts";
 
 export interface ModeContext {
@@ -10,7 +10,7 @@ export interface ModeContext {
   sound: Sound;
   /** O que o jogador está apertando agora. */
   input: () => InputMessage;
-  drawTacho: (speed: number) => void;
+  drawTacho: (data: TachoData) => void;
   drawMinimap: (view: MinimapView) => void;
   /** Motores dos outros carros, com volume pela distância e lado pelo ângulo. */
   updateOtherEngines: (cars: Map<string, CarView>, myId: string, me: { x: number; z: number; heading: number }) => void;
@@ -21,6 +21,9 @@ export interface ModeContext {
 /** Estado de um carro como os testes e2e enxergam (via window.__nfbmc). */
 export interface PlayerSnapshot {
   name: string;
+  car: string;
+  gear: number;
+  rpm: number;
   bot: boolean;
   x: number;
   z: number;

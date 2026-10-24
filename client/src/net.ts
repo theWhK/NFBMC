@@ -1,7 +1,7 @@
 // Conexão com o servidor: as duas salas (mundo aberto e corrida) e seus tipos.
 import { ColyseusSDK } from "@colyseus/sdk";
 import type server from "@nfbmc/server/app.config";
-import { ROOM_NAME, WORLD_ROOM_NAME, type WorldJoinOptions } from "@nfbmc/shared";
+import { ROOM_NAME, WORLD_ROOM_NAME, type CreateOptions, type WorldJoinOptions } from "@nfbmc/shared";
 
 // Em produção o cliente é servido pelo próprio servidor do jogo (mesma origem).
 // Em dev o Vite roda na 5173 e o servidor na 2567, na mesma máquina.
@@ -58,10 +58,10 @@ export type WorldRoom = Awaited<ReturnType<typeof joinPublicWorld>>;
 // SDK; os casts abaixo só unificam esses tipos.
 
 /** Corrida rápida no autódromo: a sala pública da galera, ou uma sala solo contra bots. */
-export const joinQuickRace = (name: string, solo: boolean, color?: string): Promise<RaceRoom> =>
+export const joinQuickRace = (options: WorldJoinOptions & CreateOptions, solo: boolean): Promise<RaceRoom> =>
   solo
-    ? (client.create(ROOM_NAME, { name, solo: true, color }) as Promise<unknown> as Promise<RaceRoom>)
-    : joinPublicRace({ name, color });
+    ? (client.create(ROOM_NAME, { ...options, solo: true }) as Promise<unknown> as Promise<RaceRoom>)
+    : joinPublicRace(options);
 
 /** Corrida de evento disparada no mundo aberto (sala criada pelo servidor). */
 export const joinEventRace = (roomId: string, options: WorldJoinOptions): Promise<RaceRoom> =>

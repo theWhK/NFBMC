@@ -16,6 +16,7 @@ import {
 import { Effects } from "./effects.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
 import { SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
+import { InkPass, toonify, type Quality } from "./toon.ts";
 import { buildTrackMesh } from "./track-mesh.ts";
 
 /** O que a cena precisa saber de cada carro (vem do estado da sala). */
@@ -28,6 +29,8 @@ export interface CarView {
   speed: number;
   boost: number;
   visible: boolean;
+  /** Carro da garagem (id em CARS). */
+  car?: string;
   /** Viatura da Vigilância Sanitária. */
   cop?: boolean;
   /** Carro do trânsito, e de que tipo. */
@@ -139,6 +142,22 @@ function makeMarker(id: RaceId) {
   return group;
 }
 
+/**
+ * Qualidade gráfica: a escolhida nas Opções ou, sem escolha, automática
+ * (sem placa de vídeo → baixa; celular → média; computador → alta).
+ */
+function chooseQuality(renderer: THREE.WebGLRenderer): Quality {
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem("nfbmc:quality");
+  } catch {
+    // Sem localStorage: automática.
+  }
+  if (saved === "alto" || saved === "medio" || saved === "baixo") return saved;
+  if (isSoftwareRenderer(renderer)) return "baixo";
+  return window.matchMedia?.("(pointer: coarse)").matches ? "medio" : "alto";
+}
+
 /** Navegador desenhando o 3D na CPU (sem placa de vídeo): começa em resolução baixa. */
 function isSoftwareRenderer(renderer: THREE.WebGLRenderer) {
   const gl = renderer.getContext();
@@ -155,9 +174,13 @@ export class GameScene {
   private sun: THREE.Object3D;
   private raceOverlay: THREE.Object3D | null = null;
   private markers: THREE.Group;
+  private light: THREE.DirectionalLight;
+  private clouds: THREE.Object3D;
+  readonly quality: Quality;
+  private ink: InkPass | null = null;
   private sunDirection = SUN_DIRECTION;
   /** Carro de vitrine do menu (girando na reta do autódromo). */
-  private showcase: { model: CarModel; color: string } | null = null;
+  private showcase: { model: CarModel; key: string } | null = null;
   private cars = new Map<string, CarEntry>();
   private foods: THREE.Group[] = [];
   private foodActive: boolean[] = [];
@@ -178,23 +201,63 @@ export class GameScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
 
-    const { sky, sun } = buildScenery(this.scene);
+    const { sky, sun, light, clouds } = buildScenery(this.scene);
+    this.clouds = clouds;
     this.sky = sky;
     this.sun = sun;
+    this.light = light;
     this.effects = new Effects(this.scene);
     this.markers = new THREE.Group();
     for (const id of RACE_IDS) this.markers.add(makeMarker(id));
     this.markers.visible = false;
     this.scene.add(this.markers);
 
+    // Visual de quadrinho: cel-shading sempre; contorno de tinta e sombras conforme a qualidade.
+    this.quality = chooseQuality(this.renderer);
+    toonify(this.scene);
+    if (this.quality !== "baixo") this.ink = new InkPass(this.renderer);
+    if (this.quality === "alto") this.enableShadows();
+
     this.camera.position.set(0, 60, -160);
     this.resize();
     window.addEventListener("resize", () => this.resize());
   }
 
+  private enableShadows() {
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.light.castShadow = true;
+    this.light.shadow.mapSize.set(2048, 2048);
+    const area = this.light.shadow.camera;
+    area.left = area.bottom = -90;
+    area.right = area.top = 90;
+    area.near = 10;
+    area.far = 500;
+    this.light.shadow.bias = -0.0008;
+    this.light.shadow.normalBias = 0.04;
+    this.scene.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh || !(mesh.material instanceof THREE.MeshToonMaterial)) return;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    });
+  }
+
+  /** Objeto novo na cena (carro, comida): mesmo visual do resto. */
+  private dress(object: THREE.Object3D) {
+    toonify(object);
+    if (this.quality === "alto") {
+      object.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.isMesh && mesh.material instanceof THREE.MeshToonMaterial) mesh.castShadow = mesh.receiveShadow = true;
+      });
+    }
+  }
+
   private resize() {
     const { innerWidth: w, innerHeight: h } = window;
     this.renderer.setSize(w, h);
+    this.ink?.setSize(w, h, this.pixelRatio);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -223,6 +286,7 @@ export class GameScene {
     this.raceOverlay = null;
     if (raceId && raceId !== "autodromo") {
       this.raceOverlay = buildTrackMesh(RACES[raceId].track, { asphalt: false, bannerColor: "#ff7a00" });
+      this.dress(this.raceOverlay);
       this.scene.add(this.raceOverlay);
     }
     this.markers.visible = raceId === null;
@@ -233,17 +297,19 @@ export class GameScene {
   }
 
   /** Mostra (ou tira, com null) o carro na vitrine do menu, na cor escolhida. */
-  setShowcase(color: string | null) {
-    if (this.showcase && this.showcase.color === color) return;
+  setShowcase(color: string | null, car?: string) {
+    const key = `${color}|${car ?? ""}`;
+    if (this.showcase && this.showcase.key === key) return;
     if (this.showcase) this.scene.remove(this.showcase.model.group);
     this.showcase = null;
     if (!color) return;
-    const model = makeCar(color, "");
+    const model = makeCar(color, "", { car });
+    this.dress(model.group);
     const spot = pointOnTrack(RACES.autodromo.track, -14, 0);
     model.group.position.set(spot.x, 0, spot.z);
     model.group.rotation.y = spot.heading;
     this.scene.add(model.group);
-    this.showcase = { model, color };
+    this.showcase = { model, key };
   }
 
   private clearFoods() {
@@ -261,14 +327,15 @@ export class GameScene {
       }
     }
     for (const [id, car] of cars) {
-      const key = `${car.name}|${car.color}|${car.cop ? "cop" : ""}|${car.traffic ?? ""}`;
+      const key = `${car.name}|${car.color}|${car.car ?? ""}|${car.cop ? "cop" : ""}|${car.traffic ?? ""}`;
       let entry = this.cars.get(id);
       if (entry && entry.key !== key) {
         this.scene.remove(entry.model.group);
         entry = undefined;
       }
       if (!entry) {
-        const model = makeCar(car.color, car.name, { cop: car.cop, traffic: car.traffic });
+        const model = makeCar(car.color, car.name, { car: car.car, cop: car.cop, traffic: car.traffic });
+        this.dress(model.group);
         model.group.rotation.order = "YXZ";
         entry = { model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false };
         this.scene.add(model.group);
@@ -280,6 +347,7 @@ export class GameScene {
   syncFoods(foods: FoodView[]) {
     while (this.foods.length < foods.length) {
       const food = makeFood(foods[this.foods.length].kind as FoodKind);
+      this.dress(food);
       this.scene.add(food);
       this.foods.push(food);
       this.foodActive.push(true);
@@ -383,13 +451,13 @@ export class GameScene {
       // Menu: a câmera gira devagar em volta do carro da vitrine.
       const center = this.showcase.model.group.position;
       const angle = this.time * 0.25;
-      this.camera.position.set(center.x + Math.sin(angle) * 7.5, 2.4, center.z + Math.cos(angle) * 7.5);
+      this.camera.position.set(center.x + Math.sin(angle) * 8.5, 2.6, center.z + Math.cos(angle) * 8.5);
       // Mira um pouco à esquerda do carro, para ele aparecer à direita da tela
       // (a lista do menu fica à esquerda, como no jogo original).
       const fx = center.x - this.camera.position.x;
       const fz = center.z - this.camera.position.z;
       const len = Math.hypot(fx, fz) || 1;
-      this.cameraTarget.set(center.x + (fz / len) * 3, 1.1, center.z - (fx / len) * 3);
+      this.cameraTarget.set(center.x + (fz / len) * 4.6, 1.1, center.z - (fx / len) * 4.6);
       this.camera.fov = 50;
       this.camera.updateProjectionMatrix();
       for (const wheel of this.showcase.model.wheels) wheel.rotation.x = 0;
@@ -404,9 +472,18 @@ export class GameScene {
     this.camera.lookAt(this.cameraTarget);
     // Céu e sol acompanham a câmera, para nunca chegar perto da borda do céu.
     this.sky.position.copy(this.camera.position);
+    // As nuvens acompanham a câmera no chão (ficam sempre no horizonte) e andam devagar.
+    this.clouds.position.set(this.camera.position.x, 0, this.camera.position.z);
+    this.clouds.rotation.y = this.time * 0.004;
     this.sun.position.copy(this.camera.position).addScaledVector(this.sunDirection, 1200);
 
-    this.renderer.render(this.scene, this.camera);
+    // A luz do sol (e a área de sombra) acompanha o que a câmera está olhando.
+    if (this.quality === "alto") {
+      this.light.target.position.copy(this.cameraTarget).setY(0);
+      this.light.position.copy(this.light.target.position).addScaledVector(this.sunDirection, 250);
+    }
+    if (this.ink) this.ink.render(this.scene, this.camera);
+    else this.renderer.render(this.scene, this.camera);
     return followed ? { skid: followed.skid, offroad: followed.offroad } : null;
   }
 }

@@ -20,6 +20,14 @@ import {
   pointOnTrack,
   stepCar,
   pickColor,
+  DEFAULT_CAR,
+  PLAYER_CARS,
+  carSpec,
+  createDrive,
+  isCarId,
+  requestShift,
+  type DriveState,
+  type ShiftMessage,
   DIFFICULTY_LABELS,
   SOLO_DEFAULT_BOTS,
   type CreateOptions,
@@ -89,11 +97,15 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   private respawnAt = new Map<Food, number>();
   private brains = new Map<string, Brain>();
   private tokens = new Map<string, string>();
+  /** Motor e câmbio de cada carro (giro, marcha, acelerador). */
+  private drives = new Map<string, DriveState>();
   private joinCount = 0;
   private track: Track = RACES.autodromo.track;
   private layout = foodLayout(this.track);
   /** Corrida de evento: quantos jogadores esperar e até quando. */
   private expected = 0;
+  /** Rival do duelo do modo história (null = corrida normal). */
+  private rival: { name: string; car: string; skill: number } | null = null;
   private age = 0;
 
   messages = {
@@ -106,6 +118,17 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     },
     start: () => {
       if (this.state.phase === "lobby" && this.state.players.size > 0) this.startCountdown();
+    },
+    shift: (client: Client, message: ShiftMessage) => {
+      const player = this.state.players.get(client.sessionId);
+      const drive = this.drives.get(client.sessionId);
+      if (player && drive && Number.isFinite(message?.direction)) requestShift(drive, carSpec(player.car), message.direction);
+    },
+    gearbox: (client: Client, message: { manual?: unknown }) => {
+      const player = this.state.players.get(client.sessionId);
+      const drive = this.drives.get(client.sessionId);
+      if (!player || !drive || typeof message?.manual !== "boolean") return;
+      player.manual = drive.manual = message.manual;
     },
     setBots: (_client: Client, message: { count?: unknown }) => {
       if (this.state.phase !== "lobby" || typeof message?.count !== "number") return;
@@ -130,6 +153,13 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       this.maxClients = 1;
       this.state.solo = true;
       this.state.botCount = SOLO_DEFAULT_BOTS;
+      const rival = options.rival;
+      if (rival && typeof rival.name === "string" && carSpec(rival.car).id === rival.car && Number.isFinite(rival.skill)) {
+        this.rival = { name: rival.name.slice(0, NAME_MAX_LENGTH + 4), car: rival.car, skill: clamp(rival.skill, 0.5, 1.05) };
+        this.state.challenge = true;
+        this.state.botCount = 1;
+        this.state.difficulty = "dificil";
+      }
     } else if (typeof options?.expected === "number" && options.expected > 0) {
       // Evento do mundo aberto: só entra quem foi chamado (pelo id da sala).
       this.setPrivate(true);
@@ -158,6 +188,9 @@ export class RaceRoom extends Room<{ state: RaceState }> {
 
     const usedColors = new Set([...this.state.players.values()].map((p) => p.color));
     player.color = pickColor(options?.color, usedColors);
+    player.car = isCarId(options?.car) ? options.car : DEFAULT_CAR;
+    player.manual = options?.manual === true;
+    this.drives.set(client.sessionId, createDrive(carSpec(player.car), player.manual));
 
     this.placeOnGrid(player, this.state.players.size);
     this.state.players.set(client.sessionId, player);
@@ -168,6 +201,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     this.controls.delete(client.sessionId);
     this.sectors.delete(client.sessionId);
     this.tokens.delete(client.sessionId);
+    this.drives.delete(client.sessionId);
   }
 
   /** Posição no grid de largada: duas colunas, atrás da linha de chegada. */
@@ -192,6 +226,8 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     player.z = spot.z;
     player.heading = spot.heading;
     player.speed = 0;
+    player.gear = 1;
+    player.rpm = carSpec(player.car).idleRpm;
   }
 
   private removeBots() {
@@ -199,6 +235,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       this.state.players.delete(id);
       this.controls.delete(id);
       this.sectors.delete(id);
+      this.drives.delete(id);
     }
     this.brains.clear();
   }
@@ -209,13 +246,36 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     const humans = this.state.players.size;
     const count = Math.min(this.state.botCount, MAX_PLAYERS - humans);
     const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+    // Carros dos bots perto do nível do melhor carro humano: um pouco abaixo no
+    // fácil, igual no médio, acima no difícil. (O A3 do Bruno fica de fora.)
+    const humanTier = Math.max(0, ...[...this.state.players.values()].map((p) => PLAYER_CARS.indexOf(p.car)));
+    const offset = { facil: -3, medio: 0, dificil: 2 }[this.state.difficulty as Difficulty] ?? 0;
+    const botCars = PLAYER_CARS.filter((id) => id !== "a3bruno");
+    if (this.rival) {
+      const bot = new Player();
+      bot.bot = true;
+      bot.name = this.rival.name;
+      bot.car = this.rival.car;
+      const usedColors = new Set([...this.state.players.values()].map((p) => p.color));
+      bot.color = PLAYER_COLORS.find((c) => !usedColors.has(c)) ?? PLAYER_COLORS[1];
+      const brain = createBrain("dificil");
+      brain.skill = this.rival.skill;
+      brain.greed = 0.6;
+      this.drives.set("bot-0", createDrive(carSpec(bot.car)));
+      this.state.players.set("bot-0", bot);
+      this.brains.set("bot-0", brain);
+      return;
+    }
     for (let i = 0; i < count; i++) {
       const bot = new Player();
       bot.bot = true;
       bot.name = names[i % names.length];
       const usedColors = new Set([...this.state.players.values()].map((p) => p.color));
       bot.color = PLAYER_COLORS.find((c) => !usedColors.has(c)) ?? PLAYER_COLORS[i % PLAYER_COLORS.length];
+      const tier = Math.round(humanTier + offset + (Math.random() * 3 - 1.5));
+      bot.car = botCars[clamp(tier, 0, botCars.length - 1)];
       const id = `bot-${i}`;
+      this.drives.set(id, createDrive(carSpec(bot.car)));
       this.state.players.set(id, bot);
       this.brains.set(id, createBrain(this.state.difficulty as Difficulty));
     }
@@ -228,6 +288,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     let slot = 0;
     grid.forEach(([sessionId, player]) => {
       this.placeOnGrid(player, slot++);
+      this.drives.set(sessionId, createDrive(carSpec(player.car), player.manual));
       player.racing = true;
       player.lap = 0;
       player.progress = 0;
@@ -252,6 +313,12 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   private update(dt: number) {
     const phase = this.state.phase as Phase;
     this.age += dt;
+
+    if (this.state.challenge && phase === "lobby") {
+      // Duelo: larga assim que o jogador entra.
+      if (this.state.players.size > 0) this.startCountdown();
+      return;
+    }
 
     if (this.state.event && phase === "lobby") {
       // Larga quando todo mundo chegou (ou cansou de esperar); sala abandonada fecha.
@@ -288,6 +355,11 @@ export class RaceRoom extends Room<{ state: RaceState }> {
         this.state.timer -= dt;
         this.drive(dt, [...this.state.players.entries()]);
         if (this.state.timer <= 0) {
+          if (this.state.challenge) {
+            // Duelo: fica no resultado até o jogador sair (uma corrida só).
+            this.state.timer = Infinity;
+            return;
+          }
           if (this.state.event) {
             // Fim do evento: todo mundo volta para o mundo aberto.
             this.broadcast("backToWorld", { raceId: this.state.raceId });
@@ -320,7 +392,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
         pace = lead > 120 ? 0.93 : lead < -150 ? 1.06 : 1;
       }
       const others = [...this.state.players.values()].filter((p) => p !== bot && p.racing);
-      this.controls.set(id, botInput(brain, this.track, bot, dt, foods, others, pace));
+      this.controls.set(id, botInput(brain, this.track, bot, carSpec(bot.car), dt, foods, others, pace));
     }
   }
 
@@ -333,8 +405,13 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       const onGrass = !isOnRoad(player.x, player.z);
 
       player.boost = Math.max(0, player.boost - dt);
-      stepCar(player, input, dt, onGrass, player.boost > 0);
+      const spec = carSpec(player.car);
+      let drive = this.drives.get(sessionId);
+      if (!drive) this.drives.set(sessionId, (drive = createDrive(spec, player.manual)));
+      stepCar(player, drive, spec, input, dt, onGrass, player.boost > 0);
       collideWorld(player);
+      player.rpm = Math.round(drive.rpm);
+      player.gear = drive.gear;
 
       if (racing && !player.finished) {
         this.countLaps(sessionId, player);
