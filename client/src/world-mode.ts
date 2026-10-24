@@ -14,6 +14,7 @@ import {
   type GoRaceMessage,
   type InputMessage,
   type RaceId,
+  type TrafficKind,
 } from "@nfbmc/shared";
 
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
@@ -113,6 +114,12 @@ export class WorldMode {
     const cars = new Map<string, CarView>();
     room.state.players?.forEach((p, id) => {
       cars.set(id, { name: p.name, color: p.color, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, visible: true });
+    });
+    room.state.traffic?.forEach((n, id) => {
+      cars.set(`npc:${id}`, {
+        name: "", color: n.color, x: n.x, z: n.z, heading: n.heading,
+        speed: n.speed, boost: 0, visible: true, traffic: n.kind as TrafficKind,
+      });
     });
     room.state.cops?.forEach((c, id) => {
       cars.set(`cop:${id}`, {
@@ -252,6 +259,7 @@ export class WorldMode {
       heat: me?.heat ?? 0,
       chased: me?.chased ?? false,
       cops: [...(this.room.state.cops?.values() ?? [])].map((c) => ({ x: c.x, z: c.z, target: c.target })),
+      traffic: [...(this.room.state.traffic?.values() ?? [])].map((n) => ({ x: n.x, z: n.z, speed: n.speed, kind: n.kind })),
     };
   }
 

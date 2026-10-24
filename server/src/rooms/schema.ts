@@ -112,11 +112,23 @@ export const Stand = schema({
 });
 export type Stand = SchemaType<typeof Stand>;
 
+/** Carro do trânsito (NPC). */
+export const Npc = schema({
+  x: t.number().default(0),
+  z: t.number().default(0),
+  heading: t.number().default(0),
+  speed: t.number().default(0),
+  kind: t.string().default("sedan"),
+  color: t.string().default("#888888"),
+});
+export type Npc = SchemaType<typeof Npc>;
+
 export const WorldState = schema({
   /** Mundo só de um jogador. */
   solo: t.boolean().default(false),
   players: t.map(WorldPlayer),
   cops: t.map(Cop),
+  traffic: t.map(Npc),
   stands: t.array(Stand),
 });
 export type WorldState = SchemaType<typeof WorldState>;

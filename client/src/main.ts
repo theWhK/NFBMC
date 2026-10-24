@@ -108,7 +108,9 @@ const ctx: ModeContext = {
       const pan = distance > 0 ? (dx * -Math.cos(me.heading) + dz * Math.sin(me.heading)) / distance : 0;
       others.set(id, { speed: car.speed, distance, pan });
     }
-    sound.updateOthers(others);
+    // Só os 6 motores mais perto (com trânsito, podiam ser dezenas de osciladores).
+    const nearest = new Map([...others].sort(([, a], [, b]) => a.distance - b.distance).slice(0, 6));
+    sound.updateOthers(nearest);
   },
   detectBump(previous, speed) {
     const now = performance.now();
@@ -326,7 +328,12 @@ declare global {
       raceId: () => RaceId | null;
       phase: () => Phase;
       players: () => Record<string, PlayerSnapshot>;
-      police: () => { heat: number; chased: boolean; cops: { x: number; z: number; target: string }[] } | null;
+      police: () => {
+        heat: number;
+        chased: boolean;
+        cops: { x: number; z: number; target: string }[];
+        traffic: { x: number; z: number; speed: number; kind: string }[];
+      } | null;
       send: (type: string, message: unknown) => void;
     };
   }

@@ -67,3 +67,11 @@ test("mundo aberto: quem está no ponto de encontro vai junto para a corrida", a
   const names = Object.values(await bob.evaluate(() => window.__nfbmc!.players())).map((p) => p.name).sort();
   expect(names).toEqual(["Alice", "Bob"]);
 });
+
+test("mundo aberto: o trânsito aparece e anda pelas ruas", async ({ browser }) => {
+  const page = await enterWorld(browser, "Will");
+  const traffic = () => page.evaluate(() => window.__nfbmc!.police()!.traffic);
+  await expect.poll(async () => (await traffic()).length, { timeout: 15_000 }).toBeGreaterThan(5);
+  // Os carros andam sozinhos (alguns podem estar parados atrás de outros).
+  await expect.poll(async () => (await traffic()).filter((n) => n.speed > 3).length, { timeout: 15_000 }).toBeGreaterThan(2);
+});

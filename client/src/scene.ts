@@ -9,6 +9,7 @@ import {
   raceMarker,
   type FoodKind,
   type RaceId,
+  type TrafficKind,
 } from "@nfbmc/shared";
 
 import { Effects } from "./effects.ts";
@@ -28,6 +29,8 @@ export interface CarView {
   visible: boolean;
   /** Viatura da Vigilância Sanitária. */
   cop?: boolean;
+  /** Carro do trânsito, e de que tipo. */
+  traffic?: TrafficKind;
 }
 
 export interface FoodView {
@@ -240,14 +243,14 @@ export class GameScene {
       }
     }
     for (const [id, car] of cars) {
-      const key = `${car.name}|${car.color}|${car.cop ? "cop" : ""}`;
+      const key = `${car.name}|${car.color}|${car.cop ? "cop" : ""}|${car.traffic ?? ""}`;
       let entry = this.cars.get(id);
       if (entry && entry.key !== key) {
         this.scene.remove(entry.model.group);
         entry = undefined;
       }
       if (!entry) {
-        const model = makeCar(car.color, car.name, car.cop);
+        const model = makeCar(car.color, car.name, { cop: car.cop, traffic: car.traffic });
         model.group.rotation.order = "YXZ";
         entry = { model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false };
         this.scene.add(model.group);
