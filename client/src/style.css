@@ -923,9 +923,14 @@ button.link {
   transform: none;
 }
 
-.swatches button.selected {
+.swatches button.chosen {
   border-color: #fff;
   outline: 3px solid var(--orange);
+}
+
+/* Foco do teclado na amostra (navegando pelo submenu). */
+.swatches button.selected {
+  transform: scale(1.12);
 }
 
 .specs {
@@ -1338,4 +1343,128 @@ body.touch .panel.side {
   .mw-hint {
     display: none;
   }
+}
+
+/* --- Garagem: lista de carros e ficha ---------------------------------- */
+
+.garage {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 14px;
+}
+
+.car-list {
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.mw-list.sub.car-list button {
+  padding: 3px 12px;
+  font-size: 0.95rem;
+}
+
+.car-list .cat {
+  display: block;
+  margin: 8px 0 2px;
+  font: 0.65rem system-ui, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mustard);
+}
+
+.car-info h3 {
+  margin: 0;
+  font: italic 1.4rem var(--hud);
+}
+
+.car-info .inspired {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.car-info .food {
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.stat-bar {
+  display: grid;
+  grid-template-columns: 96px 1fr 72px;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.stat-bar .track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  transform: skewX(-20deg);
+}
+
+.stat-bar .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--orange), var(--mustard));
+}
+
+.stat-bar strong {
+  font-family: var(--hud);
+  text-align: right;
+}
+
+/* Botões de marcha no toque (só com câmbio manual). */
+.touch-shift {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: calc(max(14px, env(safe-area-inset-bottom)) + 130px);
+  display: none;
+  gap: 10px;
+}
+
+#touch.manual .touch-shift {
+  display: flex;
+}
+
+#touch .touch-shift button {
+  width: 64px;
+  height: 52px;
+  font-size: 1.8rem;
+}
+
+@media (max-height: 520px) {
+  .garage {
+    grid-template-columns: 180px 1fr;
+  }
+
+  .car-list {
+    max-height: 40vh;
+  }
+
+  .car-info .food {
+    display: none;
+  }
+}
+
+.mw-list.sub.car-list button.selected-car::after {
+  content: " ✔";
+  color: var(--mustard);
+}
+
+/* A garagem fica mais estreita, para o carro aparecer na vitrine à direita. */
+.mw-screen.garage-screen {
+  width: min(520px, calc(100vw - 440px));
+}
+
+.garage-screen .garage {
+  grid-template-columns: 190px 1fr;
+}
+
+/* As telas do menu nunca passam por baixo do rodapé: rolam por dentro. */
+.mw-screen {
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
 }

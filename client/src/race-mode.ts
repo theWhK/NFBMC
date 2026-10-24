@@ -1,5 +1,6 @@
 // Modo corrida: HUD, lobby, contagem, placar e sons de evento de uma RaceRoom.
 import {
+  carSpec,
   DIFFICULTY_LABELS,
   type InputMessage,
   MAX_PLAYERS,
@@ -64,6 +65,7 @@ export class RaceMode {
       views.set(id, {
         name: p.bot ? `🤖 ${p.name}` : p.name,
         color: p.color,
+        car: p.car,
         x: p.x,
         z: p.z,
         heading: p.heading,
@@ -95,6 +97,8 @@ export class RaceMode {
 
     ctx.sound.updateMine(followId === room.sessionId && followed ? {
       speed: me.speed,
+      rpm: me.rpm,
+      redline: carSpec(me.car).redline,
       throttle: ctx.input().throttle,
       skid: followed.skid,
       offroad: followed.offroad,
@@ -152,7 +156,7 @@ export class RaceMode {
     }
     ui.dash.hidden = spectating;
     if (!spectating) {
-      ctx.drawTacho(me.speed);
+      ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
       ui.nitroFill.style.width = `${Math.min(100, (me.boost / 2.5) * 100)}%`;
     }
     ui.speedlines.hidden = !(me.boost > 0 && !spectating);
@@ -245,11 +249,15 @@ export class RaceMode {
     this.room.send("input", input);
   }
 
+  sendShift(direction: number) {
+    this.room.send("shift", { direction });
+  }
+
   snapshot() {
     const result: Record<string, PlayerSnapshot> = {};
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
-        name: p.name, bot: p.bot, x: p.x, z: p.z, speed: p.speed, racing: p.racing,
+        name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: p.bot, x: p.x, z: p.z, speed: p.speed, racing: p.racing,
         lap: p.lap, place: p.place, calories: p.calories, finished: p.finished,
       };
     });

@@ -20,6 +20,13 @@ import {
   raceMarker,
   stepCar,
   pickColor,
+  DEFAULT_CAR,
+  carSpec,
+  createDrive,
+  isCarId,
+  requestShift,
+  type DriveState,
+  type ShiftMessage,
   type Difficulty,
   type DriveInput,
   type EventRaceOptions,
@@ -75,6 +82,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   patchRate = 1000 / 30;
 
   private controls = new Map<string, DriveInput>();
+  /** Motor e câmbio de cada carro (jogadores, viaturas e trânsito). */
+  private drives = new Map<string, DriveState>();
   private profiles = new Map<string, Profile>();
   private respawnAt = new Map<Stand, number>();
   /** Quem já foi chamado para uma corrida (não entra em outra enquanto sai daqui). */
@@ -95,6 +104,17 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         throttle: clamp(message.throttle, -1, 1),
         steer: clamp(message.steer, -1, 1),
       });
+    },
+    shift: (client: Client, message: ShiftMessage) => {
+      const player = this.state.players.get(client.sessionId);
+      const drive = this.drives.get(client.sessionId);
+      if (player && drive && Number.isFinite(message?.direction)) requestShift(drive, carSpec(player.car), message.direction);
+    },
+    gearbox: (client: Client, message: { manual?: unknown }) => {
+      const player = this.state.players.get(client.sessionId);
+      const drive = this.drives.get(client.sessionId);
+      if (!player || !drive || typeof message?.manual !== "boolean") return;
+      player.manual = drive.manual = message.manual;
     },
     startRace: (client: Client, message: { raceId?: unknown; bots?: unknown; difficulty?: unknown }) => {
       this.startRace(client, message).catch((err) => console.error("Falha ao criar corrida", err));
@@ -141,6 +161,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     player.calories = profile.calories;
     const usedColors = new Set([...this.state.players.values()].map((p) => p.color));
     player.color = pickColor(options?.color, usedColors, this.joinCount);
+    player.car = isCarId(options?.car) ? options.car : DEFAULT_CAR;
+    player.manual = options?.manual === true;
+    this.drives.set(client.sessionId, createDrive(carSpec(player.car), player.manual));
 
     if (isRaceId(options?.spawn)) {
       // Voltando de uma corrida: aparece no ponto de encontro dela, um pouco ao lado.
@@ -164,6 +187,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.profiles.delete(client.sessionId);
     this.leaving.delete(client.sessionId);
     this.lastCopHit.delete(client.sessionId);
+    this.drives.delete(client.sessionId);
     this.removeCops(client.sessionId);
   }
 
@@ -208,8 +232,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         ? { throttle: -1, steer: 0 }
         : this.controls.get(sessionId) ?? { throttle: 0, steer: 0 };
       player.boost = Math.max(0, player.boost - dt);
-      stepCar(player, input, dt, !isOnRoad(player.x, player.z), player.boost > 0);
+      const spec = carSpec(player.car);
+      const drive = this.driveOf(sessionId, spec, player.manual);
+      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), player.boost > 0);
       collideWorld(player);
+      player.rpm = Math.round(drive.rpm);
+      player.gear = drive.gear;
       this.eat(sessionId, player);
     }
 
@@ -254,6 +282,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     }
   }
 
+  private driveOf(id: string, spec: ReturnType<typeof carSpec>, manual = false) {
+    let drive = this.drives.get(id);
+    if (!drive) this.drives.set(id, (drive = createDrive(spec, manual)));
+    return drive;
+  }
+
   private syncProfile(sessionId: string, player: WorldPlayer) {
     const profile = this.profiles.get(sessionId);
     if (profile) setCalories(profile, player.calories);
@@ -269,6 +303,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     for (const [id] of this.copsOf(sessionId)) {
       this.state.cops.delete(id);
       this.copBrains.delete(id);
+      this.drives.delete(id);
     }
   }
 
@@ -285,6 +320,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   private removeTraffic(id: string) {
     this.state.traffic.delete(id);
     this.trafficBrains.delete(id);
+    this.drives.delete(id);
   }
 
   private driveTraffic(dt: number) {
@@ -324,7 +360,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         this.removeTraffic(id);
         continue;
       }
-      stepCar(npc, input, dt, !isOnRoad(npc.x, npc.z), false);
+      // O trânsito anda num carro popular comum, com câmbio automático.
+      const spec = carSpec("uno");
+      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z), false);
       collideWorld(npc);
     }
   }
@@ -338,9 +376,13 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         this.copBrains.delete(id);
         continue;
       }
-      const { input, boost } = copInput(brain, cop, target, Math.floor(target.heat), dt);
+      // De 4 estrelas para cima, a Vigilância manda a viatura tática (superesportiva).
+      const stars = Math.floor(target.heat);
+      cop.car = stars >= 4 ? "viatura-tatica" : "viatura";
+      const spec = carSpec(cop.car);
+      const { input, boost } = copInput(brain, cop, spec, target, stars, dt);
       cop.boost = boost ? 1 : 0;
-      stepCar(cop, input, dt, !isOnRoad(cop.x, cop.z), boost);
+      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z), boost);
       collideWorld(cop);
     }
   }

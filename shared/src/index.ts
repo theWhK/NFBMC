@@ -2,6 +2,7 @@
 
 export * from "./track.ts";
 export * from "./physics.ts";
+export * from "./cars.ts";
 export * from "./world.ts";
 
 export const ROOM_NAME = "race";
@@ -98,6 +99,14 @@ export interface JoinOptions {
   name?: string;
   /** Cor preferida do carrinho (escolhida na Garagem); vale se ninguém na sala estiver com ela. */
   color?: string;
+  /** Carro escolhido na Garagem (id de CARS) e se o câmbio é manual. */
+  car?: string;
+  manual?: boolean;
+}
+
+/** Troca de marcha no câmbio manual (+1 sobe, -1 desce). */
+export interface ShiftMessage {
+  direction: number;
 }
 
 /** Escolhe a cor do jogador: a preferida, se estiver livre; senão, a primeira livre. */

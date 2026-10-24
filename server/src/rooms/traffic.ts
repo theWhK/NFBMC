@@ -138,6 +138,7 @@ export function trafficInput(
 
   let throttle = 0;
   if (car.speed < desired - 0.5) throttle = 0.7;
-  else if (car.speed > desired + 1) throttle = -1;
+  // Freia só em movimento: segurar o freio parado engataria a ré.
+  else if (car.speed > desired + 1) throttle = car.speed > 0.5 ? -1 : 0;
   return { throttle, steer };
 }

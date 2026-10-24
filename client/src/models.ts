@@ -1,7 +1,9 @@
 // Modelos 3D feitos só com formas simples do Three.js (sem arquivos externos).
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { FoodKind, TrafficKind } from "@nfbmc/shared";
+import { carSpec, type FoodKind, type TrafficKind } from "@nfbmc/shared";
+
+import { buildBody } from "./car-models.ts";
 
 const lambert = (color: THREE.ColorRepresentation) => new THREE.MeshLambertMaterial({ color });
 
@@ -13,6 +15,7 @@ const MATERIALS = {
   lettuce: lambert("#5cb83a"),
   tomato: lambert("#e2412f"),
   tire: lambert("#222222"),
+  rim: lambert("#b8bcc2"),
   window: lambert("#2a3540"),
   light: new THREE.MeshBasicMaterial({ color: "#fff3b0" }),
   fry: lambert("#f7d154"),
@@ -136,9 +139,11 @@ export interface CarModel {
 }
 
 export interface CarOptions {
-  /** Viatura da Vigilância Sanitária. */
+  /** Carro da garagem (id em CARS). Sem ele, usa o padrão. */
+  car?: string;
+  /** Viatura da Vigilância Sanitária (com pintura e giroflex). */
   cop?: boolean;
-  /** Carro do trânsito (sem hambúrguer no teto e sem nome). */
+  /** Carro do trânsito (modelo simples, sem nome). */
   traffic?: TrafficKind;
 }
 
@@ -162,44 +167,51 @@ function trafficBody(shell: THREE.Group, kind: TrafficKind, body: THREE.Material
   }
 }
 
-/** Carrinho de lanche: carroceria na cor do jogador e um hambúrguer no teto. A frente aponta para +Z. */
+/** Pintura de viatura: branca, faixa verde (cor de "saúde") e "VIGILÂNCIA" escrito. */
+const copLivery: Parameters<typeof buildBody>[2] = (add, design) => {
+  add.box(design.width + 0.14, 0.22, design.length - 0.3, "#2a9d4a", 0, 0.62, 0);
+  add.box(1.4, 0.16, 0.5, "#222222", 0, 1.42, -0.2);
+};
+
+/** Carro de um jogador, bot, viatura ou do trânsito. A frente aponta para +Z. */
 export function makeCar(color: string, name: string, options: CarOptions = {}): CarModel {
   const { cop, traffic } = options;
   const group = new THREE.Group();
-  const body = lambert(cop ? "#f4f4f0" : color);
-
-  // Carroceria, vidros, faróis e o hambúrguer do teto: tudo fundido numa peça.
   const shell = new THREE.Group();
+  let wheelSpots: { x: number; z: number; radius: number }[];
+  let length = 4.2;
+  let roofY = 1.8;
+
   if (traffic) {
-    trafficBody(shell, traffic, body);
+    trafficBody(shell, traffic, lambert(color));
+    shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, -0.65, 0.85, 2.11));
+    shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, 0.65, 0.85, 2.11));
+    wheelSpots = [[-1.1, 1.3], [1.1, 1.3], [-1.1, -1.3], [1.1, -1.3]].map(([x, z]) => ({ x, z, radius: 0.45 }));
   } else {
-    shell.add(mesh(new THREE.BoxGeometry(2.1, 0.7, 4), body, 0, 0.75));
-    shell.add(mesh(new THREE.BoxGeometry(1.8, 0.6, 1.9), MATERIALS.window, 0, 1.4, -0.3));
-    shell.add(mesh(new THREE.BoxGeometry(1.9, 0.12, 2.0), body, 0, 1.75, -0.3));
+    const spec = carSpec(options.car ?? (cop ? "viatura" : undefined));
+    const built = buildBody(spec.body, cop ? "#f4f4f0" : color, cop ? copLivery : undefined);
+    shell.add(built.shell);
+    wheelSpots = built.wheels;
+    length = built.length;
+    roofY = 1.6;
   }
-  shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, -0.65, 0.85, 2.11));
-  shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, 0.65, 0.85, 2.11));
+
   let lights: [THREE.Mesh, THREE.Mesh] | undefined;
-  if (traffic) {
-    // Carro comum: sem enfeite no teto.
-  } else if (cop) {
-    // Viatura da Vigilância Sanitária: branca com faixa verde (cor de "saúde") e giroflex.
-    shell.add(mesh(new THREE.BoxGeometry(2.14, 0.22, 4.02), lambert("#2a9d4a"), 0, 0.8));
-    shell.add(mesh(new THREE.BoxGeometry(1.4, 0.18, 0.5), lambert("#222222"), 0, 1.9, -0.3));
-    const red = mesh(new THREE.BoxGeometry(0.6, 0.22, 0.45), new THREE.MeshBasicMaterial({ color: "#ff2a2a" }), -0.35, 2.05, -0.3);
-    const blue = mesh(new THREE.BoxGeometry(0.6, 0.22, 0.45), new THREE.MeshBasicMaterial({ color: "#2a6bff" }), 0.35, 2.05, -0.3);
+  if (cop) {
+    const red = mesh(new THREE.BoxGeometry(0.6, 0.2, 0.42), new THREE.MeshBasicMaterial({ color: "#ff2a2a" }), -0.35, 1.58, -0.2);
+    const blue = mesh(new THREE.BoxGeometry(0.6, 0.2, 0.42), new THREE.MeshBasicMaterial({ color: "#2a6bff" }), 0.35, 1.58, -0.2);
     lights = [red, blue];
-  } else {
-    const burger = makeBurger();
-    burger.scale.setScalar(1.3);
-    burger.position.set(0, 1.8, -0.3);
-    shell.add(burger);
   }
+
   const wheels: THREE.Mesh[] = [];
-  const wheelGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.4, 14);
-  wheelGeometry.rotateZ(Math.PI / 2);
-  for (const [x, z] of [[-1.1, 1.3], [1.1, 1.3], [-1.1, -1.3], [1.1, -1.3]]) {
-    const wheel = mesh(wheelGeometry, MATERIALS.tire, x, 0.45, z);
+  for (const spot of wheelSpots) {
+    const geometry = new THREE.CylinderGeometry(spot.radius, spot.radius, 0.32, 16);
+    geometry.rotateZ(Math.PI / 2);
+    const wheel = mesh(geometry, MATERIALS.tire, spot.x, spot.radius, spot.z);
+    // Calota/roda clara, para dar para ver o giro.
+    const rimGeometry = new THREE.CylinderGeometry(spot.radius * 0.6, spot.radius * 0.6, 0.34, 6);
+    rimGeometry.rotateZ(Math.PI / 2);
+    wheel.add(new THREE.Mesh(rimGeometry, MATERIALS.rim));
     // No trânsito as rodas vão fundidas na carroceria (não giram, mas são dezenas de
     // carros: assim cada um custa uma chamada de desenho em vez de cinco).
     if (traffic) shell.add(wheel);
@@ -209,24 +221,24 @@ export function makeCar(color: string, name: string, options: CarOptions = {}): 
   if (lights) group.add(...lights);
   if (wheels.length) group.add(...wheels);
 
-  const flame = mesh(new THREE.ConeGeometry(0.4, 1.6, 10), MATERIALS.flame, 0, 0.8, -2.8);
+  const flame = mesh(new THREE.ConeGeometry(0.4, 1.6, 10), MATERIALS.flame, 0, 0.6, -length / 2 - 0.8);
   flame.rotation.x = -Math.PI / 2;
   flame.visible = false;
   group.add(flame);
 
   // Sombra falsa: um círculo escuro no chão, bem mais barato que sombra de verdade.
   const shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(2.3, 20),
-    new THREE.MeshBasicMaterial({ color: "#000000", transparent: true, opacity: 0.25, depthWrite: false }),
+    new THREE.CircleGeometry(1.2, 20),
+    new THREE.MeshBasicMaterial({ color: "#000000", transparent: true, opacity: 0.28, depthWrite: false }),
   );
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.06;
-  shadow.scale.y = 1.5;
+  shadow.scale.set(1.0, length / 2.2, 1);
   group.add(shadow);
 
   if (name) {
     const label = makeLabel(name, color);
-    label.position.y = 3.6;
+    label.position.y = roofY + 1.6;
     group.add(label);
   }
 

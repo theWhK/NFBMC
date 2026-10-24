@@ -28,6 +28,8 @@ export interface CarView {
   speed: number;
   boost: number;
   visible: boolean;
+  /** Carro da garagem (id em CARS). */
+  car?: string;
   /** Viatura da Vigilância Sanitária. */
   cop?: boolean;
   /** Carro do trânsito, e de que tipo. */
@@ -157,7 +159,7 @@ export class GameScene {
   private markers: THREE.Group;
   private sunDirection = SUN_DIRECTION;
   /** Carro de vitrine do menu (girando na reta do autódromo). */
-  private showcase: { model: CarModel; color: string } | null = null;
+  private showcase: { model: CarModel; key: string } | null = null;
   private cars = new Map<string, CarEntry>();
   private foods: THREE.Group[] = [];
   private foodActive: boolean[] = [];
@@ -233,17 +235,18 @@ export class GameScene {
   }
 
   /** Mostra (ou tira, com null) o carro na vitrine do menu, na cor escolhida. */
-  setShowcase(color: string | null) {
-    if (this.showcase && this.showcase.color === color) return;
+  setShowcase(color: string | null, car?: string) {
+    const key = `${color}|${car ?? ""}`;
+    if (this.showcase && this.showcase.key === key) return;
     if (this.showcase) this.scene.remove(this.showcase.model.group);
     this.showcase = null;
     if (!color) return;
-    const model = makeCar(color, "");
+    const model = makeCar(color, "", { car });
     const spot = pointOnTrack(RACES.autodromo.track, -14, 0);
     model.group.position.set(spot.x, 0, spot.z);
     model.group.rotation.y = spot.heading;
     this.scene.add(model.group);
-    this.showcase = { model, color };
+    this.showcase = { model, key };
   }
 
   private clearFoods() {
@@ -261,14 +264,14 @@ export class GameScene {
       }
     }
     for (const [id, car] of cars) {
-      const key = `${car.name}|${car.color}|${car.cop ? "cop" : ""}|${car.traffic ?? ""}`;
+      const key = `${car.name}|${car.color}|${car.car ?? ""}|${car.cop ? "cop" : ""}|${car.traffic ?? ""}`;
       let entry = this.cars.get(id);
       if (entry && entry.key !== key) {
         this.scene.remove(entry.model.group);
         entry = undefined;
       }
       if (!entry) {
-        const model = makeCar(car.color, car.name, { cop: car.cop, traffic: car.traffic });
+        const model = makeCar(car.color, car.name, { car: car.car, cop: car.cop, traffic: car.traffic });
         model.group.rotation.order = "YXZ";
         entry = { model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false };
         this.scene.add(model.group);
@@ -383,13 +386,13 @@ export class GameScene {
       // Menu: a câmera gira devagar em volta do carro da vitrine.
       const center = this.showcase.model.group.position;
       const angle = this.time * 0.25;
-      this.camera.position.set(center.x + Math.sin(angle) * 7.5, 2.4, center.z + Math.cos(angle) * 7.5);
+      this.camera.position.set(center.x + Math.sin(angle) * 8.5, 2.6, center.z + Math.cos(angle) * 8.5);
       // Mira um pouco à esquerda do carro, para ele aparecer à direita da tela
       // (a lista do menu fica à esquerda, como no jogo original).
       const fx = center.x - this.camera.position.x;
       const fz = center.z - this.camera.position.z;
       const len = Math.hypot(fx, fz) || 1;
-      this.cameraTarget.set(center.x + (fz / len) * 3, 1.1, center.z - (fx / len) * 3);
+      this.cameraTarget.set(center.x + (fz / len) * 4.6, 1.1, center.z - (fx / len) * 4.6);
       this.camera.fov = 50;
       this.camera.updateProjectionMatrix();
       for (const wheel of this.showcase.model.wheels) wheel.rotation.x = 0;
