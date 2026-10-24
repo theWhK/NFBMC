@@ -36,6 +36,10 @@
         <button type="button" id="solo" class="link" data-testid="solo-button">sozinho contra bots</button>
       </div>
       <p class="hint">↑/W acelera · ↓/S freia · ←→/AD vira · M liga/desliga a música</p>
+      <div id="hall" class="hall" data-testid="hall" hidden>
+        <p class="stamp small">Lista Gorda · todos os tempos</p>
+        <ol id="hall-list"></ol>
+      </div>
     </form>
 
     <div id="lobby" class="panel side" hidden>
@@ -87,7 +91,8 @@
     </div>
 
     <div id="world-hud" hidden>
-      <div class="hud-row kcal"><span>🍔 kcal na sessão</span><strong id="world-calories" data-testid="world-calories">0</strong></div>
+      <div class="hud-row kcal"><span>🍔 kcal acumuladas</span><strong id="world-calories" data-testid="world-calories">0</strong></div>
+      <p class="stats" id="world-stats" data-testid="world-stats"></p>
       <p class="hint">Siga as colunas de luz 🏁 no mapa para achar corridas. Comida nas esquinas… mas cuidado com a Vigilância Sanitária!</p>
     </div>
 

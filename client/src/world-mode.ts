@@ -31,7 +31,12 @@ export class WorldMode {
   constructor(room: WorldRoom, ctx: ModeContext, onGoRace: (message: GoRaceMessage) => void, onToken: (token: string) => void) {
     this.room = room;
     this.ctx = ctx;
-    room.onMessage("profile", (message: { token: string }) => onToken(message.token));
+    room.onMessage("profile", (message: { token: string; races: number; wins: number; bestRace: number }) => {
+      onToken(message.token);
+      ui.worldStats.textContent = message.races > 0
+        ? `${message.races} ${message.races === 1 ? "corrida" : "corridas"} · ${message.wins} ${message.wins === 1 ? "vitória" : "vitórias"} · melhor corrida: ${kcal(message.bestRace)} kcal`
+        : "Nenhuma corrida ainda: procure uma coluna de luz 🏁";
+    });
     room.onMessage("goRace", (message: GoRaceMessage) => onGoRace(message));
     room.onMessage("notice", (message: { text: string }) => showPopup(message.text));
     room.onMessage("pursuit", (message: { result: "escaped" | "busted"; calories: number }) => {

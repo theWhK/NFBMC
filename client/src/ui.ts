@@ -37,6 +37,9 @@ export const ui = {
   // Mundo aberto
   worldHud: $("world-hud"),
   worldCalories: $("world-calories"),
+  worldStats: $("world-stats"),
+  hall: $("hall"),
+  hallList: $("hall-list"),
   leaderboard: $("leaderboard"),
   leaderboardList: $("leaderboard-list"),
   markerPanel: $("marker-panel"),

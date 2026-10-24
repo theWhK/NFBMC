@@ -32,7 +32,7 @@ import {
   type Phase,
 } from "@nfbmc/shared";
 
-import { addCalories } from "../profiles.ts";
+import { recordRace } from "../profiles.ts";
 import { BOT_NAMES, botInput, createBrain, type Brain, type FoodSpot } from "./bots.ts";
 import { Food, Player, RaceState, Result } from "./schema.ts";
 
@@ -432,7 +432,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       row.total = p.calories + row.bonus;
       rows.push(row);
       // O que comeu e ganhou na corrida entra na conta do jogador no mundo aberto.
-      if (!p.bot) addCalories(this.tokens.get(sessionId), row.total);
+      if (!p.bot) recordRace(this.tokens.get(sessionId), row.total, p.finished && p.place === 1);
     });
     // Empate em calorias: quem chegou antes leva.
     rows.sort((a, b) => b.total - a.total || (a.place || 99) - (b.place || 99));

@@ -115,14 +115,18 @@ button.icon.off {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* "safe": se não couber (tela baixa), começa do topo e rola, em vez de cortar. */
+  justify-content: safe center;
+  overflow-y: auto;
+  box-sizing: border-box;
   gap: 6px;
-  padding: 16px;
+  padding: 48px 16px 16px;
   background: linear-gradient(transparent 40%, rgba(22, 17, 13, 0.75));
 }
 
 #logo {
-  width: min(720px, 100%);
+  /* O logo é ~2,5 × mais largo que alto: 70vh de largura = no máximo ~28% da altura da tela. */
+  width: min(680px, 100%, 70vh);
   filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.5));
 }
 
@@ -651,4 +655,38 @@ button.link {
 
 #banner.busted {
   color: #ff5c5c;
+}
+
+/* --- Lista Gorda de todos os tempos (menu) ------------------------------ */
+
+.hall {
+  width: min(420px, 100%);
+  margin-top: 6px;
+  padding: 10px 14px;
+  background: rgba(22, 17, 13, 0.75);
+  border-left: 4px solid var(--mustard);
+  box-sizing: border-box;
+}
+
+.hall .stamp {
+  font-size: 0.9rem;
+}
+
+.hall ol {
+  margin: 6px 0 0;
+  padding-left: 1.6em;
+  columns: 2;
+  font-size: 0.85rem;
+}
+
+.hall li strong {
+  font-family: var(--hud);
+  color: var(--mustard);
+  margin-left: 4px;
+}
+
+#world-hud .stats {
+  margin: 2px 0 6px;
+  font: 0.8rem system-ui, sans-serif;
+  opacity: 0.85;
 }
