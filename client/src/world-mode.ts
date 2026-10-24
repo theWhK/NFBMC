@@ -2,6 +2,8 @@
 // disparar corridas nos pontos de encontro.
 import {
   DIFFICULTY_LABELS,
+  DISTRICTS,
+  districtAt,
   POLICE,
   MARKER_RADIUS,
   MAX_PLAYERS,
@@ -27,6 +29,8 @@ export class WorldMode {
   private sceneReady = false;
   private previous = { calories: -1, boost: 0, speed: 0, bumpAt: 0 };
   private bannerTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bairro onde o carro estava no quadro anterior (para mostrar a placa ao trocar). */
+  private district: string | null = null;
 
   constructor(room: WorldRoom, ctx: ModeContext, onGoRace: (message: GoRaceMessage) => void, onToken: (token: string) => void) {
     this.room = room;
@@ -146,6 +150,7 @@ export class WorldMode {
     ui.leaderboard.hidden = false;
     ui.count.textContent = String(room.state.players.size);
     ui.worldCalories.textContent = kcal(me.calories);
+    this.updateDistrict(me.x, me.z);
     const ranking = [...room.state.players.entries()].sort(([, a], [, b]) => b.calories - a.calories).slice(0, 6);
     setHtml(
       ui.leaderboard.querySelector("ol")!,
@@ -191,6 +196,17 @@ export class WorldMode {
     this.previous.calories = me.calories;
     this.previous.boost = me.boost;
     this.previous.speed = me.speed;
+  }
+
+  private updateDistrict(x: number, z: number) {
+    const id = districtAt(x, z);
+    if (id === this.district) return;
+    this.district = id;
+    // Reinicia a animação da placa trocando o texto e re-exibindo o elemento.
+    ui.district.hidden = true;
+    ui.district.textContent = DISTRICTS.find((d) => d.id === id)?.name ?? "";
+    void ui.district.offsetWidth;
+    ui.district.hidden = false;
   }
 
   /** Estrelas de procurado e a barra de perseguição/fuga/autuação. */

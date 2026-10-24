@@ -13,7 +13,7 @@ import {
   copsForStars,
   STANDS,
   STAND_RESPAWN_SECONDS,
-  STREET_LINES,
+  SPAWNS,
   collideWorld,
   isOnRoad,
   isRaceId,
@@ -138,12 +138,11 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       player.z = marker.z + (Math.random() - 0.5) * 6;
       player.heading = marker.heading;
     } else {
-      // Nasce numa esquina do centro, de frente para uma rua.
-      const x = STREET_LINES[3 + Math.floor(Math.random() * 2)];
-      const z = STREET_LINES[3 + Math.floor(Math.random() * 2)] + (Math.random() < 0.5 ? -40 : 40);
-      player.x = x + (Math.random() - 0.5) * 6;
-      player.z = z;
-      player.heading = z > 0 ? 0 : Math.PI;
+      // Nasce numa rua do centro, de frente para ela.
+      const spawn = SPAWNS[Math.floor(Math.random() * SPAWNS.length)];
+      player.x = spawn.x + (Math.random() - 0.5) * 4;
+      player.z = spawn.z + (Math.random() - 0.5) * 4;
+      player.heading = spawn.heading;
     }
     this.state.players.set(client.sessionId, player);
   }

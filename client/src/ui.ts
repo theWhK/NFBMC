@@ -57,6 +57,7 @@ export const ui = {
   pursuitLabel: $("pursuit-label"),
   pursuitFill: $("pursuit-fill"),
   banner: $("banner"),
+  district: $("district"),
   vignette: $("vignette"),
   // Comum
   dash: $("dash"),
@@ -97,7 +98,7 @@ export function hideModeUi() {
   for (const el of [
     ui.lobby, ui.hud, ui.countdown, ui.message, ui.results,
     ui.worldHud, ui.leaderboard, ui.markerPanel, ui.speedlines,
-    ui.wanted, ui.pursuit, ui.banner,
+    ui.wanted, ui.pursuit, ui.banner, ui.district,
   ]) el.hidden = true;
   ui.vignette.classList.remove("chase");
 }

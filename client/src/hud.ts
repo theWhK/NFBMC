@@ -1,5 +1,5 @@
 // Partes do HUD desenhadas em canvas 2D: conta-giros e minimapa.
-import { RACES, RACE_IDS, STREETS, raceMarker, type RaceId, type Track } from "@nfbmc/shared";
+import { LAKE, QUAY_Z, RACES, RACE_IDS, ROADS, raceMarker, type RaceId, type Track } from "@nfbmc/shared";
 
 import { gearFor } from "./audio.ts";
 import type { CarView } from "./scene.ts";
@@ -113,11 +113,22 @@ export function createMinimap(canvas: HTMLCanvasElement) {
     ];
 
     ctx.clearRect(0, 0, size, size);
-    ctx.fillStyle = "#5b5148";
-    for (const street of STREETS) {
-      const [x1, y1] = toMap(street.maxX, street.maxZ);
-      const [x2, y2] = toMap(street.minX, street.minZ);
-      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+    // Mar e lago.
+    ctx.fillStyle = "#24506e";
+    const [, seaY] = toMap(0, QUAY_Z);
+    if (seaY < size) ctx.fillRect(0, seaY, size, size - seaY);
+    ctx.beginPath();
+    ctx.ellipse(...toMap(LAKE.x, LAKE.z), LAKE.rx * scale, LAKE.rz * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Ruas, com a largura de cada uma.
+    ctx.strokeStyle = "#6b6156";
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    for (const road of ROADS) {
+      ctx.lineWidth = Math.max(1.5, road.width * scale);
+      ctx.beginPath();
+      for (const [x, z] of road.points) ctx.lineTo(...toMap(x, z));
+      ctx.stroke();
     }
     drawTrack(RACES.autodromo.track, scale, toMap, "#5b5148", RACES.autodromo.track.width);
     if (race) {
