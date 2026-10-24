@@ -546,3 +546,109 @@ button.link {
   text-transform: uppercase;
   color: var(--mustard);
 }
+
+/* --- Vigilância Sanitária ---------------------------------------------- */
+
+#wanted {
+  position: fixed;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%) skewX(-8deg);
+  font-size: 1.6rem;
+  letter-spacing: 0.1em;
+  text-shadow: 0 2px 6px #000;
+}
+
+#wanted .off {
+  opacity: 0.25;
+  filter: grayscale(1);
+}
+
+#pursuit {
+  position: fixed;
+  top: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 32px));
+  text-align: center;
+  font: 1rem var(--hud);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 0 #000;
+}
+
+#pursuit .bar {
+  height: 10px;
+  margin-top: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid #555;
+  transform: skewX(-20deg);
+  overflow: hidden;
+}
+
+#pursuit-fill {
+  height: 100%;
+  width: 0;
+}
+
+#pursuit.chase #pursuit-label {
+  animation: police 0.5s steps(2) infinite;
+}
+
+#pursuit.escape #pursuit-fill {
+  background: linear-gradient(90deg, #2a9d4a, #8cff9e);
+}
+
+#pursuit.bust #pursuit-fill {
+  background: linear-gradient(90deg, #c1121f, #ff5c5c);
+}
+
+@keyframes police {
+  0% {
+    color: #ff4040;
+  }
+  100% {
+    color: #4d8cff;
+  }
+}
+
+/* Bordas da tela piscando vermelho/azul durante a perseguição. */
+#vignette.chase {
+  animation: chase-edges 0.6s steps(2) infinite;
+}
+
+@keyframes chase-edges {
+  0% {
+    box-shadow: inset 60px 0 80px -40px rgba(255, 40, 40, 0.55), inset -60px 0 80px -40px rgba(40, 90, 255, 0.25);
+  }
+  100% {
+    box-shadow: inset 60px 0 80px -40px rgba(255, 40, 40, 0.25), inset -60px 0 80px -40px rgba(40, 90, 255, 0.55);
+  }
+}
+
+#banner {
+  position: fixed;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%) skewX(-10deg);
+  text-align: center;
+  font: 4rem var(--stamp);
+  text-transform: uppercase;
+  pointer-events: none;
+  text-shadow: 0 6px 0 #000, 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+
+#banner small {
+  display: block;
+  font: 1.3rem var(--hud);
+  text-transform: none;
+  color: #fff;
+}
+
+#banner.escaped {
+  color: #8cff9e;
+}
+
+#banner.busted {
+  color: #ff5c5c;
+}

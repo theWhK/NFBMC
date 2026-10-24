@@ -19,7 +19,8 @@ export default defineConfig({
   // Sobe a stack do jeito que roda em produção: cliente buildado servido pelo próprio servidor.
   webServer: {
     command: "npm run build && npm start",
-    env: { PORT: String(PORT) },
+    // NFBMC_TEST_HOOKS liga mensagens de teste no servidor (ex.: definir o nível de procurado).
+    env: { PORT: String(PORT), NFBMC_TEST_HOOKS: "1" },
     url: `http://localhost:${PORT}/healthz`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

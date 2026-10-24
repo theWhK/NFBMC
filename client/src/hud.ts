@@ -148,7 +148,12 @@ export function createMinimap(canvas: HTMLCanvasElement) {
       ctx.arc(...toMap(car.x, car.z), radius, 0, Math.PI * 2);
       ctx.fill();
     };
-    for (const [id, car] of cars) if (id !== myId && car.visible) drawCar(car, 4);
+    const flash = Math.floor(performance.now() / 160) % 2 === 0;
+    for (const [id, car] of cars) {
+      if (id === myId || !car.visible) continue;
+      // Viaturas piscam vermelho/azul no mapa.
+      drawCar(car.cop ? { ...car, color: flash ? "#ff2a2a" : "#2a6bff" } : car, car.cop ? 5 : 4);
+    }
     if (me?.visible) {
       // Seta na direção do carro.
       const [cx, cy] = toMap(me.x, me.z);

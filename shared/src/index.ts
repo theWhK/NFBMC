@@ -47,6 +47,41 @@ export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
 /** Quantos bots a sala solo começa tendo. */
 export const SOLO_DEFAULT_BOTS = 5;
 
+/**
+ * Vigilância Sanitária (a "polícia" do mundo aberto). Comer nas barraquinhas
+ * esquenta o jogador (nível de procurado, 0 a 5); com 1 ou mais, viaturas saem
+ * atrás dele. Fugir para longe delas por um tempo = escapou (ganha calorias);
+ * ficar parado colado numa viatura = autuado (perde parte das calorias).
+ */
+export const POLICE = {
+  maxHeat: 5,
+  /** Quanto cada comida de barraquinha esquenta. */
+  heatPerStand: 0.4,
+  /** Batida numa viatura. */
+  heatPerHit: 0.75,
+  /** Em perseguição o calor sobe devagar sozinho (a coisa vai ficando séria). */
+  heatPerSecondChased: 0.04,
+  /** Sem perseguição, o calor baixa devagar. */
+  heatDecayPerSecond: 0.05,
+  /** Viatura a menos que isto "está vendo" o jogador. */
+  sightRadius: 140,
+  /** Durante a fuga, se uma viatura chegar a isto, volta a ser perseguição. */
+  reacquireRadius: 100,
+  /** Segundos longe das viaturas para escapar (mais 1 s por nível). */
+  escapeSeconds: 8,
+  /** Viatura colada e jogador quase parado, por este tempo = autuado. */
+  bustRadius: 9,
+  bustSpeed: 5,
+  bustSeconds: 3,
+  /** Parte das calorias da sessão que a Vigilância confisca na autuação. */
+  bustPenalty: 0.25,
+  /** Calorias de prêmio por nível ao escapar. */
+  escapeBonusPerStar: 300,
+} as const;
+
+/** Viaturas atrás de um jogador, conforme o nível de procurado. */
+export const copsForStars = (stars: number) => (stars <= 0 ? 0 : Math.min(3, 1 + Math.floor(stars / 2)));
+
 /** Intenção do jogador; o servidor é quem move o carro. */
 export interface InputMessage {
   throttle: number;

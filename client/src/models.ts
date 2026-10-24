@@ -131,12 +131,14 @@ export interface CarModel {
   group: THREE.Group;
   flame: THREE.Mesh;
   wheels: THREE.Mesh[];
+  /** Giroflex (só nas viaturas): luz vermelha e azul, que piscam alternadas. */
+  lights?: [THREE.Mesh, THREE.Mesh];
 }
 
 /** Carrinho de lanche: carroceria na cor do jogador e um hambúrguer no teto. A frente aponta para +Z. */
-export function makeCar(color: string, name: string): CarModel {
+export function makeCar(color: string, name: string, cop = false): CarModel {
   const group = new THREE.Group();
-  const body = lambert(color);
+  const body = lambert(cop ? "#f4f4f0" : color);
 
   // Carroceria, vidros, faróis e o hambúrguer do teto: tudo fundido numa peça.
   const shell = new THREE.Group();
@@ -145,11 +147,22 @@ export function makeCar(color: string, name: string): CarModel {
   shell.add(mesh(new THREE.BoxGeometry(1.9, 0.12, 2.0), body, 0, 1.75, -0.3));
   shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, -0.65, 0.85, 2.01));
   shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, 0.65, 0.85, 2.01));
-  const burger = makeBurger();
-  burger.scale.setScalar(1.3);
-  burger.position.set(0, 1.8, -0.3);
-  shell.add(burger);
+  let lights: [THREE.Mesh, THREE.Mesh] | undefined;
+  if (cop) {
+    // Viatura da Vigilância Sanitária: branca com faixa verde (cor de "saúde") e giroflex.
+    shell.add(mesh(new THREE.BoxGeometry(2.14, 0.22, 4.02), lambert("#2a9d4a"), 0, 0.8));
+    shell.add(mesh(new THREE.BoxGeometry(1.4, 0.18, 0.5), lambert("#222222"), 0, 1.9, -0.3));
+    const red = mesh(new THREE.BoxGeometry(0.6, 0.22, 0.45), new THREE.MeshBasicMaterial({ color: "#ff2a2a" }), -0.35, 2.05, -0.3);
+    const blue = mesh(new THREE.BoxGeometry(0.6, 0.22, 0.45), new THREE.MeshBasicMaterial({ color: "#2a6bff" }), 0.35, 2.05, -0.3);
+    lights = [red, blue];
+  } else {
+    const burger = makeBurger();
+    burger.scale.setScalar(1.3);
+    burger.position.set(0, 1.8, -0.3);
+    shell.add(burger);
+  }
   group.add(bake(shell));
+  if (lights) group.add(...lights);
 
   const wheels: THREE.Mesh[] = [];
   const wheelGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.4, 14);
@@ -179,5 +192,5 @@ export function makeCar(color: string, name: string): CarModel {
   label.position.y = 3.6;
   group.add(label);
 
-  return { group, flame, wheels };
+  return { group, flame, wheels, lights };
 }

@@ -125,6 +125,7 @@ export class Sound {
   private dirt!: ReturnType<typeof noiseLoop>;
   private wind!: ReturnType<typeof noiseLoop>;
   private music: Music | null = null;
+  private siren: { osc: OscillatorNode; gain: GainNode } | null = null;
   private wantedSong: SongName | null = null;
   readonly prefs = loadPrefs();
 
@@ -218,6 +219,38 @@ export class Sound {
       const volume = 0.12 * Math.max(0, 1 - car.distance / 70);
       engine.set(car.speed, 0.6, volume, car.pan);
     }
+  }
+
+  /** Sirene da viatura mais próxima (null = nenhuma por perto). Sobe e desce, mais alta quanto mais perto. */
+  updateSiren(distance: number | null) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    if (!this.siren) {
+      const osc = this.ctx.createOscillator();
+      osc.type = "square";
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 2200;
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0;
+      osc.connect(filter).connect(gain).connect(this.sfxBus);
+      osc.start();
+      this.siren = { osc, gain };
+    }
+    const volume = distance === null ? 0 : 0.1 * Math.max(0, 1 - distance / 170);
+    this.siren.gain.gain.setTargetAtTime(volume, t, 0.1);
+    // "Uóóó-uóóó": a frequência vai e volta a cada 1,4 s.
+    this.siren.osc.frequency.setTargetAtTime(650 + 450 * (0.5 + 0.5 * Math.sin((t * Math.PI * 2) / 1.4)), t, 0.02);
+  }
+
+  /** Escapou da Vigilância: fanfarra curta. */
+  escaped() {
+    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, "square", 0.15, i * 0.1));
+  }
+
+  /** Autuado: "buá buá" descendo. */
+  busted() {
+    [392, 330, 262].forEach((f, i) => this.tone(f, 0.35, "sawtooth", 0.15, i * 0.25, f * 0.9));
   }
 
   // --- Sons curtos -----------------------------------------------------------

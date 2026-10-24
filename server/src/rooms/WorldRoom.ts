@@ -8,7 +8,9 @@ import {
   MAX_PLAYERS,
   NAME_MAX_LENGTH,
   PLAYER_COLORS,
+  POLICE,
   ROOM_NAME,
+  copsForStars,
   STANDS,
   STAND_RESPAWN_SECONDS,
   STREET_LINES,
@@ -27,7 +29,18 @@ import {
 } from "@nfbmc/shared";
 
 import { getProfile, type Profile } from "../profiles.ts";
-import { Stand, WorldPlayer, WorldState } from "./schema.ts";
+import { copInput, createCopBrain, spawnPoint, type CopBrain } from "./cops.ts";
+import { Cop, Stand, WorldPlayer, WorldState } from "./schema.ts";
+
+/** Limite de viaturas na cidade, somando todos os jogadores. */
+const MAX_COPS = 12;
+/** Ganchos só para os testes e2e (nunca ligados em produção). */
+const TEST_HOOKS = process.env.NFBMC_TEST_HOOKS === "1";
+
+export interface PursuitMessage {
+  result: "escaped" | "busted";
+  calories: number;
+}
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -57,6 +70,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   private respawnAt = new Map<Stand, number>();
   /** Quem já foi chamado para uma corrida (não entra em outra enquanto sai daqui). */
   private leaving = new Set<string>();
+  private copBrains = new Map<string, CopBrain>();
+  private copCount = 0;
+  /** Última batida em viatura por jogador (para não somar calor a cada tick do encosto). */
+  private lastCopHit = new Map<string, number>();
   private time = 0;
   private joinCount = 0;
 
@@ -71,6 +88,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     startRace: (client: Client, message: { raceId?: unknown; bots?: unknown; difficulty?: unknown }) => {
       this.startRace(client, message).catch((err) => console.error("Falha ao criar corrida", err));
     },
+    ...(TEST_HOOKS && {
+      debugHeat: (client: Client, message: { heat?: unknown }) => {
+        const player = this.state.players.get(client.sessionId);
+        if (player && typeof message?.heat === "number") player.heat = Math.min(POLICE.maxHeat, Math.max(0, message.heat));
+      },
+    }),
   };
 
   onCreate(options?: WorldJoinOptions) {
@@ -124,6 +147,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.controls.delete(client.sessionId);
     this.profiles.delete(client.sessionId);
     this.leaving.delete(client.sessionId);
+    this.lastCopHit.delete(client.sessionId);
+    this.removeCops(client.sessionId);
   }
 
   /** Dispara a corrida do ponto de encontro e chama todo mundo que está nele. */
@@ -136,6 +161,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       return !!p && !this.leaving.has(id) && Math.hypot(p.x - marker.x, p.z - marker.z) <= MARKER_RADIUS;
     };
     if (!near(client.sessionId)) return;
+    if (this.copsOf(client.sessionId).length > 0) {
+      client.send("notice", { text: "Despiste a Vigilância Sanitária antes de correr!" });
+      return;
+    }
 
     const participants = [...this.state.players.keys()].filter(near).slice(0, MAX_PLAYERS);
     participants.forEach((id) => this.leaving.add(id));
@@ -168,12 +197,15 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       this.eat(sessionId, player);
     }
 
-    // Carros que se encostam são empurrados para longe um do outro.
+    this.driveCops(dt);
+
+    // Carros (jogadores e viaturas) que se encostam são empurrados para longe um do outro.
+    const all: [string, WorldPlayer | Cop][] = [...cars, ...this.state.cops.entries()];
     const minDist = CAR.radius * 2;
-    for (let i = 0; i < cars.length; i++) {
-      for (let j = i + 1; j < cars.length; j++) {
-        const a = cars[i][1];
-        const b = cars[j][1];
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const a = all[i][1];
+        const b = all[j][1];
         const dx = b.x - a.x;
         const dz = b.z - a.z;
         const dist = Math.hypot(dx, dz);
@@ -185,14 +217,130 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         b.z += (dz / dist) * push;
         a.speed *= 0.9;
         b.speed *= 0.9;
+        // Jogador batendo em viatura esquenta a situação (a viatura batendo nele, não).
+        const [player, playerId, cop] = a instanceof Cop
+          ? (b instanceof Cop ? [null, "", null] : [b, all[j][0], a])
+          : b instanceof Cop ? [a, all[i][0], b] : [null, "", null];
+        if (player && cop && Math.abs(player.speed) > 10 && Math.abs(player.speed) > Math.abs(cop.speed)) this.hitCop(playerId);
       }
     }
+
+    for (const [sessionId, player] of cars) this.updatePursuit(sessionId, player, dt);
 
     for (const [stand, at] of this.respawnAt) {
       if (this.time < at) continue;
       stand.active = true;
       this.respawnAt.delete(stand);
     }
+  }
+
+  private syncProfile(sessionId: string, player: WorldPlayer) {
+    const profile = this.profiles.get(sessionId);
+    if (profile) profile.calories = player.calories;
+  }
+
+  // --- Vigilância Sanitária --------------------------------------------------
+
+  private copsOf(sessionId: string) {
+    return [...this.state.cops.entries()].filter(([, cop]) => cop.target === sessionId);
+  }
+
+  private removeCops(sessionId: string) {
+    for (const [id] of this.copsOf(sessionId)) {
+      this.state.cops.delete(id);
+      this.copBrains.delete(id);
+    }
+  }
+
+  private hitCop(sessionId: string) {
+    const player = this.state.players.get(sessionId);
+    const last = this.lastCopHit.get(sessionId) ?? -Infinity;
+    if (!player || this.time - last < 1) return;
+    this.lastCopHit.set(sessionId, this.time);
+    player.heat = Math.min(POLICE.maxHeat, player.heat + POLICE.heatPerHit);
+  }
+
+  private driveCops(dt: number) {
+    for (const [id, cop] of this.state.cops) {
+      const target = this.state.players.get(cop.target);
+      const brain = this.copBrains.get(id);
+      if (!target || !brain) {
+        this.state.cops.delete(id);
+        this.copBrains.delete(id);
+        continue;
+      }
+      const { input, boost } = copInput(brain, cop, target, Math.floor(target.heat), dt);
+      cop.boost = boost ? 1 : 0;
+      stepCar(cop, input, dt, !isOnRoad(cop.x, cop.z), boost);
+      collideWorld(cop);
+    }
+  }
+
+  /** Nível de procurado, viaturas, fuga e autuação de um jogador. */
+  private updatePursuit(sessionId: string, player: WorldPlayer, dt: number) {
+    const stars = Math.floor(player.heat);
+    let cops = this.copsOf(sessionId);
+
+    // Viaturas que faltam para o nível atual.
+    const wanted = this.leaving.has(sessionId) ? 0 : copsForStars(stars);
+    while (cops.length < wanted && this.state.cops.size < MAX_COPS) {
+      const cop = new Cop();
+      const spot = spawnPoint(player.x, player.z);
+      cop.x = spot.x;
+      cop.z = spot.z;
+      cop.heading = spot.heading;
+      cop.target = sessionId;
+      const id = `cop-${++this.copCount}`;
+      this.state.cops.set(id, cop);
+      this.copBrains.set(id, createCopBrain());
+      if (cops.length === 0) player.chased = true;
+      cops = this.copsOf(sessionId);
+    }
+
+    if (cops.length === 0) {
+      player.chased = false;
+      player.escape = 0;
+      player.bust = 0;
+      if (stars === 0) player.heat = Math.max(0, player.heat - POLICE.heatDecayPerSecond * dt);
+      return;
+    }
+
+    const nearest = Math.min(...cops.map(([, c]) => Math.hypot(c.x - player.x, c.z - player.z)));
+
+    // Perseguição x fuga: longe de todas as viaturas por um tempo = escapou.
+    if (player.chased) {
+      player.heat = Math.min(POLICE.maxHeat, player.heat + POLICE.heatPerSecondChased * dt);
+      player.escape = Math.max(0, player.escape - dt * 0.5);
+      if (nearest > POLICE.sightRadius) player.chased = false;
+    } else {
+      player.escape += dt / (POLICE.escapeSeconds + stars);
+      if (nearest < POLICE.reacquireRadius) player.chased = true;
+    }
+
+    // Autuação: viatura colada e jogador (quase) parado.
+    const pinned = nearest < POLICE.bustRadius && Math.abs(player.speed) < POLICE.bustSpeed;
+    player.bust = pinned ? player.bust + dt / POLICE.bustSeconds : Math.max(0, player.bust - dt);
+
+    if (player.escape >= 1) {
+      const bonus = POLICE.escapeBonusPerStar * Math.max(1, stars);
+      player.calories += bonus;
+      this.endPursuit(sessionId, player, { result: "escaped", calories: bonus });
+    } else if (player.bust >= 1) {
+      const lost = Math.floor(player.calories * POLICE.bustPenalty);
+      player.calories -= lost;
+      player.speed = 0;
+      this.endPursuit(sessionId, player, { result: "busted", calories: lost });
+    }
+  }
+
+  private endPursuit(sessionId: string, player: WorldPlayer, message: PursuitMessage) {
+    player.heat = 0;
+    player.chased = false;
+    player.escape = 0;
+    player.bust = 0;
+    this.removeCops(sessionId);
+    this.syncProfile(sessionId, player);
+    this.clients.getById(sessionId)?.send("pursuit", message);
   }
 
   private eat(sessionId: string, player: WorldPlayer) {
@@ -202,8 +350,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const info = FOOD[stand.kind as FoodKind];
       player.calories += info.calories;
       player.boost = Math.max(player.boost, info.boostSeconds);
-      const profile = this.profiles.get(sessionId);
-      if (profile) profile.calories = player.calories;
+      this.syncProfile(sessionId, player);
+      // Comer na rua chama a atenção da Vigilância Sanitária.
+      player.heat = Math.min(POLICE.maxHeat, player.heat + POLICE.heatPerStand);
       stand.active = false;
       this.respawnAt.set(stand, this.time + STAND_RESPAWN_SECONDS);
     }
