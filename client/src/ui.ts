@@ -49,6 +49,12 @@ export const ui = {
   markerDifficulty: $<HTMLSelectElement>("marker-difficulty"),
   startRace: $<HTMLButtonElement>("start-race"),
   loading: $("loading"),
+  wanted: $("wanted"),
+  pursuit: $("pursuit"),
+  pursuitLabel: $("pursuit-label"),
+  pursuitFill: $("pursuit-fill"),
+  banner: $("banner"),
+  vignette: $("vignette"),
   // Comum
   dash: $("dash"),
   tacho: $<HTMLCanvasElement>("tacho"),
@@ -88,5 +94,7 @@ export function hideModeUi() {
   for (const el of [
     ui.lobby, ui.hud, ui.countdown, ui.message, ui.results,
     ui.worldHud, ui.leaderboard, ui.markerPanel, ui.speedlines,
+    ui.wanted, ui.pursuit, ui.banner,
   ]) el.hidden = true;
+  ui.vignette.classList.remove("chase");
 }

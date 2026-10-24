@@ -138,6 +138,7 @@ let switching = false;
 function setMode(next: WorldMode | RaceMode | null) {
   mode?.dispose();
   hideModeUi();
+  sound.updateSiren(null);
   mode = next;
   lastSent = "";
   sendInput();
@@ -308,6 +309,10 @@ function publishTestHook() {
     raceId: () => (current instanceof RaceMode ? current.raceId : null),
     phase: () => (current instanceof RaceMode ? current.phase() : "lobby"),
     players: () => current.snapshot(),
+    police: () => (current instanceof WorldMode ? current.policeSnapshot() : null),
+    send: (type: string, message: unknown) => {
+      if (current instanceof WorldMode) current.send(type, message);
+    },
   };
 }
 
@@ -319,6 +324,8 @@ declare global {
       raceId: () => RaceId | null;
       phase: () => Phase;
       players: () => Record<string, PlayerSnapshot>;
+      police: () => { heat: number; chased: boolean; cops: { x: number; z: number; target: string }[] } | null;
+      send: (type: string, message: unknown) => void;
     };
   }
 }

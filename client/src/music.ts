@@ -2,7 +2,7 @@
 // Cada música é uma função chamada a cada semicolcheia (16 passos por compasso)
 // que decide o que tocar naquele instante.
 
-export type SongName = "lobby" | "race";
+export type SongName = "lobby" | "race" | "pursuit";
 
 const midiToFreq = (note: number) => 440 * 2 ** ((note - 69) / 12);
 
@@ -192,7 +192,37 @@ const LOBBY: Song = {
   },
 };
 
-const SONGS: Record<SongName, Song> = { race: RACE, lobby: LOBBY };
+/** Perseguição: drum and bass tenso em Ré menor, com baixo "rasgado" e um alarme de fundo. */
+const PURSUIT: Song = {
+  bpm: 172,
+  step(i, t, s, inst) {
+    const bar = Math.floor(i / 16) % 4;
+    const pos = i % 16;
+    const roots = [38, 38, 34, 36];
+    const root = roots[bar];
+
+    // Quebrada clássica: bumbo no 1 e no "e" do 3, caixa no 2 e no 4.
+    if (pos === 0 || pos === 10) inst.kick(t);
+    if (pos === 4 || pos === 12) inst.snare(t, 0.55);
+    if (pos === 7 && bar % 2 === 1) inst.snare(t, 0.25);
+    inst.hat(t, false, pos % 2 === 0 ? 0.11 : 0.06);
+
+    // Baixo "reese": duas notas quase iguais, desafinadas entre si.
+    if (pos === 0 || pos === 6 || pos === 11) {
+      inst.bass(t, root - 12, s * (pos === 0 ? 5 : 3), 0.38);
+      inst.bass(t, root - 12.15, s * (pos === 0 ? 5 : 3), 0.25);
+    }
+
+    // Alarme: duas notas a meio tom, como uma sirene distante.
+    if (pos === 0 && bar % 2 === 0) {
+      inst.lead(t, root + 36, s * 3, 0.05);
+      inst.lead(t + s * 4, root + 37, s * 3, 0.05);
+    }
+    if (pos === 8) inst.power(t, root + 12, s * 2);
+  },
+};
+
+const SONGS: Record<SongName, Song> = { race: RACE, lobby: LOBBY, pursuit: PURSUIT };
 
 export class Music {
   private instruments: Instruments;

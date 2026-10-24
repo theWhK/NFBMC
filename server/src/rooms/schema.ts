@@ -82,8 +82,27 @@ export const WorldPlayer = schema({
   boost: t.number().default(0),
   /** Calorias acumuladas na sessão (mundo + corridas). */
   calories: t.uint32().default(0),
+  /** Nível de procurado pela Vigilância Sanitária (0 a 5; a parte inteira são as estrelas). */
+  heat: t.number().default(0),
+  /** Alguma viatura está vendo o jogador agora. */
+  chased: t.boolean().default(false),
+  /** Progresso da fuga e da autuação (0 a 1). */
+  escape: t.number().default(0),
+  bust: t.number().default(0),
 });
 export type WorldPlayer = SchemaType<typeof WorldPlayer>;
+
+/** Viatura da Vigilância Sanitária. */
+export const Cop = schema({
+  x: t.number().default(0),
+  z: t.number().default(0),
+  heading: t.number().default(0),
+  speed: t.number().default(0),
+  boost: t.number().default(0),
+  /** Sessão do jogador perseguido. */
+  target: t.string().default(""),
+});
+export type Cop = SchemaType<typeof Cop>;
 
 export const Stand = schema({
   kind: t.string().default("burger"),
@@ -97,6 +116,7 @@ export const WorldState = schema({
   /** Mundo só de um jogador. */
   solo: t.boolean().default(false),
   players: t.map(WorldPlayer),
+  cops: t.map(Cop),
   stands: t.array(Stand),
 });
 export type WorldState = SchemaType<typeof WorldState>;

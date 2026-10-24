@@ -26,6 +26,8 @@ export interface CarView {
   speed: number;
   boost: number;
   visible: boolean;
+  /** Viatura da Vigilância Sanitária. */
+  cop?: boolean;
 }
 
 export interface FoodView {
@@ -238,14 +240,14 @@ export class GameScene {
       }
     }
     for (const [id, car] of cars) {
-      const key = `${car.name}|${car.color}`;
+      const key = `${car.name}|${car.color}|${car.cop ? "cop" : ""}`;
       let entry = this.cars.get(id);
       if (entry && entry.key !== key) {
         this.scene.remove(entry.model.group);
         entry = undefined;
       }
       if (!entry) {
-        const model = makeCar(car.color, car.name);
+        const model = makeCar(car.color, car.name, car.cop);
         model.group.rotation.order = "YXZ";
         entry = { model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false };
         this.scene.add(model.group);
@@ -304,6 +306,12 @@ export class GameScene {
       group.rotation.y = entry.heading;
       group.rotation.z = entry.lean;
       for (const wheel of wheels) wheel.rotation.x += (car.speed * dt) / 0.45;
+      if (entry.model.lights) {
+        // Giroflex: vermelho e azul alternando rápido.
+        const on = Math.floor(this.time * 6) % 2 === 0;
+        entry.model.lights[0].visible = on;
+        entry.model.lights[1].visible = !on;
+      }
       flame.visible = car.boost > 0;
       if (flame.visible) flame.scale.setScalar(0.8 + Math.random() * 0.5);
 
