@@ -722,3 +722,255 @@ button.link {
     opacity: 0;
   }
 }
+
+/* --- Menu principal no estilo Most Wanted (2005) ------------------------ */
+
+.mw-menu {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  /* Escurece o lado esquerdo, onde fica a lista; o carro aparece à direita. */
+  background:
+    linear-gradient(90deg, rgba(10, 8, 6, 0.92) 0%, rgba(10, 8, 6, 0.75) 32%, transparent 62%),
+    linear-gradient(transparent 70%, rgba(10, 8, 6, 0.7));
+}
+
+.mw-menu #logo {
+  position: absolute;
+  top: 40px;
+  left: 36px;
+  width: min(380px, 70vw);
+}
+
+.mw-list {
+  position: absolute;
+  top: 210px;
+  left: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 330px;
+}
+
+.mw-list button,
+.mw-list.sub button {
+  width: 100%;
+  padding: 7px 18px;
+  text-align: left;
+  font: italic 1.45rem var(--hud);
+  letter-spacing: 0.06em;
+  color: rgba(245, 235, 224, 0.7);
+  background: none;
+  box-shadow: none;
+  transform: skewX(-12deg);
+  transition: color 0.1s, background 0.1s, padding 0.1s;
+}
+
+/* Item selecionado: barra inclinada amarela com texto escuro, como no jogo. */
+.mw-list button.selected {
+  color: #16110d;
+  background: linear-gradient(90deg, var(--mustard), #ff9a1f 70%, transparent);
+  padding-left: 28px;
+}
+
+.mw-list button:hover {
+  filter: none;
+  color: #fff;
+}
+
+.mw-list button.selected:hover {
+  color: #16110d;
+}
+
+.mw-screen {
+  position: absolute;
+  top: 210px;
+  left: 400px;
+  width: min(420px, calc(100vw - 440px));
+  padding: 16px 22px;
+  background: rgba(10, 8, 6, 0.82);
+  border-left: 4px solid var(--orange);
+}
+
+.mw-screen.wide {
+  width: min(640px, calc(100vw - 440px));
+}
+
+.mw-list.sub {
+  position: static;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.mw-list.sub button {
+  font-size: 1.15rem;
+}
+
+.mw-hint {
+  position: absolute;
+  left: 36px;
+  bottom: 60px;
+  max-width: 560px;
+  margin: 0;
+  font-size: 0.95rem;
+  color: rgba(245, 235, 224, 0.85);
+  text-shadow: 0 1px 3px #000;
+}
+
+.mw-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 8px 36px;
+  background: #0a0806;
+  border-top: 2px solid rgba(255, 196, 46, 0.6);
+  font-size: 0.85rem;
+}
+
+.mw-footer .pilot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--mustard);
+}
+
+.mw-footer input {
+  display: inline-block;
+  width: 190px;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 1rem;
+}
+
+.mw-footer .kcal {
+  font-family: var(--hud);
+  color: var(--mustard);
+}
+
+.mw-footer .keys {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
+/* Fichas dos rivais (a "Blacklist"). */
+.rivals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
+.rival {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 0 8px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 3px solid var(--ketchup);
+}
+
+.rival .rank {
+  grid-row: span 3;
+  font: italic 1.6rem var(--hud);
+  color: var(--mustard);
+}
+
+.rival strong {
+  font-size: 0.95rem;
+}
+
+.rival .title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+
+.rival .quote {
+  font-size: 0.75rem;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.mw-screen .hall {
+  width: 100%;
+  padding: 8px 0 0;
+  background: none;
+  border: 0;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.swatches button {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 6px;
+  border: 3px solid transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.swatches button.selected {
+  border-color: #fff;
+  outline: 3px solid var(--orange);
+}
+
+.specs {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.specs dt {
+  color: var(--mustard);
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.specs dd {
+  margin: 0;
+}
+
+/* Tela estreita (celular): lista em cima, telas embaixo, sem posições fixas. */
+@media (max-width: 760px) {
+  .mw-menu #logo,
+  .mw-list,
+  .mw-screen,
+  .mw-hint {
+    position: static;
+    width: auto;
+    margin: 12px 16px;
+  }
+
+  .mw-menu {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 60px;
+    background: rgba(10, 8, 6, 0.8);
+  }
+
+  .mw-footer .keys {
+    display: none;
+  }
+}
+
+/* No menu a barra de status do topo não tem o que mostrar. */
+body:has(#join:not([hidden])) #topbar {
+  display: none;
+}

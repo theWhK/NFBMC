@@ -7,7 +7,6 @@ import {
   MARKER_RADIUS,
   MAX_PLAYERS,
   NAME_MAX_LENGTH,
-  PLAYER_COLORS,
   POLICE,
   ROOM_NAME,
   TRAFFIC_KINDS,
@@ -20,6 +19,7 @@ import {
   isRaceId,
   raceMarker,
   stepCar,
+  pickColor,
   type Difficulty,
   type DriveInput,
   type EventRaceOptions,
@@ -140,7 +140,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     player.name = name;
     player.calories = profile.calories;
     const usedColors = new Set([...this.state.players.values()].map((p) => p.color));
-    player.color = PLAYER_COLORS.find((c) => !usedColors.has(c)) ?? PLAYER_COLORS[this.joinCount % PLAYER_COLORS.length];
+    player.color = pickColor(options?.color, usedColors, this.joinCount);
 
     if (isRaceId(options?.spawn)) {
       // Voltando de uma corrida: aparece no ponto de encontro dela, um pouco ao lado.

@@ -19,28 +19,75 @@
       <button id="toggle-sfx" class="icon" title="Efeitos sonoros">🔊</button>
     </div>
 
-    <form id="join" class="menu">
+    <div id="join" class="mw-menu">
       <div id="logo"></div>
-      <p class="tagline">Rode por Porto Gordo, coma tudo e dispute corridas. Ganha quem tiver <strong>mais calorias</strong>.</p>
-      <label>
-        Seu apelido de piloto
-        <input id="name" data-testid="name-input" maxlength="16" autocomplete="off" placeholder="ex.: Rei do X-Tudo" />
-      </label>
-      <div class="modes">
-        <button type="submit" id="world" data-testid="world-button">Porto Gordo com a galera</button>
-        <button type="button" id="world-solo" data-testid="world-solo-button">Porto Gordo sozinho</button>
-      </div>
-      <div class="quick">
-        Corrida rápida no autódromo:
-        <button type="button" id="quick" class="link" data-testid="join-button">com a galera</button> ·
-        <button type="button" id="solo" class="link" data-testid="solo-button">sozinho contra bots</button>
-      </div>
-      <p class="hint">↑/W acelera · ↓/S freia · ←→/AD vira · M liga/desliga a música</p>
-      <div id="hall" class="hall" data-testid="hall" hidden>
-        <p class="stamp small">Lista Gorda · todos os tempos</p>
-        <ol id="hall-list"></ol>
-      </div>
-    </form>
+
+      <!-- Lista principal, à esquerda (como no menu do Most Wanted de 2005). -->
+      <nav id="menu-list" class="mw-list" aria-label="Menu principal">
+        <button type="button" id="world" data-testid="world-button" data-hint="Rode por Porto Gordo com a galera, coma tudo e dispute corridas nos pontos de encontro.">Porto Gordo</button>
+        <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="A cidade inteira só para você (e para a Vigilância Sanitária).">Modo solo</button>
+        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida no autódromo, sem passar pela cidade.">Corrida rápida</button>
+        <button type="button" data-screen="lista" data-testid="lista-menu" data-hint="Os rivais mais calóricos de Porto Gordo e o placar de todos os tempos.">Lista Gorda</button>
+        <button type="button" data-screen="garage" data-testid="garage-menu" data-hint="Escolha a cor do seu carrinho de lanche.">Garagem</button>
+        <button type="button" data-screen="options" data-testid="options-menu" data-hint="Som, música e seu apelido de piloto.">Opções</button>
+        <button type="button" data-screen="credits" data-hint="Quem fez esta bagunça.">Créditos</button>
+      </nav>
+
+      <!-- Telas que abrem ao lado da lista. -->
+      <section class="mw-screen" data-screen-id="quick" hidden>
+        <h2>Corrida rápida</h2>
+        <p class="hint">No Autódromo do Colesterol, 3 voltas.</p>
+        <div class="mw-list sub">
+          <button type="button" id="quick" data-testid="join-button">Com a galera</button>
+          <button type="button" id="solo" data-testid="solo-button">Sozinho contra bots</button>
+        </div>
+      </section>
+
+      <section class="mw-screen wide" data-screen-id="lista" hidden>
+        <h2>Lista Gorda</h2>
+        <div class="rivals" id="rivals"></div>
+        <div id="hall" class="hall" data-testid="hall" hidden>
+          <p class="stamp small">Pilotos · todos os tempos</p>
+          <ol id="hall-list"></ol>
+        </div>
+      </section>
+
+      <section class="mw-screen" data-screen-id="garage" hidden>
+        <h2>Garagem</h2>
+        <p class="hint">Se outro piloto na sala já estiver com a cor, você fica com outra.</p>
+        <div class="swatches" id="swatches" data-testid="swatches"></div>
+        <dl class="specs">
+          <dt>Modelo</dt><dd>Carrinho de lanche GT</dd>
+          <dt>Motor</dt><dd>1.0 movido a banha</dd>
+          <dt>Teto</dt><dd>X-Burguer original</dd>
+        </dl>
+      </section>
+
+      <section class="mw-screen" data-screen-id="options" hidden>
+        <h2>Opções</h2>
+        <div class="mw-list sub">
+          <button type="button" id="opt-music" data-testid="opt-music">Música: ligada</button>
+          <button type="button" id="opt-sfx" data-testid="opt-sfx">Efeitos: ligados</button>
+        </div>
+        <p class="hint">↑/W acelera · ↓/S freia · ←→/AD vira · Enter dispara corrida no ponto · M liga/desliga a música</p>
+      </section>
+
+      <section class="mw-screen" data-screen-id="credits" hidden>
+        <h2>Créditos</h2>
+        <p>Feito para a galera do Will, com muito colesterol.</p>
+        <p class="hint">Paródia carinhosa de Need for Speed: Most Wanted (2005). Músicas e sons gerados no próprio jogo. Fontes Russo One e Black Ops One (OFL).</p>
+      </section>
+
+      <p class="mw-hint" id="menu-hint"></p>
+
+      <footer class="mw-footer">
+        <label class="pilot">Piloto
+          <input id="name" data-testid="name-input" maxlength="16" autocomplete="off" placeholder="seu apelido" />
+        </label>
+        <span id="profile-kcal" class="kcal"></span>
+        <span class="keys">↑↓ navegar · Enter selecionar · Esc voltar</span>
+      </footer>
+    </div>
 
     <div id="lobby" class="panel side" hidden>
       <h2 id="lobby-title">Lobby</h2>

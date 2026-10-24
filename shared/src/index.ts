@@ -96,7 +96,36 @@ export interface InputMessage {
 
 export interface JoinOptions {
   name?: string;
+  /** Cor preferida do carrinho (escolhida na Garagem); vale se ninguém na sala estiver com ela. */
+  color?: string;
 }
+
+/** Escolhe a cor do jogador: a preferida, se estiver livre; senão, a primeira livre. */
+export function pickColor(preferred: unknown, used: Set<string>, fallbackIndex = 0) {
+  if (typeof preferred === "string" && (PLAYER_COLORS as readonly string[]).includes(preferred) && !used.has(preferred)) {
+    return preferred;
+  }
+  return PLAYER_COLORS.find((c) => !used.has(c)) ?? PLAYER_COLORS[fallbackIndex % PLAYER_COLORS.length];
+}
+
+/**
+ * Os rivais da Lista Gorda (os bots), em ordem de "perigo", com o apelido e a
+ * frase que aparecem no menu. Paródia da Blacklist, versão lanchonete.
+ */
+export const RIVALS = [
+  { name: "Razor Bacon", title: "O mais procurado", quote: "Eu não freio. Eu frito." },
+  { name: "Bull Bauru", title: "Rei da avenida", quote: "Pão francês, rosbife e zero paciência." },
+  { name: "Kaze Coxinha", title: "Mestre do drift", quote: "Crocante por fora, cantando pneu por dentro." },
+  { name: "Ronnie Rocambole", title: "Enrola todo mundo", quote: "Te vejo no retrovisor... de novo." },
+  { name: "Ming Miojo", title: "Pronto em 3 minutos", quote: "Cheguei antes da água ferver." },
+  { name: "Earl Esfiha", title: "Aberta ou fechada?", quote: "Na curva eu sou fechada." },
+  { name: "Baron Brigadeiro", title: "Doce e perigoso", quote: "Granulado na pista, adversário no muro." },
+  { name: "JV Pastel", title: "Vento de feira", quote: "Quanto mais vento, mais rápido." },
+  { name: "Izzy Iogurte", title: "Light, mas nem tanto", quote: "Zero lactose, zero piedade." },
+  { name: "Vic Virado", title: "Virado à paulista", quote: "Tutu, couve e ultrapassagem." },
+  { name: "Taz Torresmo", title: "Pururuca total", quote: "Estalou? Passei." },
+  { name: "Big Lanche", title: "O tanque", quote: "Não desvio. Os outros desviam de mim." },
+] as const;
 
 export interface CreateOptions extends JoinOptions {
   /** Corrida sozinho contra bots, numa sala privada. */

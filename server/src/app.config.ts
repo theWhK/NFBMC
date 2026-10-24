@@ -6,7 +6,7 @@ import { ROOM_NAME, WORLD_ROOM_NAME } from "@nfbmc/shared";
 import { RaceRoom } from "./rooms/RaceRoom.ts";
 import { WorldRoom } from "./rooms/WorldRoom.ts";
 import { checkDatabase } from "./db.ts";
-import { listaGorda } from "./profiles.ts";
+import { listaGorda, peekProfile } from "./profiles.ts";
 
 // Build do Vite (client/dist). Em produção o próprio servidor entrega o cliente,
 // então o jogo inteiro sai por uma porta só (a que o Cloudflare Tunnel aponta).
@@ -38,6 +38,19 @@ const server = defineServer({
       } catch (err) {
         console.error("lista-gorda: falha no banco", err);
         res.status(503).json([]);
+      }
+    });
+
+    // Ficha de um jogador (o menu mostra as calorias dele no rodapé).
+    app.get("/api/ficha/:token", async (req, res) => {
+      res.set("Access-Control-Allow-Origin", "*");
+      try {
+        const profile = await peekProfile(req.params.token);
+        if (profile) res.json(profile);
+        else res.status(404).json(null);
+      } catch (err) {
+        console.error("ficha: falha no banco", err);
+        res.status(503).json(null);
       }
     });
 

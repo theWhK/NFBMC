@@ -4,6 +4,7 @@
 // jogador: a saída é um DriveInput, e a física é a mesma de todo mundo.
 import {
   CAR,
+  RIVALS,
   nearestSample,
   pointOnTrack,
   type CarState,
@@ -12,21 +13,8 @@ import {
   type Track,
 } from "@nfbmc/shared";
 
-/** Paródia da Blacklist: os 15 mais procurados, versão lanchonete. */
-export const BOT_NAMES = [
-  "Razor Bacon",
-  "Big Lanche",
-  "Kaze Coxinha",
-  "Ronnie Rocambole",
-  "Ming Miojo",
-  "Earl Esfiha",
-  "Baron Brigadeiro",
-  "JV Pastel",
-  "Izzy Iogurte",
-  "Vic Virado",
-  "Taz Torresmo",
-  "Bull Bauru",
-];
+/** Nomes dos bots: os rivais da Lista Gorda (lista no shared, que o menu também mostra). */
+export const BOT_NAMES = RIVALS.map((r) => r.name);
 
 /**
  * Por dificuldade: quanto da velocidade máxima o bot usa e quanto ele vai atrás

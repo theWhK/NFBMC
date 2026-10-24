@@ -14,6 +14,8 @@ async function join(browser: Browser, name: string, mode: "multiplayer" | "solo"
   const page = await context.newPage();
   await page.goto("/");
   await page.getByTestId("name-input").fill(name);
+  // A corrida rápida fica numa tela do menu principal.
+  await page.getByTestId("quick-menu").click();
   await page.getByTestId(mode === "solo" ? "solo-button" : "join-button").click();
   await expect(page.getByTestId("status")).toHaveText(/^Conectado/);
   return page;
