@@ -21,6 +21,29 @@ export type BodyStyle =
   | "fusca" | "uno" | "gol" | "sedan" | "hatch" | "opala" | "muscle"
   | "supra" | "skyline" | "porsche" | "wedge" | "ferrari" | "veyron" | "hyper" | "a3" | "m3";
 
+/** Comprimento e largura (m) de cada carroceria: o desenho e a colisão usam os mesmos. */
+export const BODY_SIZE: Record<BodyStyle, { length: number; width: number }> = {
+  fusca: { length: 4.05, width: 1.55 },
+  uno: { length: 3.65, width: 1.55 },
+  gol: { length: 3.8, width: 1.6 },
+  sedan: { length: 4.5, width: 1.75 },
+  hatch: { length: 4.2, width: 1.78 },
+  opala: { length: 4.8, width: 1.8 },
+  muscle: { length: 4.8, width: 1.9 },
+  supra: { length: 4.5, width: 1.81 },
+  skyline: { length: 4.6, width: 1.79 },
+  porsche: { length: 4.45, width: 1.85 },
+  wedge: { length: 4.6, width: 2.0 },
+  ferrari: { length: 4.7, width: 2.0 },
+  veyron: { length: 4.46, width: 2.0 },
+  hyper: { length: 4.3, width: 2.0 },
+  m3: { length: 4.5, width: 1.86 },
+  a3: { length: 4.2, width: 1.76 },
+};
+
+/** Medidas dos carros do trânsito (o desenho deles fica no cliente). */
+export const TRAFFIC_SIZE = { length: 4.3, width: 2.0 };
+
 export interface CarSpec {
   id: string;
   /** Nome no jogo (a paródia). */
@@ -177,3 +200,9 @@ export const isCarId = (value: unknown): value is string =>
   typeof value === "string" && PLAYER_CARS.includes(value);
 
 export const carSpec = (id: unknown): CarSpec => CARS[typeof id === "string" && id in CARS ? id : DEFAULT_CAR];
+
+/** Meio comprimento e meia largura de um carro da garagem (para colisão). */
+export function carHalfSize(id: unknown) {
+  const size = BODY_SIZE[carSpec(id).body];
+  return { halfLength: size.length / 2, halfWidth: size.width / 2 };
+}

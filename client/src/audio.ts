@@ -251,6 +251,34 @@ export class Sound {
     this.siren.osc.frequency.setTargetAtTime(650 + 450 * (0.5 + 0.5 * Math.sin((t * Math.PI * 2) / 1.4)), t, 0.02);
   }
 
+  /**
+   * Buzina: duas notas juntas (o "fom" de buzina de carro). `volume` de 0 a 1
+   * (a dos outros fica mais baixa com a distância) e `pan` de -1 a 1.
+   */
+  horn(volume = 1, pan = 0) {
+    if (!this.ctx || volume <= 0) return;
+    const t = this.ctx.currentTime;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.16 * volume, t + 0.02);
+    gain.gain.setValueAtTime(0.16 * volume, t + 0.32);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    const panner = this.ctx.createStereoPanner();
+    panner.pan.value = pan;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 1800;
+    filter.connect(gain).connect(panner).connect(this.sfxBus);
+    for (const freq of [415, 523]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = "square";
+      osc.frequency.value = freq;
+      osc.connect(filter);
+      osc.start(t);
+      osc.stop(t + 0.42);
+    }
+  }
+
   /** Escapou da Vigilância: fanfarra curta. */
   escaped() {
     [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, "square", 0.15, i * 0.1));

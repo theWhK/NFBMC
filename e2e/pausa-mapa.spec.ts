@@ -30,6 +30,16 @@ test("pausa e mapa: Esc pausa e solta o carro, Tab abre o mapa, e dá para volta
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("fullmap")).toBeHidden();
 
+  // Teclas: M abre e fecha o mapa, F1 mostra os comandos.
+  await page.keyboard.press("KeyM");
+  await expect(page.getByTestId("fullmap")).toBeVisible();
+  await page.keyboard.press("KeyM");
+  await expect(page.getByTestId("fullmap")).toBeHidden();
+  await page.keyboard.press("F1");
+  await expect(page.getByTestId("help")).toContainText("Freio de mão");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("help")).toBeHidden();
+
   // Voltar ao menu principal.
   await page.getByTestId("to-menu").click();
   await page.getByTestId("pause-quit").click();

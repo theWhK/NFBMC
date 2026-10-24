@@ -2099,3 +2099,71 @@ body.touch .panel.side {
   color: #16110d;
   background: linear-gradient(90deg, var(--mustard), #ff9a1f 70%, transparent);
 }
+
+/* --- Lista de comandos e botões extras do toque -------------------------- */
+
+.help {
+  z-index: 37;
+  text-align: left;
+}
+
+.help table {
+  border-collapse: collapse;
+  margin: 6px 0 12px;
+}
+
+.help td {
+  padding: 3px 10px 3px 0;
+  font-size: 0.9rem;
+}
+
+.help td:first-child {
+  white-space: nowrap;
+  text-align: right;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 1px 6px;
+  margin: 1px;
+  font: 0.8rem var(--hud);
+  text-align: center;
+  color: #16110d;
+  background: #f5ebe0;
+  border-radius: 4px;
+  box-shadow: 0 2px 0 #8a7f72;
+}
+
+.help button {
+  width: auto;
+  padding: 8px 24px;
+}
+
+.touch-extra {
+  position: absolute;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: calc(max(14px, env(safe-area-inset-bottom)) + 104px);
+  display: flex;
+  gap: 8px;
+}
+
+#touch .touch-extra button {
+  width: 48px;
+  height: 44px;
+  font-size: 1.3rem;
+}
+
+#touch .handbrake {
+  width: 70px;
+  height: 56px;
+  font-size: 0.65rem;
+  line-height: 1.1;
+}
+
+@media (max-height: 520px) {
+  .help td {
+    font-size: 0.75rem;
+    padding: 1px 8px 1px 0;
+  }
+}

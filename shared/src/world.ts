@@ -12,7 +12,7 @@ import {
   type DistrictId,
   type RoadKind,
 } from "./map.ts";
-import { CAR, type CarState } from "./physics.ts";
+import { CAR, type CarMotion, type CarState } from "./physics.ts";
 import { buildTrack, nearestSample, splinePath, type Track } from "./track.ts";
 
 export { DISTRICTS, LAKE, QUAY_Z, type DistrictId } from "./map.ts";
@@ -420,19 +420,16 @@ export function insideBuilding(x: number, z: number) {
 
 // --- Colisão -----------------------------------------------------------------
 
-/**
- * Empurra o carro para fora de prédios, árvores, do lago e dos limites do mapa.
- * Retorna true se bateu. A batida tira boa parte da velocidade.
- */
-export function collideWorld(car: CarState): boolean {
-  let hit = false;
-  const r = CAR.radius;
-  for (const b of nearbyBuildings(car.x, car.z)) {
-    // Leva o carro para o "espaço" da caixa (sem giro), resolve como retângulo e volta.
+/** Quanto um círculo (cx, cz, raio r) precisa andar para sair de prédios e árvores; null se está livre. */
+function circlePush(cx: number, cz: number, r: number): [number, number] | null {
+  let px = 0;
+  let pz = 0;
+  for (const b of nearbyBuildings(cx, cz)) {
+    // Leva o círculo para o "espaço" da caixa (sem giro), resolve como retângulo e volta.
     const cos = Math.cos(b.angle);
     const sin = Math.sin(b.angle);
-    const dx = car.x - b.x;
-    const dz = car.z - b.z;
+    const dx = cx + px - b.x;
+    const dz = cz + pz - b.z;
     const lw = dx * cos - dz * sin;
     const ld = dx * sin + dz * cos;
     const hw = b.w / 2;
@@ -440,42 +437,71 @@ export function collideWorld(car: CarState): boolean {
     if (Math.abs(lw) > hw + r || Math.abs(ld) > hd + r) continue;
     const cw = Math.max(-hw, Math.min(lw, hw));
     const cd = Math.max(-hd, Math.min(ld, hd));
-    const ow = lw - cw;
-    const od = ld - cd;
-    const dist = Math.hypot(ow, od);
+    const dist = Math.hypot(lw - cw, ld - cd);
     if (dist >= r) continue;
     let nw: number;
     let nd: number;
     if (dist === 0) {
-      // Centro do carro dentro da caixa: sai pelo lado mais próximo.
+      // Centro dentro da caixa: sai pelo lado mais próximo.
       const exits = [hw - lw, lw + hw, hd - ld, ld + hd];
       const k = exits.indexOf(Math.min(...exits));
       nw = k === 0 ? hw + r : k === 1 ? -hw - r : lw;
       nd = k === 2 ? hd + r : k === 3 ? -hd - r : ld;
     } else {
-      nw = cw + (ow / dist) * r;
-      nd = cd + (od / dist) * r;
+      nw = cw + ((lw - cw) / dist) * r;
+      nd = cd + ((ld - cd) / dist) * r;
     }
-    car.x = b.x + nw * cos + nd * sin;
-    car.z = b.z - nw * sin + nd * cos;
-    car.speed *= 0.35;
-    hit = true;
+    px = b.x + nw * cos + nd * sin - cx;
+    pz = b.z - nw * sin + nd * cos - cz;
   }
-
   for (let i = -1; i <= 1; i++) {
     for (let j = -1; j <= 1; j++) {
-      for (const tree of treeGrid.get(cellKey(car.x + i * CELL, car.z + j * CELL)) ?? []) {
-        const dx = car.x - tree.x;
-        const dz = car.z - tree.z;
+      for (const tree of treeGrid.get(cellKey(cx + i * CELL, cz + j * CELL)) ?? []) {
+        const dx = cx + px - tree.x;
+        const dz = cz + pz - tree.z;
         const dist = Math.hypot(dx, dz);
         const min = r + 0.7 * tree.size;
         if (dist >= min || dist === 0) continue;
-        car.x = tree.x + (dx / dist) * min;
-        car.z = tree.z + (dz / dist) * min;
-        car.speed *= 0.4;
-        hit = true;
+        px += (dx / dist) * (min - dist);
+        pz += (dz / dist) * (min - dist);
       }
     }
+  }
+  return px || pz ? [px, pz] : null;
+}
+
+/**
+ * Empurra o carro para fora de prédios, árvores, do lago e dos limites do mapa.
+ * O carro é uma cápsula (três círculos ao longo do comprimento, da largura
+ * dele): o bico não atravessa a parede e a lateral não para longe dela.
+ * Batendo de frente o carro para; de raspão, escorrega pela parede.
+ * Retorna true se bateu.
+ */
+export function collideWorld(car: CarState, halfLength: number = CAR.halfLength, halfWidth: number = CAR.halfWidth, motion?: CarMotion): boolean {
+  let hit = false;
+  const fx = Math.sin(car.heading);
+  const fz = Math.cos(car.heading);
+  const reach = Math.max(0, halfLength - halfWidth);
+  for (const offset of [reach, 0, -reach]) {
+    const push = circlePush(car.x + fx * offset, car.z + fz * offset, halfWidth);
+    if (!push) continue;
+    car.x += push[0];
+    car.z += push[1];
+    const len = Math.hypot(push[0], push[1]);
+    const nx = push[0] / len;
+    const nz = push[1] / len;
+    // Perde velocidade conforme o quanto bateu de frente (0 = raspão, 1 = de frente).
+    const headOn = Math.abs(fx * nx + fz * nz);
+    car.speed *= 1 - 0.7 * headOn;
+    if (motion) {
+      // O empurrão lateral não continua para dentro da parede.
+      const into = motion.vx * nx + motion.vz * nz;
+      if (into < 0) {
+        motion.vx -= nx * into;
+        motion.vz -= nz * into;
+      }
+    }
+    hit = true;
   }
 
   if (insideLake(car.x, car.z)) {

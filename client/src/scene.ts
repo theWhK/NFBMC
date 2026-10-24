@@ -163,6 +163,14 @@ function chooseQuality(renderer: THREE.WebGLRenderer): Quality {
   return window.matchMedia?.("(pointer: coarse)").matches ? "medio" : "alto";
 }
 
+/** Câmeras de perseguição: distância atrás (negativa = na frente do centro, no capô), alturas e se o carro aparece. */
+const CAMERAS = [
+  { name: "Perseguição", back: 11, height: 5.5, ahead: 6, lookHeight: 1.5, showCar: true },
+  { name: "Longe", back: 17, height: 8, ahead: 8, lookHeight: 1.5, showCar: true },
+  { name: "Baixa", back: 7, height: 2.3, ahead: 10, lookHeight: 1.2, showCar: true },
+  { name: "Capô", back: -0.7, height: 1.2, ahead: 25, lookHeight: 1.0, showCar: false },
+];
+
 /** Navegador desenhando o 3D na CPU (sem placa de vídeo): começa em resolução baixa. */
 function isSoftwareRenderer(renderer: THREE.WebGLRenderer) {
   const gl = renderer.getContext();
@@ -186,6 +194,8 @@ export class GameScene {
   private sunDirection = SUN_DIRECTION;
   /** Carro de vitrine do menu (girando na reta do autódromo). */
   private showcase: { model: CarModel; key: string } | null = null;
+  /** Câmera atual (C troca): atrás, longe, baixa ou no capô. */
+  private cameraMode = 0;
   private cars = new Map<string, CarEntry>();
   private foods: THREE.Group[] = [];
   private foodActive: boolean[] = [];
@@ -223,6 +233,11 @@ export class GameScene {
     if (this.quality !== "baixo") this.ink = new InkPass(this.renderer);
     if (this.quality === "alto") this.enableShadows();
 
+    try {
+      this.cameraMode = Math.min(CAMERAS.length - 1, Number(localStorage.getItem("nfbmc:camera")) || 0);
+    } catch {
+      // Sem localStorage: começa na câmera padrão.
+    }
     this.camera.position.set(0, 60, -160);
     this.resize();
     window.addEventListener("resize", () => this.resize());
@@ -299,6 +314,17 @@ export class GameScene {
     // Troca de sala: os carros da sala anterior somem.
     for (const entry of this.cars.values()) this.scene.remove(entry.model.group);
     this.cars.clear();
+  }
+
+  /** Troca a câmera (atrás → longe → baixa → capô) e devolve o nome dela. */
+  cycleCamera() {
+    this.cameraMode = (this.cameraMode + 1) % CAMERAS.length;
+    try {
+      localStorage.setItem("nfbmc:camera", String(this.cameraMode));
+    } catch {
+      // Sem localStorage: vale só nesta aba.
+    }
+    return CAMERAS[this.cameraMode].name;
   }
 
   /** Mostra (ou tira, com null) o carro na vitrine do menu, na cor escolhida. */
@@ -459,9 +485,13 @@ export class GameScene {
     if (followed && followedCar) {
       const forwardX = Math.sin(followed.heading);
       const forwardZ = Math.cos(followed.heading);
-      const desired = new THREE.Vector3(followed.x - forwardX * 11, 5.5, followed.z - forwardZ * 11);
-      this.camera.position.lerp(desired, 1 - Math.exp(-6 * dt));
-      this.cameraTarget.set(followed.x + forwardX * 6, 1.5, followed.z + forwardZ * 6);
+      const view = CAMERAS[this.cameraMode];
+      const desired = new THREE.Vector3(followed.x - forwardX * view.back, view.height, followed.z - forwardZ * view.back);
+      // No capô a câmera vai presa ao carro; nas outras, ela vem atrás com um pouco de atraso.
+      if (view.back < 0) this.camera.position.copy(desired);
+      else this.camera.position.lerp(desired, 1 - Math.exp(-6 * dt));
+      this.cameraTarget.set(followed.x + forwardX * view.ahead, view.lookHeight, followed.z + forwardZ * view.ahead);
+      followed.model.group.visible = view.showCar && followedCar.visible;
       // Com turbo a lente abre e a câmera treme, para dar sensação de velocidade.
       const boosting = followedCar.boost > 0;
       const fov = boosting ? 84 : 70 + Math.min(8, Math.abs(followedCar.speed) / 6);
