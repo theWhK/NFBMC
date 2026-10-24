@@ -28,7 +28,7 @@ import {
   type WorldJoinOptions,
 } from "@nfbmc/shared";
 
-import { getProfile, type Profile } from "../profiles.ts";
+import { loadProfile, setCalories, type Profile } from "../profiles.ts";
 import { copInput, createCopBrain, spawnPoint, type CopBrain } from "./cops.ts";
 import { Cop, Stand, WorldPlayer, WorldState } from "./schema.ts";
 
@@ -93,6 +93,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         const player = this.state.players.get(client.sessionId);
         if (player && typeof message?.heat === "number") player.heat = Math.min(POLICE.maxHeat, Math.max(0, message.heat));
       },
+      debugCalories: (client: Client, message: { calories?: unknown }) => {
+        const player = this.state.players.get(client.sessionId);
+        if (!player || typeof message?.calories !== "number") return;
+        player.calories = Math.max(0, Math.round(message.calories));
+        this.syncProfile(client.sessionId, player);
+      },
     }),
   };
 
@@ -112,12 +118,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.setSimulationInterval((deltaMs) => this.update(Math.min(deltaMs, 100) / 1000));
   }
 
-  onJoin(client: Client, options?: WorldJoinOptions) {
+  async onJoin(client: Client, options?: WorldJoinOptions) {
     this.joinCount++;
     const name = sanitizeName(options?.name, `Jogador ${this.joinCount}`);
-    const profile = getProfile(options?.token, name);
+    const profile = await loadProfile(options?.token, name);
     this.profiles.set(client.sessionId, profile);
-    client.send("profile", { token: profile.token });
+    client.send("profile", { token: profile.token, races: profile.races, wins: profile.wins, bestRace: profile.bestRace });
 
     const player = new WorldPlayer();
     player.name = name;
@@ -236,7 +242,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
 
   private syncProfile(sessionId: string, player: WorldPlayer) {
     const profile = this.profiles.get(sessionId);
-    if (profile) profile.calories = player.calories;
+    if (profile) setCalories(profile, player.calories);
   }
 
   // --- Vigilância Sanitária --------------------------------------------------

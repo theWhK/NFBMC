@@ -12,6 +12,26 @@ const endpoint = import.meta.env.DEV
 
 const client = new ColyseusSDK<typeof server>(endpoint);
 
+/** Endereço da API HTTP do servidor (em dev, a porta 2567; em produção, a mesma origem). */
+const apiBase = import.meta.env.DEV ? `${location.protocol}//${location.hostname}:2567` : "";
+
+export interface ListaGordaEntry {
+  name: string;
+  calories: number;
+  races: number;
+  wins: number;
+}
+
+/** Lista Gorda de todos os tempos (fica vazia se o servidor não responder). */
+export async function fetchListaGorda(): Promise<ListaGordaEntry[]> {
+  try {
+    const response = await fetch(`${apiBase}/api/lista-gorda`);
+    return response.ok ? await response.json() : [];
+  } catch {
+    return [];
+  }
+}
+
 const joinPublicRace = (options: WorldJoinOptions) => client.joinOrCreate(ROOM_NAME, options);
 const joinPublicWorld = (options: WorldJoinOptions) => client.joinOrCreate(WORLD_ROOM_NAME, options);
 export type RaceRoom = Awaited<ReturnType<typeof joinPublicRace>>;

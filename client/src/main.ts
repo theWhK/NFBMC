@@ -7,10 +7,10 @@ import { Sound } from "./audio.ts";
 import { createMinimap, createTacho } from "./hud.ts";
 import { LOGO_SVG } from "./logo.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
-import { joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
+import { fetchListaGorda, joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
 import { RaceMode } from "./race-mode.ts";
 import { GameScene } from "./scene.ts";
-import { $, hideModeUi, ui } from "./ui.ts";
+import { $, escapeHtml, hideModeUi, kcal, setHtml, ui } from "./ui.ts";
 import { WorldMode } from "./world-mode.ts";
 
 ui.logo.innerHTML = LOGO_SVG;
@@ -124,14 +124,11 @@ const ctx: ModeContext = {
 
 let mode: WorldMode | RaceMode | null = null;
 let playerName = "";
-/** Ficha da sessão no servidor: guarda as calorias entre o mundo e as corridas. */
-let token = (() => {
-  try {
-    return sessionStorage.getItem("nfbmc:token") ?? undefined;
-  } catch {
-    return undefined;
-  }
-})();
+/**
+ * Ficha do jogador no servidor (calorias, corridas, vitórias). Fica guardada
+ * neste navegador, então quem volta outro dia continua de onde parou.
+ */
+let token = storage.get("nfbmc:token") || undefined;
 let soloWorld = false;
 let switching = false;
 
@@ -157,11 +154,7 @@ async function enterWorld(spawn?: RaceId) {
   });
   setMode(new WorldMode(room, ctx, goRace, (newToken) => {
     token = newToken;
-    try {
-      sessionStorage.setItem("nfbmc:token", newToken);
-    } catch {
-      // Sem sessionStorage: a ficha vale só enquanto a aba estiver aberta.
-    }
+    storage.set("nfbmc:token", newToken);
   }));
 }
 
@@ -286,6 +279,15 @@ function enter(entry: Entry) {
     buttons.forEach((b) => (b.disabled = false));
   });
 }
+
+// Lista Gorda de todos os tempos, no menu.
+fetchListaGorda().then((entries) => {
+  if (!entries.length) return;
+  setHtml(ui.hallList, entries
+    .map((e) => `<li>${escapeHtml(e.name)} <strong>${kcal(e.calories)}</strong></li>`)
+    .join(""));
+  ui.hall.hidden = false;
+});
 
 ui.name.value = storage.get("nfbmc:name");
 ui.name.focus();

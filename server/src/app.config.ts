@@ -6,6 +6,7 @@ import { ROOM_NAME, WORLD_ROOM_NAME } from "@nfbmc/shared";
 import { RaceRoom } from "./rooms/RaceRoom.ts";
 import { WorldRoom } from "./rooms/WorldRoom.ts";
 import { checkDatabase } from "./db.ts";
+import { listaGorda } from "./profiles.ts";
 
 // Build do Vite (client/dist). Em produção o próprio servidor entrega o cliente,
 // então o jogo inteiro sai por uma porta só (a que o Cloudflare Tunnel aponta).
@@ -25,6 +26,18 @@ const server = defineServer({
       } catch (err) {
         console.error("healthz: falha no banco", err);
         res.status(503).json({ status: "error", db: "unreachable" });
+      }
+    });
+
+    // Lista Gorda de todos os tempos (o menu mostra). Liberada para outras origens
+    // porque em dev o cliente roda na porta 5173.
+    app.get("/api/lista-gorda", async (_req, res) => {
+      res.set("Access-Control-Allow-Origin", "*");
+      try {
+        res.json(await listaGorda(10));
+      } catch (err) {
+        console.error("lista-gorda: falha no banco", err);
+        res.status(503).json([]);
       }
     });
 

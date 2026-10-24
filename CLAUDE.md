@@ -34,9 +34,9 @@ deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo a
 - O mundo fica no plano XZ (Y para cima). A pista, a física do carro e as regras (voltas, comida, bônus) ficam em `shared/` para o servidor e o cliente usarem as mesmas contas.
 - Fluxo da sala (`server/src/rooms/RaceRoom.ts`): `lobby` → alguém aperta "Começar" → `countdown` → `racing` → `results` → `lobby`. Quem entra no meio espera a próxima corrida.
 - **Mundo aberto (Porto Gordo)**: a planta da cidade fica em `shared/src/world.ts` (ruas em grade, prédios com colisão, praças, parque do autódromo, corridas e pontos de encontro), gerada com semente fixa para servidor e cliente verem a mesma cidade. Corridas novas entram em `RACES`: o autódromo usa `splinePath`, as de rua usam `streetPath` (retas com esquinas arredondadas).
-- Salas: `world` (`WorldRoom`: todo mundo circula, come nas barraquinhas e dispara corridas nos pontos de encontro) e `race` (`RaceRoom`). Quem dispara uma corrida no mundo leva todos que estão no ponto: o servidor cria uma `RaceRoom` em modo **evento** (`matchMaker.createRoom`), manda `goRace` com o id da sala, ela larga sozinha e no fim manda `backToWorld`. As calorias da sessão ficam numa ficha em memória (`server/src/profiles.ts`), identificada por um token que o cliente guarda no `sessionStorage`.
+- Salas: `world` (`WorldRoom`: todo mundo circula, come nas barraquinhas e dispara corridas nos pontos de encontro) e `race` (`RaceRoom`). Quem dispara uma corrida no mundo leva todos que estão no ponto: o servidor cria uma `RaceRoom` em modo **evento** (`matchMaker.createRoom`), manda `goRace` com o id da sala, ela larga sozinha e no fim manda `backToWorld`. As calorias ficam na ficha do jogador (`server/src/profiles.ts`), identificada por um token que o cliente guarda no `localStorage`.
 - **Vigilância Sanitária** (a "polícia"): regras em `POLICE` (`shared/src/index.ts`), viaturas em `server/src/rooms/cops.ts` (navegam pela grade de cruzamentos e vão direto quando enxergam o alvo) e a lógica de procurado/fuga/autuação no `WorldRoom`. Comer na rua e bater em viatura esquentam; perseguido não dispara corrida.
-- Ganchos de teste no servidor só com `NFBMC_TEST_HOOKS=1` (o Playwright liga; produção nunca): hoje, a mensagem `debugHeat` define o nível de procurado.
+- Ganchos de teste no servidor só com `NFBMC_TEST_HOOKS=1` (o Playwright liga; produção nunca): as mensagens `debugHeat` (nível de procurado) e `debugCalories` (calorias da ficha).
 - Corrida rápida (fora do mundo): **multiplayer** (`joinOrCreate`, a sala pública da galera) e **solo** (`create` com `{ solo: true }`: sala privada de um jogador só, que começa com bots).
 - Cliente: `main.ts` cuida do menu e das trocas de sala; `world-mode.ts` e `race-mode.ts` têm a lógica de cada modo; `net.ts` tem as conexões. `?spawn=<corrida>` na URL faz nascer direto num ponto de encontro (usado nos testes).
 - Bots (`server/src/rooms/bots.ts`) rodam no servidor e "apertam os mesmos botões" que um jogador: a IA devolve um `DriveInput` e a física é a mesma. Eles entram na contagem e saem quando a sala volta ao lobby (ids `bot-N`, `player.bot = true`). A dificuldade muda a velocidade e a gula (comida dá turbo e calorias). Para calibrar a IA, simule fora do jogo com `stepCar` antes de testar na sala.
@@ -52,7 +52,9 @@ deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo a
 | `npm run test:e2e` | builda o cliente, sobe o servidor e roda o Playwright |
 | `npm run build` | build do cliente em `client/dist` |
 
-O banco é opcional: sem `DATABASE_URL`, o servidor roda sem Postgres e o `/healthz` responde `"db":"disabled"`. Com o banco de dev: `DATABASE_URL=postgres://nfbmc:nfbmc@127.0.0.1:5432/nfbmc npm run dev`.
+O banco é opcional: sem `DATABASE_URL`, o servidor roda sem Postgres, o `/healthz` responde `"db":"disabled"` e as fichas dos jogadores ficam só em memória.
+
+O esquema é criado pelo próprio servidor ao iniciar (`ensureSchema` em `server/src/db.ts`, idempotente). Hoje há uma tabela, `players` (ficha por token: calorias, corridas, vitórias, melhor corrida), gravada em lote a cada 5 s por `server/src/profiles.ts`. Mudanças de esquema entram como comandos novos no `ensureSchema`, sem apagar dados. `GET /api/lista-gorda` devolve o top 10 de todos os tempos. Com o banco de dev: `DATABASE_URL=postgres://nfbmc:nfbmc@127.0.0.1:5432/nfbmc npm run dev`.
 
 ## Preview na nfbmc-dev
 
