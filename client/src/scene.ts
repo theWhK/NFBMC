@@ -2,7 +2,9 @@
 import * as THREE from "three";
 import { TRACK, nearestSample, type FoodKind } from "@nfbmc/shared";
 
-import { makeBurger, makeCar, makeFood, type CarModel } from "./models.ts";
+import { Effects } from "./effects.ts";
+import { makeCar, makeFood, type CarModel } from "./models.ts";
+import { buildScenery } from "./scenery.ts";
 
 /** O que a cena precisa saber de cada carro (vem do estado da sala). */
 export interface CarView {
@@ -29,9 +31,18 @@ interface CarEntry {
   z: number;
   heading: number;
   key: string;
+  /** Inclinação da carroceria nas curvas. */
+  lean: number;
+  /** 0 a 1: quanto o pneu está cantando agora. */
+  skid: number;
+  offroad: boolean;
 }
 
-const SKY = "#8fd3ff";
+/** O que a cena sabe do carro seguido pela câmera, para os sons. */
+export interface FollowedInfo {
+  skid: number;
+  offroad: boolean;
+}
 
 /** Aproxima `current` de `target` de forma suave e independente do FPS. */
 const damp = (current: number, target: number, rate: number, dt: number) =>
@@ -40,14 +51,6 @@ const damp = (current: number, target: number, rate: number, dt: number) =>
 function dampAngle(current: number, target: number, rate: number, dt: number) {
   const diff = Math.atan2(Math.sin(target - current), Math.cos(target - current));
   return current + diff * (1 - Math.exp(-rate * dt));
-}
-
-/** Gerador pseudoaleatório com semente, para o cenário ser igual para todo mundo. */
-function seeded(seed: number) {
-  return () => {
-    seed = (seed * 1664525 + 1013904223) % 4294967296;
-    return seed / 4294967296;
-  };
 }
 
 /** Faixa ao longo da pista, entre `inner` e `outer` metros do centro (negativo = lado direito). */
@@ -130,88 +133,40 @@ function buildTrack(scene: THREE.Scene) {
   scene.add(gate);
 }
 
-function buildScenery(scene: THREE.Scene) {
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(800, 800),
-    new THREE.MeshLambertMaterial({ color: "#6ab04c" }),
-  );
-  ground.rotation.x = -Math.PI / 2;
-  scene.add(ground);
-
-  // Árvores de brócolis, porque toda dieta precisa de um vegetal (de enfeite).
-  const random = seeded(42);
-  const spots: THREE.Vector3[] = [];
-  while (spots.length < 160) {
-    const x = (random() - 0.5) * 460;
-    const z = (random() - 0.5) * 460;
-    if (nearestSample(TRACK, x, z).distance < TRACK.width / 2 + 7) continue;
-    spots.push(new THREE.Vector3(x, 0, z));
-  }
-
-  const stem = new THREE.InstancedMesh(
-    new THREE.CylinderGeometry(0.5, 0.8, 3, 8),
-    new THREE.MeshLambertMaterial({ color: "#9bc25b" }),
-    spots.length,
-  );
-  const crown = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(2.4, 1),
-    new THREE.MeshLambertMaterial({ color: "#2f7d32", flatShading: true }),
-    spots.length * 3,
-  );
-  const matrix = new THREE.Matrix4();
-  const scale = new THREE.Vector3();
-  const quat = new THREE.Quaternion();
-  spots.forEach((spot, i) => {
-    const s = 0.7 + random() * 0.8;
-    scale.setScalar(s);
-    matrix.compose(new THREE.Vector3(spot.x, 1.5 * s, spot.z), quat, scale);
-    stem.setMatrixAt(i, matrix);
-    for (let k = 0; k < 3; k++) {
-      const angle = (k / 3) * Math.PI * 2 + i;
-      const pos = new THREE.Vector3(
-        spot.x + Math.cos(angle) * 1.1 * s,
-        (3.4 + (k === 0 ? 0.6 : 0)) * s,
-        spot.z + Math.sin(angle) * 1.1 * s,
-      );
-      matrix.compose(pos, quat, scale);
-      crown.setMatrixAt(i * 3 + k, matrix);
-    }
-  });
-  scene.add(stem, crown);
-
-  // Hambúrgueres gigantes pelo infield, como estátuas.
-  for (const [x, z, size] of [[30, -40, 14], [-50, 50, 18], [85, -30, 10], [-80, -50, 12]] as const) {
-    const statue = makeBurger();
-    statue.scale.setScalar(size);
-    statue.position.set(x, 0, z);
-    statue.rotation.y = x;
-    scene.add(statue);
-  }
+/** Navegador desenhando o 3D na CPU (sem placa de vídeo): começa em resolução baixa. */
+function isSoftwareRenderer(renderer: THREE.WebGLRenderer) {
+  const gl = renderer.getContext();
+  const info = gl.getExtension("WEBGL_debug_renderer_info");
+  const name = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+  return /swiftshader|llvmpipe|software/i.test(name);
 }
 
 export class GameScene {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(70, 1, 0.5, 900);
+  private camera = new THREE.PerspectiveCamera(70, 1, 0.5, 1500);
   private cars = new Map<string, CarEntry>();
   private foods: THREE.Group[] = [];
+  private foodActive: boolean[] = [];
+  private effects: Effects;
   private cameraTarget = new THREE.Vector3();
   private clock = new THREE.Clock();
   private time = 0;
+  /** Resolução adaptativa: cai quando o FPS fica baixo (PC fraco ou sem placa de vídeo). */
+  private pixelRatio = Math.min(window.devicePixelRatio, 2);
+  private fpsFrames = 0;
+  private fpsTime = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    if (isSoftwareRenderer(this.renderer)) this.pixelRatio = 0.5;
+    this.renderer.setPixelRatio(this.pixelRatio);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
 
-    this.scene.background = new THREE.Color(SKY);
-    this.scene.fog = new THREE.Fog(SKY, 150, 420);
-    this.scene.add(new THREE.HemisphereLight("#ffffff", "#5a7d3a", 1.6));
-    const sun = new THREE.DirectionalLight("#fff4dd", 1.8);
-    sun.position.set(80, 150, 40);
-    this.scene.add(sun);
-
-    buildTrack(this.scene);
     buildScenery(this.scene);
+    buildTrack(this.scene);
+    this.effects = new Effects(this.scene);
 
     this.camera.position.set(0, 60, -160);
     this.resize();
@@ -223,6 +178,21 @@ export class GameScene {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  private adaptResolution(rawDt: number) {
+    this.fpsFrames++;
+    this.fpsTime += rawDt;
+    if (this.fpsTime < 2) return;
+    const fps = this.fpsFrames / this.fpsTime;
+    this.fpsFrames = 0;
+    this.fpsTime = 0;
+    // Aba em segundo plano não conta (o navegador pausa os quadros).
+    if (fps < 38 && fps > 3 && this.pixelRatio > 0.5) {
+      this.pixelRatio = Math.max(0.5, this.pixelRatio * 0.75);
+      this.renderer.setPixelRatio(this.pixelRatio);
+      this.resize();
+    }
   }
 
   /** Sincroniza os carros com o estado: cria os novos e remove quem saiu. */
@@ -241,8 +211,10 @@ export class GameScene {
         entry = undefined;
       }
       if (!entry) {
-        entry = { model: makeCar(car.color, car.name), x: car.x, z: car.z, heading: car.heading, key };
-        this.scene.add(entry.model.group);
+        const model = makeCar(car.color, car.name);
+        model.group.rotation.order = "YXZ";
+        entry = { model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false };
+        this.scene.add(model.group);
         this.cars.set(id, entry);
       }
     }
@@ -253,8 +225,11 @@ export class GameScene {
       const food = makeFood(foods[this.foods.length].kind as FoodKind);
       this.scene.add(food);
       this.foods.push(food);
+      this.foodActive.push(true);
     }
     foods.forEach((f, i) => {
+      if (this.foodActive[i] && !f.active) this.effects.burst(f.x, f.z);
+      this.foodActive[i] = f.active;
       this.foods[i].visible = f.active;
       this.foods[i].position.x = f.x;
       this.foods[i].position.z = f.z;
@@ -262,9 +237,11 @@ export class GameScene {
   }
 
   /** Desenha um quadro. `followId` é o carro que a câmera persegue. */
-  render(cars: Map<string, CarView>, followId: string | undefined) {
-    const dt = Math.min(this.clock.getDelta(), 0.1);
+  render(cars: Map<string, CarView>, followId: string | undefined): FollowedInfo | null {
+    const rawDt = this.clock.getDelta();
+    const dt = Math.min(rawDt, 0.1);
     this.time += dt;
+    this.adaptResolution(rawDt);
 
     for (const [id, entry] of this.cars) {
       const car = cars.get(id);
@@ -275,18 +252,34 @@ export class GameScene {
         entry.z = car.z;
         entry.heading = car.heading;
       }
+      const previousHeading = entry.heading;
       entry.x = damp(entry.x, car.x, 18, dt);
       entry.z = damp(entry.z, car.z, 18, dt);
       entry.heading = dampAngle(entry.heading, car.heading, 18, dt);
+
+      // Força lateral = velocidade de giro × velocidade. Acima de um limite o pneu canta.
+      const turnRate = dt > 0 ? Math.atan2(Math.sin(entry.heading - previousHeading), Math.cos(entry.heading - previousHeading)) / dt : 0;
+      const lateral = turnRate * car.speed;
+      entry.skid = damp(entry.skid, Math.min(1, Math.max(0, (Math.abs(lateral) - 30) / 25)), 12, dt);
+      entry.offroad = nearestSample(TRACK, entry.x, entry.z).distance > TRACK.width / 2 + 1;
+      entry.lean = damp(entry.lean, Math.max(-0.12, Math.min(0.12, lateral * 0.0025)), 8, dt);
 
       const { group, flame, wheels } = entry.model;
       group.visible = car.visible;
       group.position.set(entry.x, 0, entry.z);
       group.rotation.y = entry.heading;
+      group.rotation.z = entry.lean;
       for (const wheel of wheels) wheel.rotation.x += (car.speed * dt) / 0.45;
       flame.visible = car.boost > 0;
       if (flame.visible) flame.scale.setScalar(0.8 + Math.random() * 0.5);
+
+      if (car.visible) {
+        const dusty = entry.offroad && Math.abs(car.speed) > 6;
+        const amount = dusty ? Math.min(1, Math.abs(car.speed) / 25) * 0.6 : entry.skid;
+        if (amount > 0.15) this.effects.wheelTrail(entry.x, entry.z, entry.heading, amount, entry.offroad);
+      }
     }
+    this.effects.update(dt);
 
     this.foods.forEach((food, i) => {
       food.rotation.y = this.time * 2 + i;
@@ -301,18 +294,26 @@ export class GameScene {
       const desired = new THREE.Vector3(followed.x - forwardX * 11, 5.5, followed.z - forwardZ * 11);
       this.camera.position.lerp(desired, 1 - Math.exp(-6 * dt));
       this.cameraTarget.set(followed.x + forwardX * 6, 1.5, followed.z + forwardZ * 6);
-      // Com turbo a lente abre, para dar sensação de velocidade.
-      const fov = followedCar.boost > 0 ? 82 : 70 + Math.min(8, Math.abs(followedCar.speed) / 6);
+      // Com turbo a lente abre e a câmera treme, para dar sensação de velocidade.
+      const boosting = followedCar.boost > 0;
+      const fov = boosting ? 84 : 70 + Math.min(8, Math.abs(followedCar.speed) / 6);
       this.camera.fov = damp(this.camera.fov, fov, 4, dt);
       this.camera.updateProjectionMatrix();
+      if (boosting) {
+        this.cameraTarget.x += (Math.random() - 0.5) * 0.25;
+        this.cameraTarget.y += (Math.random() - 0.5) * 0.25;
+      }
     } else {
-      // Sem carro para seguir: sobrevoa a pista devagar.
-      const angle = this.time * 0.1;
-      this.camera.position.set(Math.sin(angle) * 200, 110, Math.cos(angle) * 200);
-      this.cameraTarget.set(0, 0, 20);
+      // Sem carro para seguir (menu): sobrevoa a pista devagar, como numa vinheta.
+      const angle = this.time * 0.08;
+      this.camera.position.set(Math.sin(angle) * 150, 45, Math.cos(angle) * 150);
+      this.cameraTarget.set(0, 10, 20);
+      this.camera.fov = 60;
+      this.camera.updateProjectionMatrix();
     }
     this.camera.lookAt(this.cameraTarget);
 
     this.renderer.render(this.scene, this.camera);
+    return followed ? { skid: followed.skid, offroad: followed.offroad } : null;
   }
 }

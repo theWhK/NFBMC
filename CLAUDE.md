@@ -28,6 +28,9 @@ deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo a
 - O servidor é autoritativo: o cliente manda só a intenção (por exemplo, a direção), e o servidor calcula as posições.
 - Em produção, o servidor também entrega o build do cliente (`client/dist`), então tudo sai pela porta 2567.
 - O jogo é 3D com **Three.js** (decidido com o Will). Os modelos são feitos com formas simples do próprio Three.js, sem arquivos externos. Não troque a engine nem adicione outra biblioteca grande sem combinar.
+- Ambientação: paródia do Need for Speed Most Wanted (fim de tarde alaranjado, cidade, "Lista Gorda", Vigilância Sanitária no lugar da polícia). Logo em `client/src/logo.ts` (SVG feito à mão, sem copiar marca de ninguém).
+- Som e música são **sintetizados no código** com Web Audio (`client/src/audio.ts` e `client/src/music.ts`), sem arquivos de áudio nem música de terceiros. Fontes: Russo One e Black Ops One (OFL), via `@fontsource`.
+- A cena reduz a resolução sozinha quando o FPS cai (o Chromium headless dos testes desenha na CPU, a ~30 FPS). Ao deixar a cena mais pesada, confira que o `npm run test:e2e` não ficou muito mais lento.
 - O mundo fica no plano XZ (Y para cima). A pista, a física do carro e as regras (voltas, comida, bônus) ficam em `shared/` para o servidor e o cliente usarem as mesmas contas.
 - Fluxo da sala (`server/src/rooms/RaceRoom.ts`): `lobby` → alguém aperta "Começar" → `countdown` → `racing` → `results` → `lobby`. Quem entra no meio espera a próxima corrida.
 
