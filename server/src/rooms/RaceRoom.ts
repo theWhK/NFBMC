@@ -44,6 +44,7 @@ import {
 import { recordRace } from "../profiles.ts";
 import { BOT_NAMES, botInput, createBrain, type Brain, type FoodSpot } from "./bots.ts";
 import { Food, Player, RaceState, Result } from "./schema.ts";
+import { realTimeSteps } from "./tick.ts";
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -177,7 +178,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       food.z = point.z;
       this.state.foods.push(food);
     }
-    this.setSimulationInterval((deltaMs) => this.update(Math.min(deltaMs, 100) / 1000));
+    this.setSimulationInterval(realTimeSteps((dt) => this.update(dt)));
   }
 
   onJoin(client: Client, options?: WorldJoinOptions) {

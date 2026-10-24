@@ -39,6 +39,7 @@ import {
 import { loadProfile, setCalories, type Profile } from "../profiles.ts";
 import { copInput, createCopBrain, spawnPoint, type CopBrain } from "./cops.ts";
 import { Cop, Npc, Stand, WorldPlayer, WorldState } from "./schema.ts";
+import { realTimeSteps } from "./tick.ts";
 import { spawnTraffic, trafficInput, type TrafficBrain } from "./traffic.ts";
 
 /** Carros do trânsito: alguns por jogador, até um limite, só por perto de quem joga. */
@@ -146,7 +147,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       stand.z = spot.z;
       this.state.stands.push(stand);
     }
-    this.setSimulationInterval((deltaMs) => this.update(Math.min(deltaMs, 100) / 1000));
+    this.setSimulationInterval(realTimeSteps((dt) => this.update(dt)));
   }
 
   async onJoin(client: Client, options?: WorldJoinOptions) {
