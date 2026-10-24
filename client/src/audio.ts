@@ -85,13 +85,17 @@ class Engine {
     this.osc2.start();
   }
 
-  set(speed: number, throttle: number, volume: number, pan = 0) {
+  /**
+   * `rpm` e `redline` do motor: o tom acompanha o giro de verdade. Motores que
+   * giram mais alto (faixa vermelha alta) soam mais agudos lá em cima.
+   */
+  set(rpm: number, redline: number, throttle: number, volume: number, pan = 0) {
     const t = this.ctx.currentTime;
-    const { rpm, gear } = gearFor(speed);
-    const freq = 38 + rpm * 70 + gear * 6;
-    this.osc1.frequency.setTargetAtTime(freq, t, 0.05);
-    this.osc2.frequency.setTargetAtTime(freq * 0.5 + 1.5, t, 0.05);
-    this.filter.frequency.setTargetAtTime(300 + rpm * 900 + Math.max(0, throttle) * 900, t, 0.08);
+    const ratio = Math.min(1.05, rpm / redline);
+    const freq = 26 + ratio * (55 + redline / 90);
+    this.osc1.frequency.setTargetAtTime(freq, t, 0.03);
+    this.osc2.frequency.setTargetAtTime(freq * 0.5 + 1.5, t, 0.03);
+    this.filter.frequency.setTargetAtTime(300 + ratio * 900 + Math.max(0, throttle) * 900, t, 0.08);
     this.gain.gain.setTargetAtTime(volume * (0.5 + 0.5 * Math.max(0.2, throttle)), t, 0.08);
     this.panner.pan.setTargetAtTime(pan, t, 0.1);
   }
@@ -108,6 +112,8 @@ class Engine {
 
 export interface CarSound {
   speed: number;
+  rpm: number;
+  redline: number;
   throttle: number;
   skid: number;
   offroad: boolean;
@@ -189,12 +195,12 @@ export class Sound {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     if (!car) {
-      this.engine.set(0, 0, 0);
+      this.engine.set(0, 1, 0, 0);
       for (const loop of [this.skid, this.dirt, this.wind]) loop.gain.gain.setTargetAtTime(0, t, 0.1);
       return;
     }
     const speed = Math.abs(car.speed);
-    this.engine.set(car.speed, car.boost ? 1 : car.throttle, 0.22);
+    this.engine.set(car.rpm, car.redline, car.boost ? 1 : car.throttle, 0.22);
     this.skid.gain.gain.setTargetAtTime(Math.min(1, car.skid) * 0.35, t, 0.04);
     this.skid.filter.frequency.setTargetAtTime(1600 + Math.random() * 600, t, 0.02);
     this.dirt.gain.gain.setTargetAtTime(car.offroad ? Math.min(1, speed / 15) * 0.5 : 0, t, 0.08);
@@ -202,7 +208,7 @@ export class Sound {
   }
 
   /** Motores dos outros carros, mais baixos conforme a distância. `pan`: -1 esquerda, 1 direita. */
-  updateOthers(cars: Map<string, { speed: number; distance: number; pan: number }>) {
+  updateOthers(cars: Map<string, { speed: number; distance: number; pan: number; rpm?: number; redline?: number }>) {
     if (!this.ctx) return;
     for (const [id, engine] of this.others) {
       if (!cars.has(id)) {
@@ -217,7 +223,9 @@ export class Sound {
         this.others.set(id, engine);
       }
       const volume = 0.12 * Math.max(0, 1 - car.distance / 70);
-      engine.set(car.speed, 0.6, volume, car.pan);
+      // Sem o giro (viatura, trânsito), estima pela velocidade com marchas fictícias.
+      const estimated = gearFor(car.speed).rpm * 0.75 + 0.2;
+      engine.set(car.rpm ?? estimated * 6000, car.redline ?? 6000, 0.6, volume, car.pan);
     }
   }
 

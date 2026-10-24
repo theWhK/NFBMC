@@ -1,6 +1,7 @@
 // Modo mundo aberto: dirigir por Porto Gordo, comer nas barraquinhas e
 // disparar corridas nos pontos de encontro.
 import {
+  carSpec,
   DIFFICULTY_LABELS,
   DISTRICTS,
   districtAt,
@@ -113,7 +114,7 @@ export class WorldMode {
     }
     const cars = new Map<string, CarView>();
     room.state.players?.forEach((p, id) => {
-      cars.set(id, { name: p.name, color: p.color, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, visible: true });
+      cars.set(id, { name: p.name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, visible: true });
     });
     room.state.traffic?.forEach((n, id) => {
       cars.set(`npc:${id}`, {
@@ -124,7 +125,7 @@ export class WorldMode {
     room.state.cops?.forEach((c, id) => {
       cars.set(`cop:${id}`, {
         name: "🚨 Vigilância", color: "#f4f4f0", x: c.x, z: c.z, heading: c.heading,
-        speed: c.speed, boost: c.boost, visible: true, cop: true,
+        speed: c.speed, boost: c.boost, visible: true, cop: true, car: c.car,
       });
     });
     const me = room.state.players?.get(room.sessionId);
@@ -140,6 +141,8 @@ export class WorldMode {
     this.updatePursuitUi(me, myCops.length > 0);
     ctx.sound.updateMine(followed ? {
       speed: me.speed,
+      rpm: me.rpm,
+      redline: carSpec(me.car).redline,
       throttle: ctx.input().throttle,
       skid: followed.skid,
       offroad: followed.offroad,
@@ -147,7 +150,7 @@ export class WorldMode {
     } : null);
     ctx.updateOtherEngines(cars, room.sessionId, me);
     ctx.drawMinimap({ cars, myId: room.sessionId, race: null });
-    ctx.drawTacho(me.speed);
+    ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
     ui.nitroFill.style.width = `${Math.min(100, (me.boost / 2.5) * 100)}%`;
     ui.speedlines.hidden = !(me.boost > 0);
 
@@ -241,11 +244,15 @@ export class WorldMode {
     this.room.send("input", input);
   }
 
+  sendShift(direction: number) {
+    this.room.send("shift", { direction });
+  }
+
   snapshot() {
     const result: Record<string, PlayerSnapshot> = {};
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
-        name: p.name, bot: false, x: p.x, z: p.z, speed: p.speed, racing: false,
+        name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: false, x: p.x, z: p.z, speed: p.speed, racing: false,
         lap: 0, place: 0, calories: p.calories, finished: false,
       };
     });

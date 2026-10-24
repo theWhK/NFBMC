@@ -83,6 +83,14 @@ const STEER: Record<string, number> = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, 
 const touch = isTouchDevice();
 document.body.classList.toggle("touch", touch);
 const touchControls = bindTouchControls($("touch"), keys, () => sendInput());
+// Botões + e − de marcha (aparecem só com câmbio manual).
+for (const button of document.querySelectorAll<HTMLButtonElement>("#touch [data-shift]")) {
+  button.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    navigator.vibrate?.(10);
+    shift(Number(button.dataset.shift));
+  });
+}
 const rotateHint = $("rotate");
 
 /** No jogo, com o celular em pé: pede para girar (o layout foi feito para a tela deitada). */
@@ -166,11 +174,17 @@ function setMode(next: WorldMode | RaceMode | null) {
   sound.updateSiren(null);
   touchControls.reset();
   $("touch").hidden = !(touch && next);
+  $("touch").classList.toggle("manual", menu.manual());
   mode = next;
   updateRotateHint();
   lastSent = "";
   sendInput();
   publishTestHook();
+}
+
+/** Nome, cor, carro e câmbio escolhidos no menu: vão junto ao entrar em qualquer sala. */
+function carOptions() {
+  return { name: playerName, color: menu.color(), car: menu.car(), manual: menu.manual() };
 }
 
 function setLoading(text: string | null) {
@@ -179,7 +193,7 @@ function setLoading(text: string | null) {
 }
 
 async function enterWorld(spawn?: RaceId) {
-  const room = await joinWorld({ name: playerName, token, solo: soloWorld, spawn, color: menu.color() });
+  const room = await joinWorld({ ...carOptions(), token, solo: soloWorld, spawn });
   room.onLeave(() => {
     if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
   });
@@ -198,7 +212,7 @@ async function goRace(message: GoRaceMessage) {
     const world = mode.room;
     setMode(null);
     await world.leave();
-    const room = await joinEventRace(message.roomId, { name: playerName, token, color: menu.color() });
+    const room = await joinEventRace(message.roomId, { ...carOptions(), token });
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });
@@ -243,12 +257,20 @@ function sendInput() {
   mode.sendInput(input);
 }
 
+/** Troca de marcha no câmbio manual (teclado ou botões da tela). */
+function shift(direction: number) {
+  if (!mode || !menu.manual()) return;
+  mode.sendShift(direction);
+}
+
 window.addEventListener("keydown", (e) => {
   if (document.activeElement === ui.name) return;
   if (e.code === "KeyM") {
     sound.toggle("music");
     refreshAudioButtons();
   }
+  if (!e.repeat && (e.code === "KeyE" || e.code === "ShiftLeft" || e.code === "ShiftRight")) shift(1);
+  if (!e.repeat && (e.code === "KeyQ" || e.code === "ControlLeft" || e.code === "ControlRight")) shift(-1);
   if (mode instanceof WorldMode) mode.handleKey(e.code);
   if (!(e.code in THROTTLE) && !(e.code in STEER)) return;
   e.preventDefault();
@@ -284,7 +306,7 @@ async function start(entry: MenuEntry) {
     const spawn = new URLSearchParams(location.search).get("spawn");
     await enterWorld(isRaceId(spawn) ? spawn : undefined);
   } else {
-    const room = await joinQuickRace(playerName, entry === "solo", menu.color());
+    const room = await joinQuickRace(carOptions(), entry === "solo");
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });

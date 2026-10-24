@@ -58,10 +58,10 @@ export type WorldRoom = Awaited<ReturnType<typeof joinPublicWorld>>;
 // SDK; os casts abaixo só unificam esses tipos.
 
 /** Corrida rápida no autódromo: a sala pública da galera, ou uma sala solo contra bots. */
-export const joinQuickRace = (name: string, solo: boolean, color?: string): Promise<RaceRoom> =>
+export const joinQuickRace = (options: WorldJoinOptions, solo: boolean): Promise<RaceRoom> =>
   solo
-    ? (client.create(ROOM_NAME, { name, solo: true, color }) as Promise<unknown> as Promise<RaceRoom>)
-    : joinPublicRace({ name, color });
+    ? (client.create(ROOM_NAME, { ...options, solo: true }) as Promise<unknown> as Promise<RaceRoom>)
+    : joinPublicRace(options);
 
 /** Corrida de evento disparada no mundo aberto (sala criada pelo servidor). */
 export const joinEventRace = (roomId: string, options: WorldJoinOptions): Promise<RaceRoom> =>
