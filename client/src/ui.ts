@@ -80,6 +80,8 @@ export function setHtml(el: HTMLElement, html: string) {
 }
 
 export function showPopup(text: string) {
+  // No celular, uma vibradinha junto (comeu, aviso...).
+  if (document.body.classList.contains("touch")) navigator.vibrate?.(20);
   const el = document.createElement("div");
   el.className = "popup";
   el.textContent = text;

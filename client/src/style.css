@@ -974,3 +974,368 @@ button.link {
 body:has(#join:not([hidden])) #topbar {
   display: none;
 }
+
+/* --- Celular e toque ----------------------------------------------------- */
+
+body.touch {
+  /* Sem zoom de dois toques, sem "puxar para atualizar", sem selecionar texto. */
+  touch-action: manipulation;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.touch input {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#touch {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+#touch button {
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font: 1.6rem var(--hud);
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(22, 17, 13, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 18px;
+  box-shadow: none;
+  transform: none;
+  backdrop-filter: blur(2px);
+}
+
+#touch button.down {
+  background: rgba(255, 154, 31, 0.65);
+  border-color: var(--mustard);
+  color: #16110d;
+}
+
+.touch-steer,
+.touch-pedals {
+  position: absolute;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  display: flex;
+  gap: 12px;
+}
+
+.touch-steer {
+  left: max(14px, env(safe-area-inset-left));
+}
+
+.touch-steer button {
+  width: 92px;
+  height: 92px;
+  font-size: 2.4rem;
+}
+
+.touch-pedals {
+  right: max(14px, env(safe-area-inset-right));
+  align-items: flex-end;
+}
+
+/* "#touch" na frente: senão a regra geral "#touch button" (mais específica) ganha. */
+#touch .brake {
+  width: 86px;
+  height: 70px;
+  font-size: 0.85rem;
+}
+
+#touch .gas {
+  width: 118px;
+  height: 118px;
+  font-size: 0.95rem;
+  border-color: rgba(255, 196, 46, 0.6);
+}
+
+#rotate {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(16, 12, 9, 0.96);
+  font: 1.3rem var(--hud);
+  text-align: center;
+  padding: 24px;
+}
+
+#rotate .phone {
+  font-size: 4rem;
+  animation: rotate-phone 1.6s ease-in-out infinite;
+}
+
+@keyframes rotate-phone {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  60%,
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+
+/* No toque, os controles ocupam os cantos de baixo: o resto do HUD se rearruma. */
+body.touch #minimap {
+  left: auto;
+  right: max(12px, env(safe-area-inset-right));
+  top: 48px;
+  bottom: auto;
+}
+
+body.touch #dash {
+  right: auto;
+  left: 50%;
+  bottom: max(4px, env(safe-area-inset-bottom));
+  transform: translateX(-50%) scale(0.5);
+  transform-origin: bottom center;
+}
+
+body.touch #leaderboard,
+body.touch #world-hud .hint,
+body.touch .mw-footer .keys {
+  display: none;
+}
+
+body.touch #marker-panel {
+  bottom: 140px;
+}
+
+body.touch .panel.side {
+  left: max(12px, env(safe-area-inset-left));
+  right: auto;
+}
+
+/* Celular deitado: pouca altura, tudo mais compacto. */
+@media (max-height: 520px) {
+  #topbar {
+    top: 4px;
+    font-size: 0.75rem;
+  }
+
+  #hud,
+  #world-hud {
+    top: 30px;
+    left: max(12px, env(safe-area-inset-left));
+  }
+
+  .hud-place strong {
+    font-size: 2.4rem;
+  }
+
+  .hud-row {
+    margin-top: 2px;
+  }
+
+  .hud-row strong {
+    font-size: 1.2rem;
+  }
+
+  .hud-row.kcal strong {
+    font-size: 1.5rem;
+  }
+
+  #world-hud .stats {
+    display: none;
+  }
+
+  #minimap {
+    width: 110px;
+    height: 110px;
+  }
+
+  body.touch #minimap {
+    top: 34px;
+  }
+
+  #wanted {
+    top: 26px;
+    font-size: 1.1rem;
+  }
+
+  #pursuit {
+    top: 52px;
+    width: min(300px, 50vw);
+    font-size: 0.8rem;
+  }
+
+  #district {
+    top: 80px;
+    font-size: 1.1rem;
+  }
+
+  #countdown {
+    font-size: 5.5rem;
+  }
+
+  #banner {
+    font-size: 2.4rem;
+  }
+
+  #banner small {
+    font-size: 0.95rem;
+  }
+
+  #message {
+    top: 22%;
+    font-size: 0.95rem;
+    padding: 6px 12px;
+  }
+
+  .popup {
+    font-size: 1.4rem;
+  }
+
+  .panel {
+    padding: 10px 14px;
+  }
+
+  .panel h2 {
+    font-size: 1.1rem;
+  }
+
+  .panel.side {
+    top: 30px;
+    width: 220px;
+    max-height: calc(100vh - 150px);
+    overflow-y: auto;
+    font-size: 0.8rem;
+  }
+
+  .panel.side .hint,
+  #lobby-list li {
+    font-size: 0.75rem;
+  }
+
+  .panel.side .hint {
+    display: none;
+  }
+
+  #lobby-list {
+    margin: 4px 0 8px;
+  }
+
+  .panel button {
+    padding: 6px 10px;
+    font-size: 0.9rem;
+  }
+
+  #marker-panel {
+    width: min(320px, calc(100vw - 460px));
+    min-width: 240px;
+    font-size: 0.8rem;
+  }
+
+  #marker-people {
+    margin: 2px 0 6px;
+  }
+
+  select {
+    padding: 2px 6px;
+    font-size: 0.8rem;
+  }
+
+  button.small {
+    padding: 0 8px;
+  }
+
+  body.touch #marker-panel {
+    bottom: 12px;
+  }
+
+  #marker-panel .hint {
+    display: none;
+  }
+
+  .setting {
+    margin-bottom: 4px;
+  }
+
+  #results {
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+  }
+
+  #results th,
+  #results td {
+    padding: 2px 6px;
+    font-size: 0.85rem;
+  }
+
+  .stamp {
+    font-size: 1.1rem;
+  }
+
+  /* Menu deitado: logo menor, lista mais justa e telas ao lado. */
+  .mw-menu #logo {
+    top: 8px;
+    left: 24px;
+    width: min(200px, 30vw);
+  }
+
+  .mw-list {
+    top: 96px;
+    left: 24px;
+    width: 230px;
+    gap: 0;
+  }
+
+  .mw-list button {
+    padding: 2px 14px;
+    font-size: 0.95rem;
+  }
+
+  .mw-list button.selected {
+    padding-left: 22px;
+  }
+
+  .mw-list.sub button {
+    font-size: 0.95rem;
+  }
+
+  .mw-screen {
+    top: 70px;
+    left: 270px;
+    width: min(420px, calc(100vw - 300px));
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    padding: 10px 16px;
+    font-size: 0.85rem;
+  }
+
+  .mw-footer {
+    padding: 4px 24px;
+  }
+
+  .mw-footer input {
+    padding: 2px 8px;
+    font-size: 0.9rem;
+  }
+
+  .rival .quote {
+    display: none;
+  }
+
+  .mw-screen.wide {
+    width: calc(100vw - 330px);
+  }
+
+  .mw-hint {
+    display: none;
+  }
+}

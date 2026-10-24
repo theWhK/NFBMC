@@ -166,7 +166,8 @@ export class GameScene {
   private clock = new THREE.Clock();
   private time = 0;
   /** Resolução adaptativa: cai quando o FPS fica baixo (PC fraco ou sem placa de vídeo). */
-  private pixelRatio = Math.min(window.devicePixelRatio, 2);
+  // No celular começa um pouco mais baixa: a tela é pequena e a bateria agradece.
+  private pixelRatio = Math.min(window.devicePixelRatio, window.matchMedia?.("(pointer: coarse)").matches ? 1.5 : 2);
   private fpsFrames = 0;
   private fpsTime = 0;
 
