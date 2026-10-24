@@ -5,10 +5,12 @@
 // grafo de ruas, passando pelos pontos de cada rua, inclusive nas curvas); com
 // o alvo à vista, vai direto para cima dele, mirando onde ele vai estar.
 import {
-  CAR,
   NAV,
+  cachedTopSpeed,
+  cornerSpeed,
   insideBuilding,
   routeBetween,
+  type CarSpec,
   type CarState,
   type DriveInput,
 } from "@nfbmc/shared";
@@ -16,13 +18,22 @@ import {
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
 
-/** Dá para ver (em linha reta, sem prédio no meio) de A até B? */
+/**
+ * Dá para ir em linha reta de A até B sem passar por prédio? Confere um
+ * "corredor" da largura do carro (três linhas), em passos curtos, para não
+ * deixar escapar quina de casa.
+ */
 export function lineOfSight(ax: number, az: number, bx: number, bz: number) {
   const dist = Math.hypot(bx - ax, bz - az);
-  const steps = Math.ceil(dist / 5);
+  if (dist < 1) return true;
+  const steps = Math.ceil(dist / 2.5);
+  const sx = ((bz - az) / dist) * 2;
+  const sz = (-(bx - ax) / dist) * 2;
   for (let k = 1; k < steps; k++) {
     const t = k / steps;
-    if (insideBuilding(ax + (bx - ax) * t, az + (bz - az) * t)) return false;
+    const x = ax + (bx - ax) * t;
+    const z = az + (bz - az) * t;
+    if (insideBuilding(x, z) || insideBuilding(x + sx, z + sz) || insideBuilding(x - sx, z - sz)) return false;
   }
   return true;
 }
@@ -48,6 +59,31 @@ function routePoints(fromX: number, fromZ: number, toX: number, toZ: number): [n
   return points.filter((_, i) => i % 4 === 0 || i === points.length - 1);
 }
 
+/** Velocidade alvo seguindo `path`: para cada curva à frente, a velocidade dela mais o que dá para frear até lá. */
+function plannedSpeed(path: [number, number][], cop: CarState, spec: CarSpec) {
+  const brake = spec.brake * 0.7;
+  const look = (cop.speed * cop.speed) / (2 * brake) + 30;
+  let desired = Infinity;
+  let travelled = Math.hypot(path[0][0] - cop.x, path[0][1] - cop.z);
+  let previous: [number, number] = [cop.x, cop.z];
+  for (let i = 0; i < path.length - 1 && travelled < look; i++) {
+    const a = previous;
+    const b = path[i];
+    const c = path[i + 1];
+    const inAngle = Math.atan2(b[0] - a[0], b[1] - a[1]);
+    const outAngle = Math.atan2(c[0] - b[0], c[1] - b[1]);
+    const turn = Math.abs(wrap(outAngle - inAngle));
+    const segment = Math.min(Math.hypot(b[0] - a[0], b[1] - a[1]), Math.hypot(c[0] - b[0], c[1] - b[1]));
+    if (turn > 0.05) {
+      const corner = cornerSpeed(spec, Math.max(8, segment / turn)) * 0.9;
+      desired = Math.min(desired, Math.sqrt(corner * corner + 2 * brake * Math.max(0, travelled - 6)));
+    }
+    travelled += Math.hypot(c[0] - b[0], c[1] - b[1]);
+    previous = b;
+  }
+  return desired;
+}
+
 // --- Piloto da viatura -------------------------------------------------------
 
 export interface CopBrain {
@@ -57,9 +93,12 @@ export interface CopBrain {
   sightCheckIn: number;
   stuckFor: number;
   reverseFor: number;
+  /** Depois de se desatolar, segue pela rua um tempo antes de tentar ir direto de novo. */
+  roadOnlyFor: number;
 }
 
 export const createCopBrain = (): CopBrain => ({
+  roadOnlyFor: 0,
   path: [],
   replanIn: 0,
   seesTarget: false,
@@ -69,7 +108,7 @@ export const createCopBrain = (): CopBrain => ({
 });
 
 /** Decide acelerar/virar neste tick. Retorna também se a viatura deve usar o "turbo". */
-export function copInput(brain: CopBrain, cop: CarState, target: CarState, stars: number, dt: number): { input: DriveInput; boost: boolean } {
+export function copInput(brain: CopBrain, cop: CarState, spec: CarSpec, target: CarState, stars: number, dt: number): { input: DriveInput; boost: boolean } {
   const distance = Math.hypot(target.x - cop.x, target.z - cop.z);
 
   // Desatolar: bateu e parou → ré virando por um tempo.
@@ -83,13 +122,16 @@ export function copInput(brain: CopBrain, cop: CarState, target: CarState, stars
     brain.stuckFor = 0;
     brain.reverseFor = 0.9;
     brain.replanIn = 0;
+    brain.roadOnlyFor = 3;
   }
+  brain.roadOnlyFor = Math.max(0, brain.roadOnlyFor - dt);
 
   // Enxerga o alvo? (A checagem de prédios no caminho é cara: 4× por segundo basta.)
   brain.sightCheckIn -= dt;
   if (brain.sightCheckIn <= 0) {
     brain.sightCheckIn = 0.25;
-    brain.seesTarget = distance < 40 || (distance < 170 && lineOfSight(cop.x, cop.z, target.x, target.z));
+    brain.seesTarget = brain.roadOnlyFor <= 0
+      && (distance < 20 || (distance < 170 && lineOfSight(cop.x, cop.z, target.x, target.z)));
   }
 
   let aimX: number;
@@ -111,27 +153,19 @@ export function copInput(brain: CopBrain, cop: CarState, target: CarState, stars
     }
     while (brain.path.length > 1 && Math.hypot(brain.path[0][0] - cop.x, brain.path[0][1] - cop.z) < 10) brain.path.shift();
     [aimX, aimZ] = brain.path[0];
-    // Curva forte logo à frente: freia antes.
-    const after = brain.path[1];
-    if (after) {
-      const inAngle = Math.atan2(aimX - cop.x, aimZ - cop.z);
-      const outAngle = Math.atan2(after[0] - aimX, after[1] - aimZ);
-      const turn = Math.abs(wrap(outAngle - inAngle));
-      const toTurn = Math.hypot(aimX - cop.x, aimZ - cop.z);
-      if (turn > 0.6 && toTurn < Math.max(18, cop.speed * 1.2)) slowFor = turn > 1.2 ? 14 : 20;
-    }
-  }
-
-  const want = wrap(Math.atan2(aimX - cop.x, aimZ - cop.z) - cop.heading);
+    // Velocidade pela curvatura do caminho à frente e pelo espaço para frear até cada curva.
+    slowFor = plannedSpeed(brain.path, cop, spec);
+  }  const want = wrap(Math.atan2(aimX - cop.x, aimZ - cop.z) - cop.heading);
   const steer = clamp(-want * 3, -1, 1);
   // Quanto maior o nível, mais rápido a viatura anda: com 1★ dá para despistar.
-  const topSpeed = CAR.maxSpeed * Math.min(1, 0.76 + 0.06 * stars);
-  const desired = slowFor || (Math.abs(want) > 1 ? 14 : topSpeed);
+  const topSpeed = cachedTopSpeed(spec) * Math.min(1, 0.76 + 0.06 * stars);
+  const desired = Math.min(slowFor || Infinity, Math.abs(want) > 1 ? 14 : topSpeed);
   let throttle = 0;
   if (cop.speed < desired - 1) throttle = 1;
   else if (cop.speed > desired + 3) throttle = -1;
 
-  // A partir de 3 estrelas, a viatura "pisa fundo" (turbo) quando está longe e em linha reta.
-  const boost = stars >= 3 && distance > 60 && Math.abs(want) < 0.3 && !slowFor;
+  // A partir de 2 estrelas, a viatura "pisa fundo" (turbo) quando está longe, alinhada
+  // e com folga até a próxima curva.
+  const boost = stars >= 2 && distance > 35 && Math.abs(want) < 0.3 && desired > cop.speed + 12;
   return { input: { throttle, steer }, boost };
 }

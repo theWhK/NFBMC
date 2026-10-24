@@ -1,7 +1,17 @@
 // Menu principal no estilo do Most Wanted (2005): lista vertical à esquerda,
 // navegável por teclado (↑↓, Enter, Esc) e mouse, telas que abrem ao lado e o
 // carro do jogador girando na vitrine, à direita.
-import { PLAYER_COLORS, RIVALS } from "@nfbmc/shared";
+import {
+  CATEGORY_LABELS,
+  DEFAULT_CAR,
+  PLAYER_CARS,
+  PLAYER_COLORS,
+  RIVALS,
+  carSpec,
+  isCarId,
+  topSpeed,
+  zeroToHundred,
+} from "@nfbmc/shared";
 
 import type { Sound } from "./audio.ts";
 import { fetchListaGorda, fetchProfile } from "./net.ts";
@@ -11,6 +21,15 @@ import { escapeHtml, kcal, setHtml, ui } from "./ui.ts";
 export type MenuEntry = "world" | "world-solo" | "quick" | "solo";
 
 const COLOR_KEY = "nfbmc:color";
+const CAR_KEY = "nfbmc:car";
+const GEARBOX_KEY = "nfbmc:manual";
+
+/** Números da ficha de cada carro (calculados pela mesma física do jogo). */
+const STATS = Object.fromEntries(PLAYER_CARS.map((id) => {
+  const spec = carSpec(id);
+  return [id, { top: topSpeed(spec) * 3.6, zeroTo100: zeroToHundred(spec), torque: spec.torque, mass: spec.mass }];
+}));
+const MAX_TOP = Math.max(...Object.values(STATS).map((s) => s.top));
 
 interface MenuOptions {
   sound: Sound;
@@ -36,7 +55,11 @@ export function createMenu(options: MenuOptions) {
 
   let color = storage.get(COLOR_KEY);
   if (!(PLAYER_COLORS as readonly string[]).includes(color)) color = PLAYER_COLORS[0];
-  scene?.setShowcase(color);
+  let car = storage.get(CAR_KEY);
+  if (!isCarId(car)) car = DEFAULT_CAR;
+  let manual = storage.get(GEARBOX_KEY) === "1";
+  const showcase = (c = color, id = car) => scene?.setShowcase(c, id);
+  showcase();
 
   /** Lista ativa: a principal ou a de dentro de uma tela aberta (submenu). */
   let active: HTMLButtonElement[] = items;
@@ -62,8 +85,8 @@ export function createMenu(options: MenuOptions) {
   /** Esc: fecha o submenu e volta para a lista principal. */
   const back = () => {
     if (active === items) return;
-    // Saiu da garagem sem escolher: a vitrine volta para a cor guardada.
-    scene?.setShowcase(color);
+    // Saiu da garagem sem escolher: a vitrine volta para o carro e a cor guardados.
+    showcase();
     for (const b of active) b.classList.remove("selected");
     active = items;
     select(items.indexOf(items.find((b) => b.dataset.screen === openScreen?.dataset.screenId) ?? items[0]));
@@ -78,7 +101,7 @@ export function createMenu(options: MenuOptions) {
       const sub = [...(openScreen?.querySelectorAll<HTMLButtonElement>(".mw-list.sub button, .swatches button") ?? [])];
       if (sub.length) {
         active = sub;
-        select(button.dataset.screen === "garage" ? Math.max(0, PLAYER_COLORS.indexOf(color as (typeof PLAYER_COLORS)[number])) : 0, sub);
+        select(button.dataset.screen === "garage" ? Math.max(0, sub.findIndex((b) => b.dataset.car === car)) : 0, sub);
       }
       return;
     }
@@ -100,30 +123,85 @@ export function createMenu(options: MenuOptions) {
   ui.quick.addEventListener("click", () => options.onEnter("quick"));
   ui.solo.addEventListener("click", () => options.onEnter("solo"));
 
-  // Garagem: uma amostra de cada cor; a escolhida vai para a vitrine e fica guardada.
+  // Garagem: lista de carros por categoria e a ficha do selecionado.
+  const carList = document.getElementById("car-list")!;
+  const carInfo = document.getElementById("car-info")!;
+  let lastCategory = "";
+  setHtml(carList, PLAYER_CARS.map((id) => {
+    const spec = carSpec(id);
+    const header = spec.category !== lastCategory ? `<span class="cat">${CATEGORY_LABELS[spec.category]}</span>` : "";
+    lastCategory = spec.category;
+    return `${header}<button type="button" data-car="${id}">${escapeHtml(spec.name)}</button>`;
+  }).join(""));
+  const bar = (label: string, value: number, max: number, text: string) =>
+    `<div class="stat-bar"><span>${label}</span><div class="track"><div class="fill" style="width:${Math.round(Math.min(1, value / max) * 100)}%"></div></div><strong>${text}</strong></div>`;
+  const showCarInfo = (id: string) => {
+    const spec = carSpec(id);
+    const stats = STATS[id];
+    setHtml(carInfo, `
+      <h3>${escapeHtml(spec.name)}</h3>
+      <p class="inspired">${CATEGORY_LABELS[spec.category]} · inspirado no ${escapeHtml(spec.inspired)}</p>
+      <p class="food">${escapeHtml(spec.food)}</p>
+      ${bar("Velocidade", stats.top, MAX_TOP, `${Math.round(stats.top)} km/h`)}
+      ${bar("Aceleração", 1 / stats.zeroTo100, 1, `${stats.zeroTo100.toFixed(1).replace(".", ",")} s`)}
+      ${bar("Torque", stats.torque, 1250, `${stats.torque} N·m`)}
+      ${bar("Peso", stats.mass, 1900, `${stats.mass} kg`)}
+      <div class="stat-bar"><span>Câmbio</span><span>${spec.gears.length} marchas · giro até ${spec.redline.toLocaleString("pt-BR")}</span></div>`);
+  };
+  const refreshCars = () => {
+    for (const b of carList.querySelectorAll<HTMLButtonElement>("button")) b.classList.toggle("selected-car", b.dataset.car === car);
+  };
+  showCarInfo(car);
+  refreshCars();
+  for (const button of carList.querySelectorAll<HTMLButtonElement>("button")) {
+    const id = button.dataset.car!;
+    button.addEventListener("click", () => {
+      car = id;
+      storage.set(CAR_KEY, car);
+      showCarInfo(car);
+      showcase();
+      refreshCars();
+      sound.click();
+    });
+    // Passar pelo carro já mostra a ficha e a vitrine com ele.
+    button.addEventListener("mouseenter", () => {
+      showCarInfo(id);
+      showcase(color, id);
+    });
+  }
+
+  // Pintura: uma amostra de cada cor; a escolhida vai para a vitrine e fica guardada.
   setHtml(swatches, PLAYER_COLORS.map((c) =>
     `<button type="button" data-color="${c}" style="background:${c}" aria-label="Cor ${c}"></button>`).join(""));
   const refreshSwatches = () => {
-    for (const b of swatches.querySelectorAll<HTMLButtonElement>("button")) b.classList.toggle("selected", b.dataset.color === color);
+    // "chosen" (e não "selected", que é o foco do teclado no submenu).
+    for (const b of swatches.querySelectorAll<HTMLButtonElement>("button")) b.classList.toggle("chosen", b.dataset.color === color);
   };
   refreshSwatches();
   for (const button of swatches.querySelectorAll<HTMLButtonElement>("button")) {
     button.addEventListener("click", () => {
       color = button.dataset.color!;
       storage.set(COLOR_KEY, color);
-      scene?.setShowcase(color);
+      showcase();
       refreshSwatches();
       sound.click();
     });
     // Na garagem, só passar pela cor já mostra o carro com ela.
-    button.addEventListener("focus", () => scene?.setShowcase(button.dataset.color!));
+    button.addEventListener("focus", () => showcase(button.dataset.color!));
   }
 
   // Opções de som.
+  const optGearbox = document.getElementById("opt-gearbox") as HTMLButtonElement;
   const refreshOptions = () => {
     optMusic.textContent = `Música: ${sound.prefs.music ? "ligada" : "desligada"}`;
     optSfx.textContent = `Efeitos: ${sound.prefs.sfx ? "ligados" : "desligados"}`;
+    optGearbox.textContent = `Câmbio: ${manual ? "manual (E/Q)" : "automático"}`;
   };
+  optGearbox.addEventListener("click", () => {
+    manual = !manual;
+    storage.set(GEARBOX_KEY, manual ? "1" : "0");
+    refreshOptions();
+  });
   refreshOptions();
   optMusic.addEventListener("click", () => {
     sound.toggle("music");
@@ -176,14 +254,21 @@ export function createMenu(options: MenuOptions) {
     } else if (e.code === "Escape" || e.code === "Backspace") {
       back();
     }
-    // Na garagem, a cor selecionada pelo teclado já aparece na vitrine.
-    if (active[0]?.dataset.color) scene?.setShowcase(active[selected].dataset.color!);
+    // Na garagem, o carro ou a cor selecionados pelo teclado já aparecem na vitrine.
+    const current = active[selected];
+    if (current?.dataset.color) showcase(current.dataset.color);
+    if (current?.dataset.car) {
+      showCarInfo(current.dataset.car);
+      showcase(color, current.dataset.car);
+    }
   });
 
   select(0);
   return {
     color: () => color,
+    car: () => car,
+    manual: () => manual,
     /** Volta a mostrar a vitrine (ex.: ao sair do jogo). */
-    show: () => scene?.setShowcase(color),
+    show: () => showcase(),
   };
 }

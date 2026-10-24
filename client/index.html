@@ -55,15 +55,14 @@
         </div>
       </section>
 
-      <section class="mw-screen" data-screen-id="garage" hidden>
+      <section class="mw-screen garage-screen" data-screen-id="garage" hidden>
         <h2>Garagem</h2>
-        <p class="hint">Se outro piloto na sala já estiver com a cor, você fica com outra.</p>
+        <div class="garage">
+          <div class="mw-list sub car-list" id="car-list" data-testid="car-list"></div>
+          <div class="car-info" id="car-info" data-testid="car-info"></div>
+        </div>
+        <p class="hint">Pintura (se outro piloto na sala já estiver com a cor, você fica com outra):</p>
         <div class="swatches" id="swatches" data-testid="swatches"></div>
-        <dl class="specs">
-          <dt>Modelo</dt><dd>Carrinho de lanche GT</dd>
-          <dt>Motor</dt><dd>1.0 movido a banha</dd>
-          <dt>Teto</dt><dd>X-Burguer original</dd>
-        </dl>
       </section>
 
       <section class="mw-screen" data-screen-id="options" hidden>
@@ -71,8 +70,9 @@
         <div class="mw-list sub">
           <button type="button" id="opt-music" data-testid="opt-music">Música: ligada</button>
           <button type="button" id="opt-sfx" data-testid="opt-sfx">Efeitos: ligados</button>
+          <button type="button" id="opt-gearbox" data-testid="opt-gearbox">Câmbio: automático</button>
         </div>
-        <p class="hint">↑/W acelera · ↓/S freia · ←→/AD vira · Enter dispara corrida no ponto · M liga/desliga a música</p>
+        <p class="hint">↑/W acelera · ↓/S freia (parado: ré) · ←→/AD vira · E/Shift sobe marcha · Q/Ctrl desce (câmbio manual) · Enter dispara corrida no ponto · M liga/desliga a música</p>
       </section>
 
       <section class="mw-screen" data-screen-id="credits" hidden>
@@ -191,6 +191,10 @@
       <div class="touch-steer">
         <button type="button" data-key="TouchLeft" data-testid="touch-left" aria-label="Virar à esquerda">◀</button>
         <button type="button" data-key="TouchRight" data-testid="touch-right" aria-label="Virar à direita">▶</button>
+      </div>
+      <div class="touch-shift">
+        <button type="button" data-shift="1" data-testid="touch-shift-up" aria-label="Subir marcha">+</button>
+        <button type="button" data-shift="-1" data-testid="touch-shift-down" aria-label="Descer marcha">−</button>
       </div>
       <div class="touch-pedals">
         <button type="button" data-key="TouchDown" data-testid="touch-brake" class="brake" aria-label="Freio e ré">FREIO</button>
