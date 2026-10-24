@@ -23,6 +23,11 @@ import type { WorldRoom } from "./net.ts";
 import type { CarView } from "./scene.ts";
 import { escapeHtml, foodByCalories, kcal, setHtml, showPopup, ui } from "./ui.ts";
 
+export interface WorldHooks {
+  onCalories?: (gained: number) => void;
+  onEscape?: (stars: number, bonus: number) => void;
+}
+
 export class WorldMode {
   readonly room: WorldRoom;
   private ctx: ModeContext;
@@ -34,9 +39,19 @@ export class WorldMode {
   /** Bairro onde o carro estava no quadro anterior (para mostrar a placa ao trocar). */
   private district: string | null = null;
 
-  constructor(room: WorldRoom, ctx: ModeContext, onGoRace: (message: GoRaceMessage) => void, onToken: (token: string) => void) {
+  /** Ganchos do modo história (calorias ganhas e fugas da Vigilância). */
+  private hooks: WorldHooks;
+
+  constructor(
+    room: WorldRoom,
+    ctx: ModeContext,
+    onGoRace: (message: GoRaceMessage) => void,
+    onToken: (token: string) => void,
+    hooks: WorldHooks = {},
+  ) {
     this.room = room;
     this.ctx = ctx;
+    this.hooks = hooks;
     room.onMessage("profile", (message: { token: string; races: number; wins: number; bestRace: number }) => {
       onToken(message.token);
       ui.worldStats.textContent = message.races > 0
@@ -49,6 +64,8 @@ export class WorldMode {
       // O número que sobe/desce aqui já é o da Vigilância; não é comida.
       this.previous.calories = -1;
       if (message.result === "escaped") {
+        // O prêmio é 300 kcal por estrela: daí sai o nível da fuga.
+        this.hooks.onEscape?.(Math.round(message.calories / POLICE.escapeBonusPerStar), message.calories);
         ctx.sound.escaped();
         this.showBanner("escaped", "Escapou!", `A Vigilância perdeu você de vista. +${kcal(message.calories)} kcal`);
       } else {
@@ -200,6 +217,7 @@ export class WorldMode {
       const food = foodByCalories(gained);
       ctx.sound.eat(food?.kind);
       showPopup(`+${kcal(gained)} kcal${food ? ` ${food.label.toLowerCase()}` : ""}`);
+      this.hooks.onCalories?.(gained);
     }
     if (me.boost > this.previous.boost + 0.9) ctx.sound.boost();
     ctx.detectBump(this.previous, me.speed);

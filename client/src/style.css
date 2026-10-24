@@ -1468,3 +1468,304 @@ body.touch .panel.side {
   max-height: calc(100vh - 280px);
   overflow-y: auto;
 }
+
+/* --- Modo história ------------------------------------------------------ */
+
+.story-board {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  gap: 16px;
+}
+
+.ladder {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 44vh;
+  overflow-y: auto;
+}
+
+.ladder li {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  padding: 3px 6px;
+  margin-bottom: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid #555;
+  font-size: 0.85rem;
+}
+
+.ladder li .rank {
+  font: italic 1.2rem var(--hud);
+}
+
+.ladder li small {
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.ladder li.beaten {
+  border-color: #2a9d4a;
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.ladder li.current {
+  border-color: var(--mustard);
+  background: rgba(255, 196, 46, 0.15);
+}
+
+.ladder li.locked {
+  opacity: 0.45;
+}
+
+.story-target h3 {
+  margin: 0;
+  font: italic 1.4rem var(--hud);
+  color: var(--mustard);
+}
+
+.story-target .quote {
+  margin: 4px 0 10px;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.req {
+  display: flex;
+  justify-content: space-between;
+  margin: 3px 0;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.85rem;
+}
+
+.req.done {
+  color: #8cff9e;
+}
+
+.req.done::after {
+  content: " ✔";
+}
+
+.story-actions {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 10px;
+}
+
+.story-objective {
+  margin-top: 6px;
+  padding: 6px 10px;
+  font: 0.8rem system-ui, sans-serif;
+  background: rgba(22, 17, 13, 0.75);
+  border-left: 3px solid var(--mustard);
+  text-shadow: none;
+}
+
+.story-objective strong {
+  font-family: var(--hud);
+  color: var(--mustard);
+}
+
+.story-objective .ok {
+  color: #8cff9e;
+}
+
+/* Quadrinhos: quadro de borda grossa, retícula, caixa de fala amarela. */
+.comic {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(10, 8, 6, 0.85);
+}
+
+.comic-panel {
+  position: relative;
+  width: min(760px, calc(100vw - 32px));
+  min-height: min(420px, 60vh);
+  border: 6px solid #0a0806;
+  box-shadow: 10px 10px 0 #0a0806;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.25) 1.4px, transparent 1.6px);
+  background-size: 9px 9px;
+  transform: rotate(-1deg);
+  animation: comic-in 0.25s ease-out;
+  overflow: hidden;
+}
+
+@keyframes comic-in {
+  from {
+    transform: rotate(-4deg) scale(0.92);
+    opacity: 0;
+  }
+}
+
+.comic-art {
+  position: absolute;
+  inset: 0 0 34% 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(3rem, 12vh, 7rem);
+  letter-spacing: 0.1em;
+  font-family: var(--stamp);
+  color: #fff;
+  text-shadow: 4px 4px 0 #0a0806;
+}
+
+.comic-speaker {
+  position: absolute;
+  left: 22px;
+  bottom: calc(34% - 18px);
+  padding: 4px 14px;
+  font: 1.1rem var(--stamp);
+  text-transform: uppercase;
+  color: #0a0806;
+  background: #fff;
+  border: 4px solid #0a0806;
+  transform: rotate(-3deg);
+}
+
+.comic-speaker:empty {
+  display: none;
+}
+
+.comic-text {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  min-height: 26%;
+  padding: 14px 18px;
+  font: 1.15rem/1.35 "Russo One", system-ui, sans-serif;
+  color: #0a0806;
+  background: #ffe36b;
+  border: 4px solid #0a0806;
+}
+
+.comic-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--hud);
+}
+
+.comic-controls button:not(.link) {
+  width: auto;
+  padding: 8px 22px;
+}
+
+/* Apresentação do rival, no estilo das apresentações de personagem do Borderlands. */
+.rival-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+  overflow: hidden;
+  animation: rival-flash 0.15s;
+}
+
+.rival-intro .band {
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  top: 34%;
+  height: 34%;
+  background: linear-gradient(90deg, #ffc42e, #ff7a00);
+  border-top: 6px solid #0a0806;
+  border-bottom: 6px solid #0a0806;
+  transform: rotate(-6deg);
+  animation: band-in 0.35s ease-out;
+}
+
+.rival-intro .rank,
+.rival-intro .name,
+.rival-intro .title,
+.rival-intro .car {
+  position: absolute;
+  left: 8%;
+  transform: rotate(-6deg);
+  text-shadow: 4px 4px 0 #0a0806;
+}
+
+.rival-intro .rank {
+  top: 26%;
+  font: 3rem var(--stamp);
+  color: #fff;
+}
+
+.rival-intro .name {
+  top: 39%;
+  font: clamp(3rem, 9vw, 6.5rem) var(--stamp);
+  text-transform: uppercase;
+  color: #fff;
+  -webkit-text-stroke: 3px #0a0806;
+  animation: name-in 0.4s ease-out;
+}
+
+.rival-intro .title {
+  top: 58%;
+  font: italic 1.6rem var(--hud);
+  color: #0a0806;
+  text-shadow: none;
+}
+
+.rival-intro .car {
+  top: 72%;
+  font: 1.2rem var(--hud);
+  color: #fff;
+}
+
+@keyframes band-in {
+  from {
+    transform: rotate(-6deg) translateX(-100%);
+  }
+}
+
+@keyframes name-in {
+  from {
+    transform: rotate(-6deg) translateX(60%) scale(1.4);
+    opacity: 0;
+  }
+}
+
+@keyframes rival-flash {
+  from {
+    background: #fff;
+  }
+}
+
+#duel-result {
+  z-index: 30;
+}
+
+#duel-result button {
+  width: auto;
+  padding: 10px 28px;
+}
+
+@media (max-height: 520px) {
+  .story-board {
+    grid-template-columns: 200px 1fr;
+  }
+
+  .ladder {
+    max-height: 36vh;
+  }
+
+  .comic-text {
+    font-size: 0.95rem;
+    padding: 8px 12px;
+  }
+
+  .comic-panel {
+    min-height: 70vh;
+  }
+}

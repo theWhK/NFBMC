@@ -19,7 +19,7 @@ export const CATEGORY_LABELS: Record<CarCategory, string> = {
 /** Formato da carroceria: o cliente desenha cada um de um jeito. */
 export type BodyStyle =
   | "fusca" | "uno" | "gol" | "sedan" | "hatch" | "opala" | "muscle"
-  | "supra" | "skyline" | "porsche" | "wedge" | "ferrari" | "veyron" | "hyper" | "a3";
+  | "supra" | "skyline" | "porsche" | "wedge" | "ferrari" | "veyron" | "hyper" | "a3" | "m3";
 
 export interface CarSpec {
   id: string;
@@ -139,6 +139,12 @@ const CARS_LIST: CarSpec[] = [
     food: "Sueco de nascença, árabe de coração. Recheio de hortelã e fibra de carbono.",
     color: "#6b4a2b", mass: 1435, torque: 1100, peakRpm: 4100, idleRpm: 950, redline: 7800,
     gears: [2.98, 2.15, 1.6, 1.24, 1.0, 0.82, 0.7], finalDrive: 3.36, wheelRadius: 0.36, dragArea: 0.6, brake: 12.5, turn: 2.4, understeer: 0.28,
+  },
+  {
+    id: "m3", name: "M3 Gorgonzola GTR", inspired: "BMW M3 GTR (E46)", category: "lenda", body: "m3",
+    food: "Prata com veias azuis, igual ao queijo. O carro do protagonista: forte, fedido e lendário. Foi roubado pelo Bruno no prólogo.",
+    color: "#c9ced6", mass: 1350, torque: 620, peakRpm: 6200, idleRpm: 1000, redline: 8600,
+    gears: [3.2, 2.2, 1.65, 1.3, 1.07, 0.88], finalDrive: 3.3, wheelRadius: 0.34, dragArea: 0.58, brake: 12, turn: 2.55, understeer: 0.22,
   },
   {
     id: "a3bruno", name: "A3 do Bruno", inspired: "Audi A3 1.8T 2002 (todo mexido)", category: "lenda", body: "a3",

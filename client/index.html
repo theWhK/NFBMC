@@ -18,6 +18,7 @@
     <div id="topbar">
       <span id="status" data-testid="status">Digite seu apelido</span>
       · Jogadores: <span id="player-count" data-testid="player-count">0</span>
+      <button id="to-menu" class="icon" title="Voltar ao menu" data-testid="to-menu" hidden>☰</button>
       <button id="toggle-music" class="icon" title="Música (M)">🎵</button>
       <button id="toggle-sfx" class="icon" title="Efeitos sonoros">🔊</button>
     </div>
@@ -27,6 +28,7 @@
 
       <!-- Lista principal, à esquerda (como no menu do Most Wanted de 2005). -->
       <nav id="menu-list" class="mw-list" aria-label="Menu principal">
+        <button type="button" data-screen="story" data-testid="story-menu" data-hint="Recupere o seu M3 Gorgonzola: suba a Lista Gorda do #10 ao #1 e derrote o Bruno.">Modo história</button>
         <button type="button" id="world" data-testid="world-button" data-hint="Rode por Porto Gordo com a galera, coma tudo e dispute corridas nos pontos de encontro.">Porto Gordo</button>
         <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="A cidade inteira só para você (e para a Vigilância Sanitária).">Modo solo</button>
         <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida no autódromo, sem passar pela cidade.">Corrida rápida</button>
@@ -37,6 +39,20 @@
       </nav>
 
       <!-- Telas que abrem ao lado da lista. -->
+      <section class="mw-screen wide story-screen" data-screen-id="story" hidden>
+        <h2>Lista Gorda</h2>
+        <div class="story-board">
+          <ol class="ladder" id="ladder" data-testid="ladder"></ol>
+          <div class="story-target" id="story-target" data-testid="story-target"></div>
+        </div>
+        <div class="mw-list sub story-actions">
+          <button type="button" id="story-go" data-testid="story-go">Ir para Porto Gordo</button>
+          <button type="button" id="story-challenge" data-testid="story-challenge">Desafiar</button>
+          <button type="button" id="story-car" data-testid="story-car">Carro: Uno Coxinha</button>
+          <button type="button" id="story-prologue">Rever o prólogo</button>
+        </div>
+      </section>
+
       <section class="mw-screen" data-screen-id="quick" hidden>
         <h2>Corrida rápida</h2>
         <p class="hint">No Autódromo do Colesterol, 3 voltas.</p>
@@ -144,6 +160,7 @@
     <div id="world-hud" hidden>
       <div class="hud-row kcal"><span>🍔 kcal acumuladas</span><strong id="world-calories" data-testid="world-calories">0</strong></div>
       <p class="stats" id="world-stats" data-testid="world-stats"></p>
+      <div id="story-objective" class="story-objective" data-testid="story-objective" hidden></div>
       <p class="hint">Siga as colunas de luz 🏁 no mapa para achar corridas. Comida nas esquinas… mas cuidado com a Vigilância Sanitária!</p>
     </div>
 
@@ -184,6 +201,37 @@
     </div>
 
     <div id="loading" data-testid="loading" hidden></div>
+
+    <!-- Quadrinhos do modo história. -->
+    <div id="comic" class="comic" data-testid="comic" hidden>
+      <div class="comic-panel" id="comic-panel">
+        <div class="comic-art" id="comic-art"></div>
+        <div class="comic-speaker" id="comic-speaker"></div>
+        <div class="comic-text" id="comic-text"></div>
+      </div>
+      <div class="comic-controls">
+        <span id="comic-page"></span>
+        <button type="button" id="comic-next" data-testid="comic-next">Continuar ▶</button>
+        <button type="button" id="comic-skip" class="link" data-testid="comic-skip">Pular</button>
+      </div>
+    </div>
+
+    <!-- Apresentação do rival (estilo Borderlands). -->
+    <div id="rival-intro" class="rival-intro" data-testid="rival-intro" hidden>
+      <div class="band"></div>
+      <div class="rank" id="rival-rank"></div>
+      <div class="name" id="rival-name"></div>
+      <div class="title" id="rival-title"></div>
+      <div class="car" id="rival-car"></div>
+    </div>
+
+    <!-- Resultado do duelo. -->
+    <div id="duel-result" class="panel center" data-testid="duel-result" hidden>
+      <p class="stamp" id="duel-stamp"></p>
+      <h2 id="duel-title"></h2>
+      <p id="duel-text"></p>
+      <button type="button" id="duel-continue" data-testid="duel-continue">Continuar</button>
+    </div>
 
     <canvas id="minimap" width="180" height="180" hidden></canvas>
 

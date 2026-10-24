@@ -16,6 +16,14 @@ import type { RaceRoom } from "./net.ts";
 import type { CarView } from "./scene.ts";
 import { escapeHtml, foodByCalories, kcal, ordinal, setHtml, showPopup, ui } from "./ui.ts";
 
+export interface RaceFinish {
+  /** Colocação na chegada (0 = não terminou). */
+  place: number;
+  total: number;
+  event: boolean;
+  challenge: boolean;
+}
+
 export class RaceMode {
   readonly room: RaceRoom;
   private ctx: ModeContext;
@@ -24,9 +32,14 @@ export class RaceMode {
   /** Valores do quadro anterior, para perceber eventos (comeu, deu volta, bateu...). */
   private previous = { phase: "", countdown: 0, lap: 0, finished: false, calories: 0, boost: 0, speed: 0, bumpAt: 0 };
 
-  constructor(room: RaceRoom, ctx: ModeContext, onBackToWorld?: (raceId: RaceId) => void) {
+  /** Avisado uma vez quando a corrida termina (para o modo história). */
+  private onFinish?: (result: RaceFinish) => void;
+  private reportedFinish = false;
+
+  constructor(room: RaceRoom, ctx: ModeContext, onBackToWorld?: (raceId: RaceId) => void, onFinish?: (result: RaceFinish) => void) {
     this.room = room;
     this.ctx = ctx;
+    this.onFinish = onFinish;
     // Botões do lobby (onclick substitui o handler de uma corrida anterior).
     const changeBots = (delta: number) => {
       ctx.sound.click();
@@ -123,8 +136,10 @@ export class RaceMode {
     ctx.sound.song(current === "racing" ? "race" : current === "countdown" ? null : "lobby");
 
     // Lobby (corridas de evento largam sozinhas, sem lobby)
-    ui.lobby.hidden = current !== "lobby" || room.state.event;
-    if (current === "lobby" && !room.state.event) {
+    // Corridas de evento e duelos largam sozinhos, sem lobby.
+    const autoStart = room.state.event || room.state.challenge;
+    ui.lobby.hidden = current !== "lobby" || autoStart;
+    if (current === "lobby" && !autoStart) {
       const humans = [...players.entries()].filter(([, p]) => !p.bot);
       const difficulty = room.state.difficulty as Difficulty;
       const bots = Math.min(room.state.botCount, MAX_PLAYERS - humans.length);
@@ -184,8 +199,16 @@ export class RaceMode {
     ui.message.hidden = !message;
     setHtml(ui.message, message);
 
+    // Fim da corrida: avisa uma vez (modo história) e, no duelo, o placar fica com a tela do duelo.
+    if (current !== "results") this.reportedFinish = false;
+    else if (!this.reportedFinish && this.onFinish) {
+      this.reportedFinish = true;
+      const mine = [...(room.state.results ?? [])].find((r) => r.sessionId === room.sessionId);
+      this.onFinish({ place: mine?.place ?? 0, total: mine?.total ?? 0, event: room.state.event, challenge: room.state.challenge });
+    }
+
     // Resultado
-    ui.results.hidden = current !== "results";
+    ui.results.hidden = current !== "results" || room.state.challenge;
     if (current === "results") {
       const rows = [...(room.state.results ?? [])];
       const winner = rows[0];
@@ -203,7 +226,7 @@ export class RaceMode {
             `<td>+${kcal(row.bonus)}</td><td>${kcal(row.total)}</td></tr>`)
           .join(""),
       );
-      ui.resultsTimer.textContent = room.state.event
+      ui.resultsTimer.textContent = room.state.challenge ? "" : room.state.event
         ? Number.isFinite(room.state.timer) && secondsLeft > 0
           ? `Voltando para Porto Gordo em ${secondsLeft}s (as calorias vão para a sua conta)`
           : "Voltando para Porto Gordo…"

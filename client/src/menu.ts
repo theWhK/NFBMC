@@ -6,7 +6,7 @@ import {
   DEFAULT_CAR,
   PLAYER_CARS,
   PLAYER_COLORS,
-  RIVALS,
+  RIVALS_LADDER,
   carSpec,
   isCarId,
   topSpeed,
@@ -18,7 +18,7 @@ import { fetchListaGorda, fetchProfile } from "./net.ts";
 import type { GameScene } from "./scene.ts";
 import { escapeHtml, kcal, setHtml, ui } from "./ui.ts";
 
-export type MenuEntry = "world" | "world-solo" | "quick" | "solo";
+export type MenuEntry = "world" | "world-solo" | "quick" | "solo" | "story" | "challenge";
 
 const COLOR_KEY = "nfbmc:color";
 const CAR_KEY = "nfbmc:car";
@@ -39,6 +39,8 @@ interface MenuOptions {
   token: () => string | undefined;
   onEnter: (entry: MenuEntry) => void;
   onAudioChange: () => void;
+  /** Uma tela do menu foi aberta (ex.: a do modo história, para atualizar o quadro). */
+  onScreen?: (id: string) => void;
 }
 
 export function createMenu(options: MenuOptions) {
@@ -97,6 +99,7 @@ export function createMenu(options: MenuOptions) {
     sound.click();
     if (button.dataset.screen) {
       showScreen(button.dataset.screen);
+      options.onScreen?.(button.dataset.screen);
       // Telas com botões viram um submenu navegável pelo teclado.
       const sub = [...(openScreen?.querySelectorAll<HTMLButtonElement>(".mw-list.sub button, .swatches button") ?? [])];
       if (sub.length) {
@@ -232,9 +235,10 @@ export function createMenu(options: MenuOptions) {
   });
 
   // Lista Gorda: os rivais (bots) e o placar de todos os tempos.
-  setHtml(rivals, RIVALS.map((r, i) => `
-    <div class="rival"><span class="rank">${i + 1}</span><strong>${escapeHtml(r.name)}</strong>
-    <span class="title">${escapeHtml(r.title)}</span><span class="quote">“${escapeHtml(r.quote)}”</span></div>`).join(""));
+  // A Lista Gorda do modo história, do #1 (o Bruno) para baixo.
+  setHtml(rivals, [...RIVALS_LADDER].reverse().map((r) => `
+    <div class="rival"><span class="rank">${r.rank}</span><strong>${escapeHtml(r.name)}</strong>
+    <span class="title">${escapeHtml(r.title)} · ${escapeHtml(carSpec(r.car).name)}</span><span class="quote">“${escapeHtml(r.taunt[0].text)}”</span></div>`).join(""));
   fetchListaGorda().then((entries) => {
     if (!entries.length) return;
     setHtml(ui.hallList, entries.map((e) => `<li>${escapeHtml(e.name)} <strong>${kcal(e.calories)}</strong></li>`).join(""));
