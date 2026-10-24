@@ -8,13 +8,13 @@ test.afterEach(async () => {
 });
 
 /** Abre o jogo num contexto separado (= outro jogador) e entra com um apelido. */
-async function join(browser: Browser, name: string) {
+async function join(browser: Browser, name: string, mode: "multiplayer" | "solo" = "multiplayer") {
   const context = await browser.newContext();
   contexts.push(context);
   const page = await context.newPage();
   await page.goto("/");
   await page.getByTestId("name-input").fill(name);
-  await page.getByTestId("join-button").click();
+  await page.getByTestId(mode === "solo" ? "solo-button" : "join-button").click();
   await expect(page.getByTestId("status")).toHaveText(/^Conectado/);
   return page;
 }
@@ -71,4 +71,32 @@ test("quem entra no meio da corrida espera a próxima", async ({ browser }) => {
   await expect(carol.getByTestId("message")).toContainText("você entra na próxima");
   const carolId = await sessionId(carol);
   expect((await playerSeenBy(alice, carolId)).racing).toBe(false);
+});
+
+test("sozinho contra bots: sala privada, bots configuráveis e correndo", async ({ browser }) => {
+  const will = await join(browser, "Will", "solo");
+  await expect(will.getByTestId("bots-count")).toHaveText("5");
+  await will.getByRole("button", { name: "Mais bots" }).click();
+  await expect(will.getByTestId("bots-count")).toHaveText("6");
+  await will.getByTestId("difficulty").selectOption("dificil");
+  await expect(will.getByTestId("lobby-list")).toContainText("6 bots da Lista Gorda (Difícil)");
+
+  // Quem entra no multiplayer não cai na sala solo.
+  const intruso = await join(browser, "Intruso");
+  await expect(intruso.getByTestId("lobby-list")).not.toContainText("Will");
+  await expect(will.getByTestId("player-count")).toHaveText("1");
+
+  await will.getByTestId("start-button").click();
+  await expect.poll(() => phase(will), { timeout: 6_000 }).toBe("racing");
+
+  const bots = async () =>
+    Object.values(await will.evaluate(() => window.__nfbmc!.players())).filter((p) => p.bot);
+  const start = await bots();
+  expect(start).toHaveLength(6);
+  expect(start.every((b) => b.racing)).toBe(true);
+
+  // Os bots largam sozinhos e andam pela pista.
+  await expect
+    .poll(async () => Math.min(...(await bots()).map((b, i) => Math.hypot(b.x - start[i].x, b.z - start[i].z))))
+    .toBeGreaterThan(30);
 });

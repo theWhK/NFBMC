@@ -5,8 +5,11 @@ import { ColyseusSDK } from "@colyseus/sdk";
 import type server from "@nfbmc/server/app.config";
 import {
   FOOD,
+  DIFFICULTY_LABELS,
+  MAX_PLAYERS,
   ROOM_NAME,
   TOTAL_LAPS,
+  type Difficulty,
   type FoodKind,
   type InputMessage,
   type Phase,
@@ -30,6 +33,13 @@ const ui = {
   lobby: $("lobby"),
   lobbyList: $("lobby-list"),
   start: $<HTMLButtonElement>("start"),
+  solo: $<HTMLButtonElement>("solo"),
+  lobbyTitle: $("lobby-title"),
+  lobbyHint: $("lobby-hint"),
+  botsMinus: $<HTMLButtonElement>("bots-minus"),
+  botsPlus: $<HTMLButtonElement>("bots-plus"),
+  botsCount: $("bots-count"),
+  difficulty: $<HTMLSelectElement>("difficulty"),
   hud: $("hud"),
   lap: $("lap"),
   place: $("place"),
@@ -57,8 +67,12 @@ const endpoint = import.meta.env.DEV
   : `${wsProtocol}://${location.host}`;
 
 const client = new ColyseusSDK<typeof server>(endpoint);
-const joinRace = (name: string) => client.joinOrCreate(ROOM_NAME, { name });
-type RaceRoom = Awaited<ReturnType<typeof joinRace>>;
+const joinPublic = (name: string) => client.joinOrCreate(ROOM_NAME, { name });
+type RaceRoom = Awaited<ReturnType<typeof joinPublic>>;
+// Solo cria uma sala privada nova; multiplayer cai na sala pública da galera.
+// (As duas são a mesma RaceRoom; o cast só unifica os tipos genéricos do SDK.)
+const joinRace = (name: string, solo: boolean): Promise<RaceRoom> =>
+  solo ? (client.create(ROOM_NAME, { name, solo: true }) as Promise<unknown> as Promise<RaceRoom>) : joinPublic(name);
 
 const NAME_KEY = "nfbmc:name";
 const storage = {
@@ -172,7 +186,7 @@ function carViews() {
   const showAll = phase() === "lobby" || phase() === "results";
   room.state.players?.forEach((p, id) => {
     views.set(id, {
-      name: p.name,
+      name: p.bot ? `🤖 ${p.name}` : p.name,
       color: p.color,
       x: p.x,
       z: p.z,
@@ -243,19 +257,31 @@ function updateUi(r: RaceRoom) {
   const spectating = current !== "lobby" && !me.racing;
   const racers = [...players.values()].filter((p) => p.racing);
 
-  ui.count.textContent = String(players.size);
+  ui.count.textContent = String([...players.values()].filter((p) => !p.bot).length);
   sound.song(current === "racing" ? "race" : current === "countdown" ? null : "lobby");
 
   // Lobby
   ui.lobby.hidden = current !== "lobby";
   if (current === "lobby") {
+    const humans = [...players.entries()].filter(([, p]) => !p.bot);
+    const difficulty = r.state.difficulty as Difficulty;
+    const bots = Math.min(r.state.botCount, MAX_PLAYERS - humans.length);
     setHtml(
       ui.lobbyList,
-      [...players.entries()]
+      humans
         .map(([id, p]) =>
           `<li><span class="dot" style="background:${p.color}"></span>${escapeHtml(p.name)}${id === r.sessionId ? " (você)" : ""}</li>`)
-        .join(""),
+        .join("") +
+        (bots > 0 ? `<li>🤖 ${bots} ${bots === 1 ? "bot" : "bots"} da Lista Gorda (${DIFFICULTY_LABELS[difficulty]})</li>` : ""),
     );
+    ui.lobbyTitle.textContent = r.state.solo ? "Corrida solo" : "Lobby";
+    ui.lobbyHint.textContent = r.state.solo
+      ? "Você contra os bots. Escolha quantos e a dificuldade."
+      : "Dirija à vontade enquanto a galera chega.";
+    ui.botsCount.textContent = String(bots);
+    ui.botsMinus.disabled = bots <= 0;
+    ui.botsPlus.disabled = bots >= MAX_PLAYERS - humans.length;
+    if (document.activeElement !== ui.difficulty) ui.difficulty.value = difficulty;
   }
 
   // HUD da corrida
@@ -308,7 +334,7 @@ function updateUi(r: RaceRoom) {
       rows
         .map((row, i) =>
           `<tr class="${row.sessionId === r.sessionId ? "me" : ""}"><td>${i + 1}</td>` +
-          `<td><span class="dot" style="background:${row.color}"></span>${escapeHtml(row.name)}</td>` +
+          `<td><span class="dot" style="background:${row.color}"></span>${row.bot ? "🤖 " : ""}${escapeHtml(row.name)}</td>` +
           `<td>${row.place ? ordinal(row.place) : "—"}</td><td>${kcal(row.calories)}</td>` +
           `<td>+${kcal(row.bonus)}</td><td>${kcal(row.total)}</td></tr>`)
         .join(""),
@@ -364,9 +390,9 @@ frame();
 
 // --- Entrar no jogo --------------------------------------------------------
 
-async function play(name: string) {
+async function play(name: string, solo: boolean) {
   ui.status.textContent = "Conectando…";
-  const joined = await joinRace(name);
+  const joined = await joinRace(name, solo);
   room = joined;
   ui.status.textContent = scene ? "Conectado" : "Conectado (sem 3D neste navegador)";
   ui.join.hidden = true;
@@ -381,6 +407,7 @@ async function play(name: string) {
       joined.state.players?.forEach((p, id) => {
         snapshot[id] = {
           name: p.name,
+          bot: p.bot,
           x: p.x,
           z: p.z,
           speed: p.speed,
@@ -419,6 +446,17 @@ async function play(name: string) {
     sendInput();
   });
 
+  const changeBots = (delta: number) => {
+    sound.click();
+    joined.send("setBots", { count: joined.state.botCount + delta });
+  };
+  ui.botsMinus.addEventListener("click", () => changeBots(-1));
+  ui.botsPlus.addEventListener("click", () => changeBots(1));
+  ui.difficulty.addEventListener("change", () => {
+    joined.send("setDifficulty", { level: ui.difficulty.value });
+    ui.difficulty.blur();
+  });
+
   ui.start.addEventListener("click", () => {
     sound.click();
     joined.send("start");
@@ -432,24 +470,29 @@ async function play(name: string) {
 
 ui.name.value = storage.get();
 ui.name.focus();
-ui.join.addEventListener("submit", (e) => {
-  e.preventDefault();
+function enter(solo: boolean) {
   sound.unlock();
   sound.click();
-  const button = ui.join.querySelector("button")!;
-  if (button.disabled) return;
-  button.disabled = true;
+  const buttons = [...ui.join.querySelectorAll("button")];
+  if (buttons.some((b) => b.disabled)) return;
+  buttons.forEach((b) => (b.disabled = true));
   const name = ui.name.value.trim();
   storage.set(name);
-  play(name).catch((err) => {
+  play(name, solo).catch((err) => {
     console.error(err);
     ui.status.textContent = "Não foi possível conectar ao servidor.";
-    button.disabled = false;
+    buttons.forEach((b) => (b.disabled = false));
   });
+}
+ui.join.addEventListener("submit", (e) => {
+  e.preventDefault();
+  enter(false);
 });
+ui.solo.addEventListener("click", () => enter(true));
 
 interface NfbmcPlayerSnapshot {
   name: string;
+  bot: boolean;
   x: number;
   z: number;
   speed: number;

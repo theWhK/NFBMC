@@ -26,14 +26,34 @@
         Seu apelido de piloto
         <input id="name" data-testid="name-input" maxlength="16" autocomplete="off" placeholder="ex.: Rei do X-Tudo" />
       </label>
-      <button type="submit" data-testid="join-button">Acelerar</button>
+      <div class="modes">
+        <button type="button" id="solo" data-testid="solo-button">Correr sozinho</button>
+        <button type="submit" data-testid="join-button">Multiplayer</button>
+      </div>
+      <p class="hint">Sozinho: você contra os bots da Lista Gorda. Multiplayer: a sala da galera.</p>
       <p class="hint">↑/W acelera · ↓/S freia · ←→/AD vira · M liga/desliga a música</p>
     </form>
 
     <div id="lobby" class="panel side" hidden>
-      <h2>Lobby</h2>
-      <p class="hint">Dirija à vontade enquanto a galera chega.</p>
+      <h2 id="lobby-title">Lobby</h2>
+      <p class="hint" id="lobby-hint">Dirija à vontade enquanto a galera chega.</p>
       <ul id="lobby-list" data-testid="lobby-list"></ul>
+      <div class="setting">
+        <span>Bots</span>
+        <span class="stepper">
+          <button type="button" id="bots-minus" class="small" aria-label="Menos bots">−</button>
+          <strong id="bots-count" data-testid="bots-count">0</strong>
+          <button type="button" id="bots-plus" class="small" aria-label="Mais bots">+</button>
+        </span>
+      </div>
+      <div class="setting">
+        <span>Dificuldade</span>
+        <select id="difficulty" data-testid="difficulty">
+          <option value="facil">Fácil</option>
+          <option value="medio">Médio</option>
+          <option value="dificil">Difícil</option>
+        </select>
+      </div>
       <button id="start" data-testid="start-button">Começar corrida</button>
     </div>
 

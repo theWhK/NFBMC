@@ -16,6 +16,10 @@ import {
   nearestSample,
   pointOnTrack,
   stepCar,
+  DIFFICULTY_LABELS,
+  SOLO_DEFAULT_BOTS,
+  type CreateOptions,
+  type Difficulty,
   type DriveInput,
   type FoodKind,
   type InputMessage,
@@ -23,6 +27,7 @@ import {
   type Phase,
 } from "@nfbmc/shared";
 
+import { BOT_NAMES, botInput, createBrain, type Brain, type FoodSpot } from "./bots.ts";
 import { Food, Player, RaceState, Result } from "./schema.ts";
 
 const clamp = (value: number, min: number, max: number) =>
@@ -61,8 +66,12 @@ function sanitizeName(raw: unknown, fallback: string) {
   return name || fallback;
 }
 
+const isDifficulty = (value: unknown): value is Difficulty =>
+  typeof value === "string" && value in DIFFICULTY_LABELS;
+
 /**
- * Uma sala só, onde todo mundo cai. Fluxo: lobby (todos dirigem livres) →
+ * Sala de corrida. A sala pública é uma só, onde todo mundo cai; a sala solo é
+ * privada, de um jogador contra bots. Fluxo: lobby (todos dirigem livres) →
  * alguém aperta "Começar" → contagem → corrida de TOTAL_LAPS voltas comendo o
  * que aparecer → resultado (calorias + bônus de colocação) → lobby de novo.
  *
@@ -77,6 +86,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   /** Último setor por onde o carro passou, para contar as voltas. */
   private sectors = new Map<string, number>();
   private respawnAt = new Map<Food, number>();
+  private brains = new Map<string, Brain>();
   private joinCount = 0;
 
   messages = {
@@ -90,9 +100,24 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     start: () => {
       if (this.state.phase === "lobby" && this.state.players.size > 0) this.startCountdown();
     },
+    setBots: (_client: Client, message: { count?: unknown }) => {
+      if (this.state.phase !== "lobby" || typeof message?.count !== "number") return;
+      this.state.botCount = clamp(Math.round(message.count), 0, MAX_PLAYERS - 1);
+    },
+    setDifficulty: (_client: Client, message: { level?: unknown }) => {
+      if (this.state.phase !== "lobby" || !isDifficulty(message?.level)) return;
+      this.state.difficulty = message.level;
+    },
   };
 
-  onCreate() {
+  onCreate(options?: CreateOptions) {
+    if (options?.solo) {
+      // Sala solo: some da busca do "entrar" e só cabe quem criou.
+      this.setPrivate(true);
+      this.maxClients = 1;
+      this.state.solo = true;
+      this.state.botCount = SOLO_DEFAULT_BOTS;
+    }
     for (const [dist, side, kind] of FOOD_LAYOUT) {
       const food = new Food();
       const point = pointOnTrack(TRACK, dist, side);
@@ -135,9 +160,39 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     player.speed = 0;
   }
 
+  private removeBots() {
+    for (const id of this.brains.keys()) {
+      this.state.players.delete(id);
+      this.controls.delete(id);
+      this.sectors.delete(id);
+    }
+    this.brains.clear();
+  }
+
+  /** Coloca os bots da próxima corrida, até completar o limite de carros. */
+  private addBots() {
+    this.removeBots();
+    const humans = this.state.players.size;
+    const count = Math.min(this.state.botCount, MAX_PLAYERS - humans);
+    const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+    for (let i = 0; i < count; i++) {
+      const bot = new Player();
+      bot.bot = true;
+      bot.name = names[i % names.length];
+      const usedColors = new Set([...this.state.players.values()].map((p) => p.color));
+      bot.color = PLAYER_COLORS.find((c) => !usedColors.has(c)) ?? PLAYER_COLORS[i % PLAYER_COLORS.length];
+      const id = `bot-${i}`;
+      this.state.players.set(id, bot);
+      this.brains.set(id, createBrain(this.state.difficulty as Difficulty));
+    }
+  }
+
   private startCountdown() {
+    this.addBots();
+    // Bots largam na frente: quem joga sai de trás e tem que ultrapassar.
+    const grid = [...this.state.players.entries()].sort(([, a], [, b]) => Number(b.bot) - Number(a.bot));
     let slot = 0;
-    this.state.players.forEach((player, sessionId) => {
+    grid.forEach(([sessionId, player]) => {
       this.placeOnGrid(player, slot++);
       player.racing = true;
       player.lap = 0;
@@ -190,6 +245,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
         this.state.timer -= dt;
         this.drive(dt, [...this.state.players.entries()]);
         if (this.state.timer <= 0) {
+          this.removeBots();
           this.state.players.forEach((p) => (p.racing = false));
           this.setPhase("lobby");
         }
@@ -197,8 +253,30 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     }
   }
 
+  /** Os bots decidem o que "apertar" neste tick, como se fossem jogadores. */
+  private driveBots(dt: number) {
+    if (this.brains.size === 0) return;
+    const foods: FoodSpot[] = FOOD_LAYOUT.map(([dist, side], i) => ({ dist, side, active: this.state.foods[i].active }));
+    // Ritmo: um pouco mais lento quando está muito na frente do humano mais
+    // adiantado, um pouco mais rápido quando está muito atrás.
+    const humans = [...this.state.players.values()].filter((p) => !p.bot && p.racing);
+    const bestHuman = humans.length ? Math.max(...humans.map((p) => p.progress)) : null;
+    for (const [id, brain] of this.brains) {
+      const bot = this.state.players.get(id);
+      if (!bot) continue;
+      let pace = 1;
+      if (bestHuman !== null && this.state.phase === "racing") {
+        const lead = bot.progress - bestHuman;
+        pace = lead > 120 ? 0.93 : lead < -150 ? 1.06 : 1;
+      }
+      const others = [...this.state.players.values()].filter((p) => p !== bot && p.racing);
+      this.controls.set(id, botInput(brain, bot, dt, foods, others, pace));
+    }
+  }
+
   private drive(dt: number, cars: [string, Player][]) {
     const racing = this.state.phase === "racing";
+    this.driveBots(dt);
 
     for (const [sessionId, player] of cars) {
       const input = this.controls.get(sessionId) ?? { throttle: 0, steer: 0 };
@@ -302,6 +380,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       row.sessionId = sessionId;
       row.name = p.name;
       row.color = p.color;
+      row.bot = p.bot;
       row.place = p.finished ? p.place : 0;
       row.calories = p.calories;
       // Só ganha bônus de colocação quem cruzou a chegada.

@@ -85,6 +85,12 @@ button:hover {
   filter: brightness(1.12);
 }
 
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  filter: none;
+}
+
 button:active {
   transform: skewX(-8deg) translateY(2px);
   box-shadow: 0 1px 0 #7a2e00;
@@ -134,8 +140,59 @@ button.icon.off {
 }
 
 .menu label,
-.menu button {
-  width: min(360px, 100%);
+.modes {
+  width: min(420px, 100%);
+}
+
+.modes {
+  display: flex;
+  gap: 10px;
+}
+
+.modes button {
+  flex: 1;
+  font-size: 1rem;
+}
+
+.modes button[type="submit"] {
+  background: linear-gradient(#ffd23f, #e8a00c);
+  box-shadow: 0 3px 0 #7a5200;
+}
+
+.setting {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stepper strong {
+  font: 1.3rem var(--hud);
+  min-width: 1.2em;
+  text-align: center;
+}
+
+button.small {
+  padding: 2px 10px;
+  font-size: 1rem;
+}
+
+select {
+  font: 0.95rem var(--hud);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--mustard);
+  background: #16110d;
+  color: inherit;
 }
 
 label {
