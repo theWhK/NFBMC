@@ -188,7 +188,7 @@ export class WorldMode {
       ui.startRace.disabled = this.calling || myCops.length > 0;
       ui.startRace.textContent = myCops.length > 0
         ? "Despiste a Vigilância primeiro!"
-        : this.calling ? "Chamando a galera…" : "Começar corrida (Enter)";
+        : this.calling ? "Chamando a galera…" : document.body.classList.contains("touch") ? "Começar corrida" : "Começar corrida (Enter)";
     }
 
     // Comeu numa barraquinha.

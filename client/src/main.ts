@@ -10,6 +10,7 @@ import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import { createMenu, type MenuEntry } from "./menu.ts";
 import { joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
 import { RaceMode } from "./race-mode.ts";
+import { bindTouchControls, isPortrait, isTouchDevice, requestLandscape } from "./touch.ts";
 import { GameScene } from "./scene.ts";
 import { $, hideModeUi, ui } from "./ui.ts";
 import { WorldMode } from "./world-mode.ts";
@@ -73,8 +74,31 @@ try {
 // --- Controles -------------------------------------------------------------
 
 const keys = new Set<string>();
-const THROTTLE: Record<string, number> = { ArrowUp: 1, KeyW: 1, ArrowDown: -1, KeyS: -1 };
-const STEER: Record<string, number> = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, KeyD: 1 };
+// Teclas "Touch*" são os botões de toque da tela (celular).
+const THROTTLE: Record<string, number> = { ArrowUp: 1, KeyW: 1, ArrowDown: -1, KeyS: -1, TouchUp: 1, TouchDown: -1 };
+const STEER: Record<string, number> = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, KeyD: 1, TouchLeft: -1, TouchRight: 1 };
+
+// --- Celular ---------------------------------------------------------------
+
+const touch = isTouchDevice();
+document.body.classList.toggle("touch", touch);
+const touchControls = bindTouchControls($("touch"), keys, () => sendInput());
+const rotateHint = $("rotate");
+
+/** No jogo, com o celular em pé: pede para girar (o layout foi feito para a tela deitada). */
+function updateRotateHint() {
+  rotateHint.hidden = !(touch && mode && isPortrait());
+}
+window.addEventListener("resize", updateRotateHint);
+screen.orientation?.addEventListener?.("change", updateRotateHint);
+
+// App em segundo plano (trocou de aba, atendeu ligação): solta tudo.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) return;
+  keys.clear();
+  touchControls.reset();
+  sendInput();
+});
 
 function currentInput(): InputMessage {
   let throttle = 0;
@@ -118,6 +142,7 @@ const ctx: ModeContext = {
     const drop = Math.abs(previous.speed) - Math.abs(speed);
     if (drop > 3 && currentInput().throttle >= 0 && now - previous.bumpAt > 400) {
       sound.bump();
+      if (touch) navigator.vibrate?.(60);
       previous.bumpAt = now;
     }
   },
@@ -139,7 +164,10 @@ function setMode(next: WorldMode | RaceMode | null) {
   mode?.dispose();
   hideModeUi();
   sound.updateSiren(null);
+  touchControls.reset();
+  $("touch").hidden = !(touch && next);
   mode = next;
+  updateRotateHint();
   lastSent = "";
   sendInput();
   publishTestHook();
@@ -268,6 +296,8 @@ async function start(entry: MenuEntry) {
 }
 
 function enter(entry: MenuEntry) {
+  // No celular: tela cheia e horizontal (tem que ser pedido ainda dentro do toque).
+  if (touch) void requestLandscape();
   sound.unlock();
   sound.click();
   const buttons = [...ui.join.querySelectorAll("button")];
