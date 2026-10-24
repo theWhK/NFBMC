@@ -1,0 +1,182 @@
+// Pilotos controlados pelo servidor. Cada bot olha um ponto à frente na pista,
+// freia antes das curvas, às vezes desvia para pegar comida e se desatola
+// sozinho quando bate ou sai da pista. Eles "apertam os mesmos botões" que um
+// jogador: a saída é um DriveInput, e a física é a mesma de todo mundo.
+import {
+  CAR,
+  TRACK,
+  nearestSample,
+  pointOnTrack,
+  type CarState,
+  type Difficulty,
+  type DriveInput,
+} from "@nfbmc/shared";
+
+/** Paródia da Blacklist: os 15 mais procurados, versão lanchonete. */
+export const BOT_NAMES = [
+  "Razor Bacon",
+  "Big Lanche",
+  "Kaze Coxinha",
+  "Ronnie Rocambole",
+  "Ming Miojo",
+  "Earl Esfiha",
+  "Baron Brigadeiro",
+  "JV Pastel",
+  "Izzy Iogurte",
+  "Vic Virado",
+  "Taz Torresmo",
+  "Bull Bauru",
+];
+
+/**
+ * Por dificuldade: quanto da velocidade máxima o bot usa e quanto ele vai atrás
+ * de comida (comida dá turbo e calorias, então gula também é habilidade).
+ */
+const SKILL: Record<Difficulty, number> = { facil: 0.76, medio: 0.88, dificil: 0.98 };
+const GREED: Record<Difficulty, [number, number]> = { facil: [0.1, 0.3], medio: [0.35, 0.6], dificil: [0.65, 0.9] };
+
+export interface FoodSpot {
+  dist: number;
+  side: number;
+  active: boolean;
+}
+
+export interface Brain {
+  skill: number;
+  /** 0 a 1: chance de ir atrás de comida que aparece pela frente. */
+  greed: number;
+  /** Faixa preferida (metros do centro) e quanto ela oscila com o tempo. */
+  lane: number;
+  sway: number;
+  /** Erros de volante (bots fáceis erram mais). */
+  wobble: number;
+  time: number;
+  stuckFor: number;
+  reverseFor: number;
+  /** Comida que o bot decidiu buscar, pela distância na pista. */
+  chasing: number | null;
+}
+
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
+
+export function createBrain(difficulty: Difficulty, random: () => number = Math.random): Brain {
+  return {
+    skill: SKILL[difficulty] * (0.96 + random() * 0.06),
+    greed: GREED[difficulty][0] + random() * (GREED[difficulty][1] - GREED[difficulty][0]),
+    lane: (random() - 0.5) * 6,
+    sway: 1 + random() * 2.5,
+    wobble: difficulty === "facil" ? 0.25 : difficulty === "medio" ? 0.1 : 0.03,
+    time: random() * 100,
+    stuckFor: 0,
+    reverseFor: 0,
+    chasing: null,
+  };
+}
+
+/** Quanto a pista vira (em radianos) entre `from` e `from + ahead` metros. */
+function turnAhead(fromIndex: number, ahead: number) {
+  const samples = TRACK.samples;
+  const spacing = TRACK.length / samples.length;
+  const a = samples[fromIndex];
+  let worst = 0;
+  for (let d = 8; d <= ahead; d += 8) {
+    const b = samples[(fromIndex + Math.round(d / spacing)) % samples.length];
+    const turn = Math.abs(Math.atan2(a.tx * b.tz - a.tz * b.tx, a.tx * b.tx + a.tz * b.tz));
+    worst = Math.max(worst, turn);
+  }
+  return worst;
+}
+
+/**
+ * Decide acelerar/virar neste tick. `pace` ajusta a velocidade pela posição
+ * (um pouco mais devagar quando está muito na frente dos humanos, um pouco mais
+ * rápido quando está muito atrás), para a corrida ficar disputada.
+ */
+export function botInput(
+  brain: Brain,
+  car: CarState,
+  dt: number,
+  foods: FoodSpot[],
+  others: CarState[],
+  pace = 1,
+): DriveInput {
+  brain.time += dt;
+  const near = nearestSample(TRACK, car.x, car.z);
+  const here = TRACK.samples[near.index].dist;
+  const speed = car.speed;
+
+  // Desatolar: parado (bateu, rodou ou ficou preso) → dá ré virando por um tempo.
+  if (brain.reverseFor > 0) {
+    brain.reverseFor -= dt;
+    const target = pointOnTrack(TRACK, here + 15, 0);
+    const want = wrap(Math.atan2(target.x - car.x, target.z - car.z) - car.heading);
+    return { throttle: -1, steer: want > 0 ? 1 : -1 };
+  }
+  brain.stuckFor = Math.abs(speed) < 2 ? brain.stuckFor + dt : 0;
+  if (brain.stuckFor > 1.2) {
+    brain.stuckFor = 0;
+    brain.reverseFor = 1;
+  }
+
+  // Comida pela frente, perto o bastante da faixa atual: vale o desvio?
+  if (brain.chasing === null || !foods.some((f) => f.active && f.dist === brain.chasing)) {
+    brain.chasing = null;
+    for (const food of foods) {
+      const ahead = (food.dist - here + TRACK.length) % TRACK.length;
+      if (!food.active || ahead < 12 || ahead > 45) continue;
+      // Decide uma vez por comida (a semente é a própria distância, para não ficar indeciso).
+      const roll = (Math.sin(food.dist * 12.9898 + brain.lane * 78.233) * 43758.5453) % 1;
+      if (Math.abs(roll) < brain.greed) brain.chasing = food.dist;
+      break;
+    }
+  }
+  const chased = brain.chasing !== null ? foods.find((f) => f.dist === brain.chasing) : undefined;
+  const chasedAhead = chased ? (chased.dist - here + TRACK.length) % TRACK.length : Infinity;
+  if (chased && chasedAhead > TRACK.length / 2) brain.chasing = null; // já passou
+
+  const lookahead = 9 + Math.max(0, speed) * 0.42;
+  const edge = TRACK.width / 2 - 2.5;
+  let lane = chased && chasedAhead < 45
+    ? chased.side
+    : clamp(brain.lane + Math.sin(brain.time / brain.sway) * 2, -edge, edge);
+
+  // Carro logo à frente na mesma faixa: muda de faixa para ultrapassar e,
+  // se estiver muito perto, alivia o pé para não bater na traseira.
+  const fx = Math.sin(car.heading);
+  const fz = Math.cos(car.heading);
+  let blocked = false;
+  for (const other of others) {
+    const dx = other.x - car.x;
+    const dz = other.z - car.z;
+    const ahead = dx * fx + dz * fz;
+    // Lado positivo = esquerda de quem dirige: (cos, -sin).
+    const side = dx * fz - dz * fx;
+    if (ahead < 0 || ahead > 14 || Math.abs(side) > 3.2 || other.speed > speed + 2) continue;
+    const myLane = lane;
+    lane = clamp(side > 0 ? myLane - 4.5 : myLane + 4.5, -edge, edge);
+    if (Math.abs(lane - myLane) < 2) lane = clamp(myLane + (side > 0 ? 4.5 : -4.5), -edge, edge);
+    if (ahead < 6) blocked = true;
+    break;
+  }
+  const target = pointOnTrack(TRACK, here + lookahead, lane);
+
+  const want = wrap(Math.atan2(target.x - car.x, target.z - car.z) - car.heading);
+  const wobble = Math.sin(brain.time * 2.3) * brain.wobble;
+  const steer = clamp(-want * 3 + wobble, -1, 1);
+
+  // Velocidade alvo: mais devagar quanto mais a pista vira à frente.
+  const turn = turnAhead(near.index, 24 + Math.max(0, speed) * 0.9);
+  const corner = 1 - clamp((turn - 0.4) * 0.5, 0, 0.45);
+  const offTrack = near.distance > TRACK.width / 2 + 1;
+  const desired = (offTrack ? CAR.grassMaxSpeed : CAR.maxSpeed) * brain.skill * corner * pace;
+
+  let throttle = 0;
+  if (blocked) throttle = 0;
+  else if (speed < desired - 1) throttle = 1;
+  else if (speed > desired + 4) throttle = -1;
+  // Mirando muito torto (rodou): alivia para conseguir virar.
+  if (Math.abs(want) > 1.2 && speed > 10) throttle = 0;
+
+  return { throttle, steer };
+}

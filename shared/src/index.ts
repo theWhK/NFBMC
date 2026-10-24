@@ -31,6 +31,17 @@ export const FOOD: Record<FoodKind, { calories: number; boostSeconds: number; la
 export const FOOD_PICKUP_RADIUS = 3;
 export const FOOD_RESPAWN_SECONDS = 8;
 
+export type Difficulty = "facil" | "medio" | "dificil";
+
+export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  facil: "Fácil",
+  medio: "Médio",
+  dificil: "Difícil",
+};
+
+/** Quantos bots a sala solo começa tendo. */
+export const SOLO_DEFAULT_BOTS = 5;
+
 /** Intenção do jogador; o servidor é quem move o carro. */
 export interface InputMessage {
   throttle: number;
@@ -39,6 +50,11 @@ export interface InputMessage {
 
 export interface JoinOptions {
   name?: string;
+}
+
+export interface CreateOptions extends JoinOptions {
+  /** Corrida sozinho contra bots, numa sala privada. */
+  solo?: boolean;
 }
 
 export const PLAYER_COLORS = [

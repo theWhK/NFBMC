@@ -33,6 +33,8 @@ deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo a
 - A cena reduz a resolução sozinha quando o FPS cai (o Chromium headless dos testes desenha na CPU, a ~30 FPS). Ao deixar a cena mais pesada, confira que o `npm run test:e2e` não ficou muito mais lento.
 - O mundo fica no plano XZ (Y para cima). A pista, a física do carro e as regras (voltas, comida, bônus) ficam em `shared/` para o servidor e o cliente usarem as mesmas contas.
 - Fluxo da sala (`server/src/rooms/RaceRoom.ts`): `lobby` → alguém aperta "Começar" → `countdown` → `racing` → `results` → `lobby`. Quem entra no meio espera a próxima corrida.
+- Modos: **multiplayer** (`joinOrCreate`, a sala pública da galera) e **solo** (`create` com `{ solo: true }`: sala privada de um jogador só, que começa com bots).
+- Bots (`server/src/rooms/bots.ts`) rodam no servidor e "apertam os mesmos botões" que um jogador: a IA devolve um `DriveInput` e a física é a mesma. Eles entram na contagem e saem quando a sala volta ao lobby (ids `bot-N`, `player.bot = true`). A dificuldade muda a velocidade e a gula (comida dá turbo e calorias). Para calibrar a IA, simule fora do jogo com `stepCar` antes de testar na sala.
 
 ## Comandos
 

@@ -3,6 +3,8 @@ import { schema, t, type SchemaType } from "@colyseus/schema";
 export const Player = schema({
   name: t.string().default(""),
   color: t.string().default("#ffffff"),
+  /** Piloto controlado pelo servidor. */
+  bot: t.boolean().default(false),
   x: t.number().default(0),
   z: t.number().default(0),
   heading: t.number().default(0),
@@ -36,6 +38,7 @@ export const Result = schema({
   sessionId: t.string().default(""),
   name: t.string().default(""),
   color: t.string().default("#ffffff"),
+  bot: t.boolean().default(false),
   /** Colocação na chegada (0 = não terminou). */
   place: t.uint8().default(0),
   calories: t.uint32().default(0),
@@ -46,6 +49,11 @@ export type Result = SchemaType<typeof Result>;
 
 export const RaceState = schema({
   phase: t.string().default("lobby"),
+  /** Sala privada de um jogador só, contra bots. */
+  solo: t.boolean().default(false),
+  /** Quantos bots entram na próxima corrida, e em que dificuldade. */
+  botCount: t.uint8().default(0),
+  difficulty: t.string().default("medio"),
   /** Segundos restantes da contagem, da tolerância de chegada ou da tela de resultado. */
   timer: t.number().default(0),
   /** Segundos desde a largada. */
