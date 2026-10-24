@@ -505,14 +505,18 @@ frame();
 // --- Menu ------------------------------------------------------------------
 
 async function start(entry: MenuEntry) {
-  // Saiu do menu: a vitrine sai de cena.
-  scene?.setShowcase(null);
+  // Saiu do menu: a vitrine sai de cena (no duelo, só depois da apresentação do rival).
+  if (entry !== "challenge") scene?.setShowcase(null);
   storyMode = entry === "story" || entry === "challenge";
   if (entry === "challenge") {
     // Duelo: apresentação do rival, a provocação dele e a corrida 1x1.
     const rival = currentRival(story.story);
     if (!rival) return;
-    await showRivalIntro(rival);
+    // Durante a apresentação, a vitrine 3D mostra o carro do rival girando atrás.
+    await showRivalIntro(rival, story.story.car, {
+      onStart: () => scene?.setShowcase(carSpec(rival.car).color, rival.car),
+      onEnd: () => scene?.setShowcase(null),
+    });
     await playComic(rival.taunt);
     const room = await joinQuickRace({
       ...carOptions(), raceId: rival.race, rival: { name: rival.name, car: rival.car, skill: rival.skill },

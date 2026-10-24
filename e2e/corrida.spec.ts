@@ -97,8 +97,9 @@ test("sozinho contra bots: sala privada, bots configuráveis e correndo", async 
   expect(start).toHaveLength(6);
   expect(start.every((b) => b.racing)).toBe(true);
 
-  // Os bots largam sozinhos e andam pela pista.
+  // Os bots largam sozinhos e andam pela pista (todos eles; os que largam atrás
+  // num carro popular demoram um pouco mais a sair, com a física de motor de verdade).
   await expect
-    .poll(async () => Math.min(...(await bots()).map((b, i) => Math.hypot(b.x - start[i].x, b.z - start[i].z))), { timeout: 15_000 })
-    .toBeGreaterThan(30);
+    .poll(async () => Math.min(...(await bots()).map((b, i) => Math.hypot(b.x - start[i].x, b.z - start[i].z))), { timeout: 20_000 })
+    .toBeGreaterThan(12);
 });

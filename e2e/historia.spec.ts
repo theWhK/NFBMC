@@ -38,8 +38,9 @@ test("modo história: prólogo, Lista Gorda, objetivo na cidade e duelo contra o
 
   // Apresentação do rival, a provocação, e o duelo 1x1 no carro dele.
   await expect(page.getByTestId("rival-intro")).toContainText("Izzy Iogurte");
-  await expect(page.getByTestId("comic")).toBeVisible({ timeout: 6_000 });
-  await page.getByTestId("comic-next").click();
+  await expect(page.getByTestId("comic")).toBeVisible({ timeout: 8_000 });
+  // (O primeiro "Continuar" só completa o texto da máquina de escrever; "Pular" fecha.)
+  await page.getByTestId("comic-skip").click();
   await expect.poll(() => page.evaluate(() => window.__nfbmc?.phase()), { timeout: 20_000 }).toBe("racing");
   const players = Object.values(await page.evaluate(() => window.__nfbmc!.players()));
   expect(players).toHaveLength(2);

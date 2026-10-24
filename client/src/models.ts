@@ -15,7 +15,9 @@ const MATERIALS = {
   lettuce: lambert("#5cb83a"),
   tomato: lambert("#e2412f"),
   tire: lambert("#222222"),
-  rim: lambert("#b8bcc2"),
+  rim: lambert("#c9cdd2"),
+  rimDark: lambert("#2c2f33"),
+  caliper: lambert("#c1121f"),
   window: lambert("#2a3540"),
   light: new THREE.MeshBasicMaterial({ color: "#fff3b0" }),
   fry: lambert("#f7d154"),
@@ -133,7 +135,7 @@ function makeLabel(text: string, color: string) {
 export interface CarModel {
   group: THREE.Group;
   flame: THREE.Mesh;
-  wheels: THREE.Mesh[];
+  wheels: THREE.Object3D[];
   /** Giroflex (só nas viaturas): luz vermelha e azul, que piscam alternadas. */
   lights?: [THREE.Mesh, THREE.Mesh];
 }
@@ -173,6 +175,45 @@ const copLivery: Parameters<typeof buildBody>[2] = (add, design) => {
   add.box(1.4, 0.16, 0.5, "#222222", 0, 1.42, -0.2);
 };
 
+/**
+ * Roda: pneu com banda e flanco, aro de cinco raios com cubo e a pinça de freio
+ * vermelha atrás. `side` (+1/-1) diz para que lado fica a face de fora.
+ * O conjunto gira em torno do eixo X (a pinça fica parada, presa ao carro, no
+ * modelo do trânsito, que é fundido).
+ */
+function makeWheel(radius: number, side: number, simple: boolean): THREE.Object3D {
+  const wheel = new THREE.Group();
+  const tire = new THREE.CylinderGeometry(radius, radius, 0.3, 20);
+  tire.rotateZ(Math.PI / 2);
+  wheel.add(new THREE.Mesh(tire, MATERIALS.tire));
+  const rim = new THREE.CylinderGeometry(radius * 0.66, radius * 0.66, 0.06, 20);
+  rim.rotateZ(Math.PI / 2);
+  const rimMesh = new THREE.Mesh(rim, MATERIALS.rimDark);
+  rimMesh.position.x = side * 0.13;
+  wheel.add(rimMesh);
+  if (!simple) {
+    for (let k = 0; k < 5; k++) {
+      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.05, radius * 1.22, 0.07), MATERIALS.rim);
+      spoke.position.x = side * 0.165;
+      spoke.rotation.x = (k / 5) * Math.PI * 2;
+      wheel.add(spoke);
+    }
+    const hub = new THREE.CylinderGeometry(radius * 0.18, radius * 0.18, 0.08, 10);
+    hub.rotateZ(Math.PI / 2);
+    const hubMesh = new THREE.Mesh(hub, MATERIALS.rim);
+    hubMesh.position.x = side * 0.17;
+    wheel.add(hubMesh);
+  }
+  return wheel;
+}
+
+/** Pinça de freio (fica parada enquanto a roda gira). */
+function makeCaliper(radius: number, side: number) {
+  const caliper = new THREE.Mesh(new THREE.BoxGeometry(0.06, radius * 0.5, radius * 0.4), MATERIALS.caliper);
+  caliper.position.set(side * 0.1, radius * 0.25, -radius * 0.25);
+  return caliper;
+}
+
 /** Carro de um jogador, bot, viatura ou do trânsito. A frente aponta para +Z. */
 export function makeCar(color: string, name: string, options: CarOptions = {}): CarModel {
   const { cop, traffic } = options;
@@ -203,19 +244,23 @@ export function makeCar(color: string, name: string, options: CarOptions = {}): 
     lights = [red, blue];
   }
 
-  const wheels: THREE.Mesh[] = [];
+  const wheels: THREE.Object3D[] = [];
   for (const spot of wheelSpots) {
-    const geometry = new THREE.CylinderGeometry(spot.radius, spot.radius, 0.32, 16);
-    geometry.rotateZ(Math.PI / 2);
-    const wheel = mesh(geometry, MATERIALS.tire, spot.x, spot.radius, spot.z);
-    // Calota/roda clara, para dar para ver o giro.
-    const rimGeometry = new THREE.CylinderGeometry(spot.radius * 0.6, spot.radius * 0.6, 0.34, 6);
-    rimGeometry.rotateZ(Math.PI / 2);
-    wheel.add(new THREE.Mesh(rimGeometry, MATERIALS.rim));
+    const wheel = makeWheel(spot.radius, spot.x > 0 ? 1 : -1, !!traffic);
+    wheel.position.set(spot.x, spot.radius, spot.z);
     // No trânsito as rodas vão fundidas na carroceria (não giram, mas são dezenas de
     // carros: assim cada um custa uma chamada de desenho em vez de cinco).
     if (traffic) shell.add(wheel);
     else wheels.push(wheel);
+  }
+  if (!traffic) {
+    for (const spot of wheelSpots) {
+      const caliper = makeCaliper(spot.radius, spot.x > 0 ? 1 : -1);
+      caliper.position.x += spot.x;
+      caliper.position.y += spot.radius * 0.6;
+      caliper.position.z += spot.z;
+      shell.add(caliper);
+    }
   }
   group.add(bake(shell));
   if (lights) group.add(...lights);

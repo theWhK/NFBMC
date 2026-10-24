@@ -2,6 +2,7 @@
 // apresentação do rival, quadro da Lista Gorda no menu e o objetivo no HUD.
 import {
   RIVALS_LADDER,
+  cachedTopSpeed,
   canChallenge,
   carSpec,
   currentRival,
@@ -37,35 +38,85 @@ export function saveStory(story: StoryProgress) {
 
 // --- Quadrinhos --------------------------------------------------------------
 
-/** Mostra os quadros um por um (clique, Enter, espaço ou toque avança). */
+/** Separa um texto em "letras" visíveis (emoji com variação conta como uma só). */
+function graphemes(text: string) {
+  const Segmenter = (Intl as unknown as { Segmenter?: new (l: string, o: object) => { segment: (t: string) => Iterable<{ segment: string }> } }).Segmenter;
+  return Segmenter ? [...new Segmenter("pt-BR", { granularity: "grapheme" }).segment(text)].map((g) => g.segment) : [...text];
+}
+
+/**
+ * Mostra os quadros um por um, animados: a "arte" entra pulando, o texto vem
+ * como máquina de escrever e cada quadro pode ter efeito (tremer, zoom, linhas
+ * de velocidade, flash da sirene) e onomatopeia. Clique, Enter, espaço ou →:
+ * a primeira vez completa o texto, a segunda avança. Esc pula tudo.
+ */
 export function playComic(panels: ComicPanel[]): Promise<void> {
   const overlay = $("comic");
   const panel = $("comic-panel");
+  const art = $("comic-art");
+  const textEl = $("comic-text");
   const next = $<HTMLButtonElement>("comic-next");
   const skip = $<HTMLButtonElement>("comic-skip");
   if (!panels.length) return Promise.resolve();
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   return new Promise((resolve) => {
     let index = 0;
+    let typing: ReturnType<typeof setInterval> | null = null;
+    let full = "";
+
+    const finishTyping = () => {
+      if (typing) clearInterval(typing);
+      typing = null;
+      textEl.textContent = full;
+      textEl.classList.remove("typing");
+    };
+
     const show = () => {
       const p = panels[index];
       panel.style.backgroundColor = p.color ?? "#16110d";
-      $("comic-art").textContent = p.art;
+      // Reinicia as animações trocando as classes (e forçando o navegador a recalcular).
+      panel.className = "comic-panel";
+      void panel.offsetWidth;
+      panel.classList.add("turn");
+      if (p.fx) panel.classList.add(`fx-${p.fx}`);
+      art.innerHTML = graphemes(p.art)
+        .map((g, i) => (g.trim() ? `<span style="animation-delay:${0.12 + i * 0.12}s">${escapeHtml(g)}</span>` : " "))
+        .join("");
       $("comic-speaker").textContent = p.speaker ?? "";
-      $("comic-text").textContent = p.text;
+      $("comic-sfx").textContent = p.sfx ?? "";
       $("comic-page").textContent = `${index + 1}/${panels.length}`;
       next.textContent = index === panels.length - 1 ? "Fechar ▶" : "Continuar ▶";
-      // Reinicia a animação de entrada do quadro.
-      panel.style.animation = "none";
-      void panel.offsetWidth;
-      panel.style.animation = "";
+
+      // Máquina de escrever (~45 letras por segundo).
+      full = p.text;
+      if (typing) clearInterval(typing);
+      if (reducedMotion) {
+        finishTyping();
+        return;
+      }
+      const letters = graphemes(full);
+      let shown = 0;
+      textEl.textContent = "";
+      textEl.classList.add("typing");
+      typing = setInterval(() => {
+        shown += 1;
+        textEl.textContent = letters.slice(0, shown).join("");
+        if (shown >= letters.length) finishTyping();
+      }, 22);
     };
+
     const finish = () => {
+      finishTyping();
       overlay.hidden = true;
       window.removeEventListener("keydown", onKey, true);
       next.onclick = skip.onclick = panel.onclick = null;
       resolve();
     };
     const advance = () => {
+      if (typing) {
+        finishTyping();
+        return;
+      }
       index++;
       if (index >= panels.length) finish();
       else show();
@@ -89,18 +140,54 @@ export function playComic(panels: ComicPanel[]): Promise<void> {
   });
 }
 
-/** Apresentação do rival, estilo Borderlands, por alguns segundos. */
-export function showRivalIntro(rival: Rival): Promise<void> {
+/**
+ * Apresentação do rival, estilo Borderlands: flash, linhas de velocidade, o
+ * nome batendo letra por letra e o painel "VOCÊ x RIVAL". `onStart`/`onEnd`
+ * deixam quem chamou trocar o carro da vitrine 3D pelo do rival durante a cena.
+ * Dura ~4 s; clique ou Enter pula.
+ */
+export function showRivalIntro(rival: Rival, yourCar: string, hooks: { onStart?: () => void; onEnd?: () => void } = {}): Promise<void> {
   const el = $("rival-intro");
+  const you = carSpec(yourCar);
+  const them = carSpec(rival.car);
+  const kmh = (id: string) => `${Math.round(cachedTopSpeed(carSpec(id)) * 3.6)} km/h`;
   $("rival-rank").textContent = `#${rival.rank} da Lista Gorda`;
-  $("rival-name").textContent = rival.name;
+  $("rival-name").innerHTML = graphemes(rival.name)
+    .map((g, i) => (g === " " ? " " : `<span style="animation-delay:${0.25 + i * 0.06}s">${escapeHtml(g)}</span>`))
+    .join("");
   $("rival-title").textContent = rival.title;
-  $("rival-car").textContent = carSpec(rival.car).name;
+  $("vs-you").textContent = you.name;
+  $("vs-you-stat").textContent = kmh(you.id);
+  $("vs-them-label").textContent = rival.name;
+  $("vs-them").textContent = them.name;
+  $("vs-them-stat").textContent = kmh(them.id);
+  // Reinicia as animações (a cena pode ser vista mais de uma vez).
+  el.hidden = true;
+  void el.offsetWidth;
   el.hidden = false;
-  return new Promise((resolve) => setTimeout(() => {
-    el.hidden = true;
-    resolve();
-  }, 2600));
+  hooks.onStart?.();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      el.hidden = true;
+      el.onclick = null;
+      window.removeEventListener("keydown", onKey, true);
+      hooks.onEnd?.();
+      resolve();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Enter" || e.code === "Space" || e.code === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        finish();
+      }
+    };
+    el.onclick = finish;
+    window.addEventListener("keydown", onKey, true);
+    setTimeout(finish, 4200);
+  });
 }
 
 // --- Quadro da Lista Gorda (menu) e objetivo (HUD) ---------------------------

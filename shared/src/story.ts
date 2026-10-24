@@ -13,6 +13,10 @@ export interface ComicPanel {
   text: string;
   /** Cor de fundo do quadro. */
   color?: string;
+  /** Efeito animado do quadro. */
+  fx?: "shake" | "zoom" | "speed" | "flash" | "slam";
+  /** Onomatopeia carimbada no quadro ("VRUUUM!"). */
+  sfx?: string;
 }
 
 export interface Rival {
@@ -47,34 +51,34 @@ export const STARTER_CARS = ["uno", "fusca"];
 export const HERO_CAR = "m3";
 
 export const PROLOGUE: ComicPanel[] = [
-  { art: "🌇🍔🌭", color: "#e3884a", text: "Porto Gordo. A cidade onde o colesterol é alto... e a Vigilância Sanitária é mais alta ainda." },
-  { art: "🏎️🧀💙", color: "#3a5a8a", text: "Você chega na cidade com o carro mais respeitado do país: o M3 Gorgonzola GTR. Prata, veias azuis e um cheiro que se sente a três quarteirões." },
+  { art: "🌇🍔🌭", color: "#e3884a", fx: "zoom", text: "Porto Gordo. A cidade onde o colesterol é alto... e a Vigilância Sanitária é mais alta ainda." },
+  { art: "🏎️🧀💙", color: "#3a5a8a", fx: "speed", sfx: "VRUUUM!", text: "Você chega na cidade com o carro mais respeitado do país: o M3 Gorgonzola GTR. Prata, veias azuis e um cheiro que se sente a três quarteirões." },
   { art: "📋🍟", color: "#16110d", text: "Aqui, quem manda é a LISTA GORDA: os dez pilotos mais calóricos da cidade. E no topo dela..." },
-  { speaker: "Bruno", art: "🧔🍔🍔🍔", color: "#c1121f", text: "Eu sou o Bruno. O Rei do X-Tudo. Número 1 da Lista Gorda. Bonito esse carro aí... Vamos apostar? Quem ganhar, leva o carro do outro." },
+  { speaker: "Bruno", art: "🧔🍔🍔🍔", color: "#c1121f", fx: "slam", sfx: "NHAC!", text: "Eu sou o Bruno. O Rei do X-Tudo. Número 1 da Lista Gorda. Bonito esse carro aí... Vamos apostar? Quem ganhar, leva o carro do outro." },
   { speaker: "Bruno", art: "🚗💨 A3", color: "#7a7f86", text: "Esse aqui é meu A3 2002. Original de fábrica. (Mentira. Ninguém sabe o que tem debaixo do capô. Nem eu.)" },
-  { art: "🏁🤢🛢️", color: "#4a7a2a", text: "A corrida começa. Na metade, o seu motor engasga... Alguém colocou MAIONESE CASEIRA VENCIDA no seu tanque!" },
+  { art: "🏁🤢🛢️", color: "#4a7a2a", fx: "shake", sfx: "PFFRRT!", text: "A corrida começa. Na metade, o seu motor engasga... Alguém colocou MAIONESE CASEIRA VENCIDA no seu tanque!" },
   { speaker: "Bruno", art: "😏🔑", color: "#c1121f", text: "Que pena. Regra é regra: o Gorgonzola agora é meu. Vou transformar ele em food truck." },
-  { speaker: "Vigilância Sanitária", art: "🚨🚓🚨", color: "#2a9d4a", text: "PARADO AÍ! Carro com cheiro de queijo forte e maionese vencida no tanque? AUTUADO!" },
+  { speaker: "Vigilância Sanitária", art: "🚨🚓🚨", color: "#2a9d4a", fx: "flash", sfx: "UÓÓÓ!", text: "PARADO AÍ! Carro com cheiro de queijo forte e maionese vencida no tanque? AUTUADO!" },
   { art: "🧾😩", color: "#16110d", text: "Você perde tudo. Sobrou só um Uno Coxinha com 300 mil km e um Fusca Pão de Queijo emprestado da sua tia." },
-  { art: "🔥📋🔥", color: "#ff7a00", text: "Mas ninguém rouba um Gorgonzola impunemente. Suba a Lista Gorda, do #10 ao #1, e pegue o seu carro de volta." },
+  { art: "🔥📋🔥", color: "#ff7a00", fx: "zoom", text: "Mas ninguém rouba um Gorgonzola impunemente. Suba a Lista Gorda, do #10 ao #1, e pegue o seu carro de volta." },
 ];
 
 export const EPILOGUE: ComicPanel[] = [
   { speaker: "Bruno", art: "😭🍔", color: "#c1121f", text: "N-não pode ser... Perdi pro cara do Uno Coxinha... Tá bom, tá bom. Toma as chaves do Gorgonzola. Eu nem consegui fazer o food truck." },
   { speaker: "Bruno", art: "🔑🚗 A3", color: "#7a7f86", text: "E leva o A3 também. Mas cuidado: o remap foi feito por um cara que eu conheci na fila do pastel." },
-  { art: "🏎️🧀💙✨", color: "#3a5a8a", text: "O M3 Gorgonzola GTR está de volta. E o A3 do Bruno agora é seu. Ninguém sabe o que tem debaixo do capô. Agora, nem você." },
-  { speaker: "Vigilância Sanitária", art: "🚨📋", color: "#2a9d4a", text: "Atenção, todas as viaturas: o novo Número 1 da Lista Gorda está à solta. Repito: o novo Número 1..." },
-  { art: "👑🍔", color: "#ff7a00", text: "Você é o Número 1 da Lista Gorda. O piloto mais calórico de Porto Gordo. FIM. (Ou será só a sobremesa?)" },
+  { art: "🏎️🧀💙✨", color: "#3a5a8a", fx: "speed", sfx: "VRUUUM!", text: "O M3 Gorgonzola GTR está de volta. E o A3 do Bruno agora é seu. Ninguém sabe o que tem debaixo do capô. Agora, nem você." },
+  { speaker: "Vigilância Sanitária", art: "🚨📋", color: "#2a9d4a", fx: "flash", text: "Atenção, todas as viaturas: o novo Número 1 da Lista Gorda está à solta. Repito: o novo Número 1..." },
+  { art: "👑🍔", color: "#ff7a00", fx: "slam", sfx: "FIM!", text: "Você é o Número 1 da Lista Gorda. O piloto mais calórico de Porto Gordo. FIM. (Ou será só a sobremesa?)" },
 ];
 
-const line = (speaker: string, art: string, text: string, color = "#16110d"): ComicPanel => ({ speaker, art, text, color });
+const line = (speaker: string, art: string, text: string, color = "#16110d", fx: ComicPanel["fx"] = "slam", sfx?: string): ComicPanel => ({ speaker, art, text, color, fx, sfx });
 
 export const RIVALS_LADDER: Rival[] = [
   {
     rank: 10, name: "Izzy Iogurte", title: "Light, mas nem tanto", car: "gol", race: "pastel",
     wins: 1, bounty: 3000, escapes: 0, escapeStars: 0, skill: 0.61,
     taunt: [line("Izzy Iogurte", "🥛😤", "Zero lactose, zero piedade. Você nem devia estar aqui com esse Uno.", "#9bd3ff")],
-    defeat: [line("Izzy Iogurte", "🥛😵", "Talhei... Leva o Gol. E me esquece.", "#9bd3ff")],
+    defeat: [line("Izzy Iogurte", "🥛😵", "Talhei... Leva o Gol. E me esquece.", "#9bd3ff", "shake", "SPLOFT!")],
   },
   {
     rank: 9, name: "Ming Miojo", title: "Pronto em 3 minutos", car: "civic", race: "centro",
@@ -104,8 +108,8 @@ export const RIVALS_LADDER: Rival[] = [
     rank: 5, name: "Ronnie Rocambole", title: "Enrola todo mundo", car: "supra", race: "parque",
     wins: 3, bounty: 50000, escapes: 2, escapeStars: 2, skill: 0.68, bonusCar: "porchetta",
     taunt: [
-      line("Ronnie Rocambole", "🍥😈", "Sabe aquela maionese no seu tanque? Fui eu. O Bruno pagou em X-Tudo.", "#d98a2b"),
-      line("Você", "😠🔧", "Então é pessoal. Liga esse Supra."),
+      line("Ronnie Rocambole", "🍥😈", "Sabe aquela maionese no seu tanque? Fui eu. O Bruno pagou em X-Tudo.", "#d98a2b", "zoom", "HÁ HÁ!"),
+      line("Você", "😠🔧", "Então é pessoal. Liga esse Supra.", "#16110d", "shake", "GRRR!"),
     ],
     defeat: [line("Ronnie Rocambole", "🍥😱", "Me desenrolou... Leva o Supra. E de brinde a Porchetta que eu guardava na garagem.", "#d98a2b")],
   },
@@ -132,8 +136,8 @@ export const RIVALS_LADDER: Rival[] = [
     wins: 4, bounty: 120000, escapes: 3, escapeStars: 4, skill: 0.78,
     taunt: [
       line("Bruno", "🧔🍔", "Olha só quem chegou. O cara do Uno Coxinha. Veio buscar seu queijo?", "#c1121f"),
-      line("Bruno", "🚗💨 A3", "Esse A3 tem turbina de navio, remap no talo e meio X-Tudo debaixo do banco. Boa sorte.", "#7a7f86"),
-      line("Você", "😤🧀", "Hoje eu como você no café da manhã."),
+      line("Bruno", "🚗💨 A3", "Esse A3 tem turbina de navio, remap no talo e meio X-Tudo debaixo do banco. Boa sorte.", "#7a7f86", "speed", "VRAAAP!"),
+      line("Você", "😤🧀", "Hoje eu como você no café da manhã.", "#16110d", "slam", "TÁ VALENDO!"),
     ],
     defeat: [],
   },
