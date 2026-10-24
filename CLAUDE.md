@@ -33,7 +33,10 @@ deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo a
 - A cena reduz a resolução sozinha quando o FPS cai (o Chromium headless dos testes desenha na CPU, a ~30 FPS). Ao deixar a cena mais pesada, confira que o `npm run test:e2e` não ficou muito mais lento.
 - O mundo fica no plano XZ (Y para cima). A pista, a física do carro e as regras (voltas, comida, bônus) ficam em `shared/` para o servidor e o cliente usarem as mesmas contas.
 - Fluxo da sala (`server/src/rooms/RaceRoom.ts`): `lobby` → alguém aperta "Começar" → `countdown` → `racing` → `results` → `lobby`. Quem entra no meio espera a próxima corrida.
-- Modos: **multiplayer** (`joinOrCreate`, a sala pública da galera) e **solo** (`create` com `{ solo: true }`: sala privada de um jogador só, que começa com bots).
+- **Mundo aberto (Porto Gordo)**: a planta da cidade fica em `shared/src/world.ts` (ruas em grade, prédios com colisão, praças, parque do autódromo, corridas e pontos de encontro), gerada com semente fixa para servidor e cliente verem a mesma cidade. Corridas novas entram em `RACES`: o autódromo usa `splinePath`, as de rua usam `streetPath` (retas com esquinas arredondadas).
+- Salas: `world` (`WorldRoom`: todo mundo circula, come nas barraquinhas e dispara corridas nos pontos de encontro) e `race` (`RaceRoom`). Quem dispara uma corrida no mundo leva todos que estão no ponto: o servidor cria uma `RaceRoom` em modo **evento** (`matchMaker.createRoom`), manda `goRace` com o id da sala, ela larga sozinha e no fim manda `backToWorld`. As calorias da sessão ficam numa ficha em memória (`server/src/profiles.ts`), identificada por um token que o cliente guarda no `sessionStorage`.
+- Corrida rápida (fora do mundo): **multiplayer** (`joinOrCreate`, a sala pública da galera) e **solo** (`create` com `{ solo: true }`: sala privada de um jogador só, que começa com bots).
+- Cliente: `main.ts` cuida do menu e das trocas de sala; `world-mode.ts` e `race-mode.ts` têm a lógica de cada modo; `net.ts` tem as conexões. `?spawn=<corrida>` na URL faz nascer direto num ponto de encontro (usado nos testes).
 - Bots (`server/src/rooms/bots.ts`) rodam no servidor e "apertam os mesmos botões" que um jogador: a IA devolve um `DriveInput` e a física é a mesma. Eles entram na contagem e saem quando a sala volta ao lobby (ids `bot-N`, `player.bot = true`). A dificuldade muda a velocidade e a gula (comida dá turbo e calorias). Para calibrar a IA, simule fora do jogo com `stepCar` antes de testar na sala.
 
 ## Comandos
@@ -56,6 +59,7 @@ O Will acessa pelo Tailscale: http://nfbmc-dev:5173 (Vite), que conecta no servi
 ## Testes com Playwright
 
 - Os testes ficam em `e2e/`. Use um `browser.newContext()` por jogador.
-- O cliente expõe `window.__nfbmc` (`sessionId`, `phase()` e `players()`) para os testes lerem o estado sem depender do canvas. Mantenha esse gancho funcionando quando mexer no cliente.
+- O cliente expõe `window.__nfbmc` (`sessionId`, `mode()`, `raceId()`, `phase()` e `players()`) para os testes lerem o estado sem depender do canvas. Mantenha esse gancho funcionando quando mexer no cliente.
+- Os testes rodam um de cada vez (`workers: 1`), porque compartilham o servidor e as salas públicas.
 - Para entrar no jogo, o teste preenche `name-input` e clica em `join-button` (veja `join()` em `e2e/corrida.spec.ts`).
 - Prefira `expect.poll` e `toHaveText` a `waitForTimeout` para esperar a sincronização.

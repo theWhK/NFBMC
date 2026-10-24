@@ -1,10 +1,20 @@
-// Cena 3D: pista, cenário, carros e comidas. Só desenha; o estado vem do servidor.
+// Cena 3D: cidade, traçado da corrida, carros, comidas e pontos de encontro.
+// Só desenha; o estado vem do servidor.
 import * as THREE from "three";
-import { TRACK, nearestSample, type FoodKind } from "@nfbmc/shared";
+import {
+  MARKER_RADIUS,
+  RACES,
+  RACE_IDS,
+  isOnRoad,
+  raceMarker,
+  type FoodKind,
+  type RaceId,
+} from "@nfbmc/shared";
 
 import { Effects } from "./effects.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
-import { buildScenery } from "./scenery.ts";
+import { SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
+import { buildTrackMesh } from "./track-mesh.ts";
 
 /** O que a cena precisa saber de cada carro (vem do estado da sala). */
 export interface CarView {
@@ -53,84 +63,74 @@ function dampAngle(current: number, target: number, rate: number, dt: number) {
   return current + diff * (1 - Math.exp(-rate * dt));
 }
 
-/** Faixa ao longo da pista, entre `inner` e `outer` metros do centro (negativo = lado direito). */
-function ribbon(inner: number, outer: number, y: number, colorAt?: (i: number) => THREE.Color) {
-  const samples = TRACK.samples;
-  const positions: number[] = [];
-  const colors: number[] = [];
-  const indices: number[] = [];
-  for (let i = 0; i <= samples.length; i++) {
-    const s = samples[i % samples.length];
-    // Esquerda de quem corre: (tz, -tx).
-    positions.push(s.x + s.tz * inner, y, s.z - s.tx * inner);
-    positions.push(s.x + s.tz * outer, y, s.z - s.tx * outer);
-    if (colorAt) {
-      const c = colorAt(i);
-      colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
-    }
-    if (i < samples.length) {
-      const a = i * 2;
-      indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
-    }
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  if (colorAt) geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-function checkerTexture() {
+/** Placa flutuante com o nome da corrida, sobre o ponto de encontro. */
+function markerLabel(title: string, subtitle: string) {
   const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 16;
-  const ctx = canvas.getContext("2d")!;
-  for (let x = 0; x < 16; x++) {
-    for (let y = 0; y < 2; y++) {
-      ctx.fillStyle = (x + y) % 2 ? "#111111" : "#ffffff";
-      ctx.fillRect(x * 8, y * 8, 8, 8);
-    }
-  }
+  canvas.width = 512;
+  canvas.height = 160;
   const texture = new THREE.CanvasTexture(canvas);
-  texture.magFilter = THREE.NearestFilter;
   texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
+  const draw = () => {
+    const ctx = canvas.getContext("2d")!;
+    ctx.clearRect(0, 0, 512, 160);
+    ctx.fillStyle = "rgba(22, 17, 13, 0.8)";
+    ctx.beginPath();
+    ctx.roundRect(8, 8, 496, 144, 18);
+    ctx.fill();
+    ctx.strokeStyle = "#ff7a00";
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffc42e";
+    ctx.font = "50px 'Russo One', sans-serif";
+    ctx.fillText(title, 256, 78, 470);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "30px 'Russo One', sans-serif";
+    ctx.fillText(subtitle, 256, 124, 470);
+    texture.needsUpdate = true;
+  };
+  draw();
+  document.fonts?.load("50px 'Russo One'").then(draw).catch(() => {});
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, fog: false }));
+  sprite.scale.set(24, 7.5, 1);
+  sprite.renderOrder = 20;
+  return sprite;
 }
 
-function buildTrack(scene: THREE.Scene) {
-  const half = TRACK.width / 2;
-  // Material dupla face: assim não importa para que lado a faixa foi montada.
-  const asphalt = new THREE.MeshLambertMaterial({ color: "#4a4a4f", side: THREE.DoubleSide });
-  scene.add(new THREE.Mesh(ribbon(-half, half, 0.02), asphalt));
-
-  const red = new THREE.Color("#d62828");
-  const white = new THREE.Color("#f5f5f5");
-  const curb = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  const stripe = (i: number) => (Math.floor(i / 2) % 2 ? red : white);
-  scene.add(new THREE.Mesh(ribbon(half, half + 1.2, 0.04, stripe), curb));
-  scene.add(new THREE.Mesh(ribbon(-half - 1.2, -half, 0.04, stripe), curb));
-
-  const start = TRACK.samples[0];
-  const line = new THREE.Mesh(
-    new THREE.PlaneGeometry(TRACK.width, 2),
-    new THREE.MeshLambertMaterial({ map: checkerTexture() }),
-  );
-  line.rotation.x = -Math.PI / 2;
-  line.rotation.z = Math.atan2(start.tx, start.tz) + Math.PI / 2;
-  line.position.set(start.x, 0.05, start.z);
-  scene.add(line);
-
-  // Pórtico de largada: duas colunas e uma faixa em cima.
-  const post = new THREE.MeshLambertMaterial({ color: "#333333" });
-  const banner = new THREE.MeshLambertMaterial({ color: "#e63946" });
-  const gate = new THREE.Group();
-  gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(half + 2).translateY(3.5));
-  gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(-half - 2).translateY(3.5));
-  gate.add(new THREE.Mesh(new THREE.BoxGeometry(TRACK.width + 4.6, 1.6, 0.4), banner).translateY(7));
-  gate.rotation.y = Math.atan2(start.tx, start.tz);
-  gate.position.set(start.x, 0, start.z);
-  scene.add(gate);
+/** Ponto de encontro: anel no chão, coluna de luz e placa com o nome. */
+function makeMarker(id: RaceId) {
+  const race = RACES[id];
+  const spot = raceMarker(id);
+  const group = new THREE.Group();
+  const light = new THREE.MeshBasicMaterial({
+    color: "#ff9a1f",
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(MARKER_RADIUS - 1.2, MARKER_RADIUS, 48), light);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.15;
+  group.add(ring);
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 90, 24, 1, true), light.clone());
+  pillar.position.y = 45;
+  group.add(pillar);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture("rgba(255,170,60,1)"),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }));
+  glow.scale.setScalar(26);
+  glow.position.y = 3;
+  group.add(glow);
+  const km = (race.track.length / 1000).toFixed(1).replace(".", ",");
+  const label = markerLabel(race.name, `${race.laps} voltas · ${km} km`);
+  label.position.y = 22;
+  group.add(label);
+  group.position.set(spot.x, 0, spot.z);
+  return group;
 }
 
 /** Navegador desenhando o 3D na CPU (sem placa de vídeo): começa em resolução baixa. */
@@ -144,7 +144,12 @@ function isSoftwareRenderer(renderer: THREE.WebGLRenderer) {
 export class GameScene {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(70, 1, 0.5, 1500);
+  private camera = new THREE.PerspectiveCamera(70, 1, 0.8, 2600);
+  private sky: THREE.Object3D;
+  private sun: THREE.Object3D;
+  private raceOverlay: THREE.Object3D | null = null;
+  private markers: THREE.Group;
+  private sunDirection = SUN_DIRECTION;
   private cars = new Map<string, CarEntry>();
   private foods: THREE.Group[] = [];
   private foodActive: boolean[] = [];
@@ -164,9 +169,14 @@ export class GameScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
 
-    buildScenery(this.scene);
-    buildTrack(this.scene);
+    const { sky, sun } = buildScenery(this.scene);
+    this.sky = sky;
+    this.sun = sun;
     this.effects = new Effects(this.scene);
+    this.markers = new THREE.Group();
+    for (const id of RACE_IDS) this.markers.add(makeMarker(id));
+    this.markers.visible = false;
+    this.scene.add(this.markers);
 
     this.camera.position.set(0, 60, -160);
     this.resize();
@@ -193,6 +203,30 @@ export class GameScene {
       this.renderer.setPixelRatio(this.pixelRatio);
       this.resize();
     }
+  }
+
+  /**
+   * Corrida em andamento (null = mundo aberto). Nas corridas de rua, as zebras
+   * marcam o traçado por cima das ruas; o autódromo já está sempre desenhado.
+   */
+  setRace(raceId: RaceId | null) {
+    if (this.raceOverlay) this.scene.remove(this.raceOverlay);
+    this.raceOverlay = null;
+    if (raceId && raceId !== "autodromo") {
+      this.raceOverlay = buildTrackMesh(RACES[raceId].track, { asphalt: false, bannerColor: "#ff7a00" });
+      this.scene.add(this.raceOverlay);
+    }
+    this.markers.visible = raceId === null;
+    this.clearFoods();
+    // Troca de sala: os carros da sala anterior somem.
+    for (const entry of this.cars.values()) this.scene.remove(entry.model.group);
+    this.cars.clear();
+  }
+
+  private clearFoods() {
+    for (const food of this.foods) this.scene.remove(food);
+    this.foods = [];
+    this.foodActive = [];
   }
 
   /** Sincroniza os carros com o estado: cria os novos e remove quem saiu. */
@@ -261,7 +295,7 @@ export class GameScene {
       const turnRate = dt > 0 ? Math.atan2(Math.sin(entry.heading - previousHeading), Math.cos(entry.heading - previousHeading)) / dt : 0;
       const lateral = turnRate * car.speed;
       entry.skid = damp(entry.skid, Math.min(1, Math.max(0, (Math.abs(lateral) - 30) / 25)), 12, dt);
-      entry.offroad = nearestSample(TRACK, entry.x, entry.z).distance > TRACK.width / 2 + 1;
+      entry.offroad = !isOnRoad(entry.x, entry.z);
       entry.lean = damp(entry.lean, Math.max(-0.12, Math.min(0.12, lateral * 0.0025)), 8, dt);
 
       const { group, flame, wheels } = entry.model;
@@ -285,6 +319,19 @@ export class GameScene {
       food.rotation.y = this.time * 2 + i;
       food.position.y = 0.6 + Math.sin(this.time * 3 + i) * 0.3;
     });
+    if (this.markers.visible) {
+      // A coluna pulsa de longe e some quando a câmera chega perto (de dentro dela, a
+      // luz lavava a tela inteira de amarelo). O anel no chão continua visível.
+      const pulse = 0.25 + Math.sin(this.time * 3) * 0.08;
+      for (const marker of this.markers.children) {
+        const [ring, pillar, glow] = marker.children as [THREE.Mesh, THREE.Mesh, THREE.Sprite];
+        const near = Math.min(1, Math.max(0, (this.camera.position.distanceTo(marker.position) - 25) / 50));
+        (ring.material as THREE.MeshBasicMaterial).opacity = pulse;
+        pillar.visible = glow.visible = near > 0.02;
+        (pillar.material as THREE.MeshBasicMaterial).opacity = pulse * near;
+        (glow.material as THREE.SpriteMaterial).opacity = near;
+      }
+    }
 
     const followed = followId ? this.cars.get(followId) : undefined;
     const followedCar = followId ? cars.get(followId) : undefined;
@@ -304,14 +351,17 @@ export class GameScene {
         this.cameraTarget.y += (Math.random() - 0.5) * 0.25;
       }
     } else {
-      // Sem carro para seguir (menu): sobrevoa a pista devagar, como numa vinheta.
-      const angle = this.time * 0.08;
-      this.camera.position.set(Math.sin(angle) * 150, 45, Math.cos(angle) * 150);
-      this.cameraTarget.set(0, 10, 20);
+      // Sem carro para seguir (menu): sobrevoa o centro da cidade devagar, como numa vinheta.
+      const angle = this.time * 0.05;
+      this.camera.position.set(Math.sin(angle) * 260, 70, Math.cos(angle) * 260);
+      this.cameraTarget.set(0, 25, 0);
       this.camera.fov = 60;
       this.camera.updateProjectionMatrix();
     }
     this.camera.lookAt(this.cameraTarget);
+    // Céu e sol acompanham a câmera, para nunca chegar perto da borda do céu.
+    this.sky.position.copy(this.camera.position);
+    this.sun.position.copy(this.camera.position).addScaledVector(this.sunDirection, 1200);
 
     this.renderer.render(this.scene, this.camera);
     return followed ? { skid: followed.skid, offroad: followed.offroad } : null;

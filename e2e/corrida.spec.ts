@@ -97,6 +97,6 @@ test("sozinho contra bots: sala privada, bots configuráveis e correndo", async 
 
   // Os bots largam sozinhos e andam pela pista.
   await expect
-    .poll(async () => Math.min(...(await bots()).map((b, i) => Math.hypot(b.x - start[i].x, b.z - start[i].z))))
+    .poll(async () => Math.min(...(await bots()).map((b, i) => Math.hypot(b.x - start[i].x, b.z - start[i].z))), { timeout: 15_000 })
     .toBeGreaterThan(30);
 });

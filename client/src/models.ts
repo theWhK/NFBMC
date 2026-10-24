@@ -1,5 +1,6 @@
 // Modelos 3D feitos só com formas simples do Three.js (sem arquivos externos).
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { FoodKind } from "@nfbmc/shared";
 
 const lambert = (color: THREE.ColorRepresentation) => new THREE.MeshLambertMaterial({ color });
@@ -26,6 +27,28 @@ function mesh(geometry: THREE.BufferGeometry, material: THREE.Material, x = 0, y
   const m = new THREE.Mesh(geometry, material);
   m.position.set(x, y, z);
   return m;
+}
+
+const bakedMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+/**
+ * Funde as peças de um modelo numa malha só, com a cor de cada peça gravada nos
+ * vértices. Um hambúrguer de 6 peças vira 1 chamada de desenho em vez de 6, o
+ * que faz muita diferença com dezenas de comidas na cidade.
+ */
+export function bake(group: THREE.Object3D): THREE.Mesh {
+  group.updateMatrixWorld(true);
+  const parts: THREE.BufferGeometry[] = [];
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const geometry = (object.geometry as THREE.BufferGeometry).clone().applyMatrix4(object.matrixWorld);
+    const color = ((object.material as THREE.MeshLambertMaterial).color ?? new THREE.Color("#ffffff")).clone();
+    const colors = new Float32Array(geometry.attributes.position.count * 3);
+    for (let i = 0; i < colors.length; i += 3) colors.set([color.r, color.g, color.b], i);
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    parts.push(geometry.index ? geometry.toNonIndexed() : geometry);
+  });
+  return new THREE.Mesh(mergeGeometries(parts), bakedMaterial);
 }
 
 /** Hambúrguer de tamanho 1 (cerca de 1 de diâmetro), com a base em y = 0. */
@@ -64,11 +87,19 @@ function makeSoda() {
   return g;
 }
 
+const foodCache = new Map<FoodKind, THREE.BufferGeometry>();
+
 export function makeFood(kind: FoodKind) {
-  const inner = kind === "burger" ? makeBurger() : kind === "fries" ? makeFries() : makeSoda();
-  inner.scale.setScalar(kind === "soda" ? 1.5 : 1.9);
+  // A geometria fundida de cada tipo é feita uma vez e reaproveitada.
+  let geometry = foodCache.get(kind);
+  if (!geometry) {
+    const inner = kind === "burger" ? makeBurger() : kind === "fries" ? makeFries() : makeSoda();
+    inner.scale.setScalar(kind === "soda" ? 1.5 : 1.9);
+    geometry = bake(inner).geometry;
+    foodCache.set(kind, geometry);
+  }
   const g = new THREE.Group();
-  g.add(inner);
+  g.add(new THREE.Mesh(geometry, bakedMaterial));
   return g;
 }
 
@@ -107,16 +138,18 @@ export function makeCar(color: string, name: string): CarModel {
   const group = new THREE.Group();
   const body = lambert(color);
 
-  group.add(mesh(new THREE.BoxGeometry(2.1, 0.7, 4), body, 0, 0.75));
-  group.add(mesh(new THREE.BoxGeometry(1.8, 0.6, 1.9), MATERIALS.window, 0, 1.4, -0.3));
-  group.add(mesh(new THREE.BoxGeometry(1.9, 0.12, 2.0), body, 0, 1.75, -0.3));
-  group.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, -0.65, 0.85, 2.01));
-  group.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, 0.65, 0.85, 2.01));
-
+  // Carroceria, vidros, faróis e o hambúrguer do teto: tudo fundido numa peça.
+  const shell = new THREE.Group();
+  shell.add(mesh(new THREE.BoxGeometry(2.1, 0.7, 4), body, 0, 0.75));
+  shell.add(mesh(new THREE.BoxGeometry(1.8, 0.6, 1.9), MATERIALS.window, 0, 1.4, -0.3));
+  shell.add(mesh(new THREE.BoxGeometry(1.9, 0.12, 2.0), body, 0, 1.75, -0.3));
+  shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, -0.65, 0.85, 2.01));
+  shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, 0.65, 0.85, 2.01));
   const burger = makeBurger();
   burger.scale.setScalar(1.3);
   burger.position.set(0, 1.8, -0.3);
-  group.add(burger);
+  shell.add(burger);
+  group.add(bake(shell));
 
   const wheels: THREE.Mesh[] = [];
   const wheelGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.4, 14);

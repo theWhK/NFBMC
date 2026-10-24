@@ -4,12 +4,12 @@
 // jogador: a saída é um DriveInput, e a física é a mesma de todo mundo.
 import {
   CAR,
-  TRACK,
   nearestSample,
   pointOnTrack,
   type CarState,
   type Difficulty,
   type DriveInput,
+  type Track,
 } from "@nfbmc/shared";
 
 /** Paródia da Blacklist: os 15 mais procurados, versão lanchonete. */
@@ -75,9 +75,9 @@ export function createBrain(difficulty: Difficulty, random: () => number = Math.
 }
 
 /** Quanto a pista vira (em radianos) entre `from` e `from + ahead` metros. */
-function turnAhead(fromIndex: number, ahead: number) {
-  const samples = TRACK.samples;
-  const spacing = TRACK.length / samples.length;
+function turnAhead(track: Track, fromIndex: number, ahead: number) {
+  const samples = track.samples;
+  const spacing = track.length / samples.length;
   const a = samples[fromIndex];
   let worst = 0;
   for (let d = 8; d <= ahead; d += 8) {
@@ -95,6 +95,7 @@ function turnAhead(fromIndex: number, ahead: number) {
  */
 export function botInput(
   brain: Brain,
+  track: Track,
   car: CarState,
   dt: number,
   foods: FoodSpot[],
@@ -102,14 +103,14 @@ export function botInput(
   pace = 1,
 ): DriveInput {
   brain.time += dt;
-  const near = nearestSample(TRACK, car.x, car.z);
-  const here = TRACK.samples[near.index].dist;
+  const near = nearestSample(track, car.x, car.z);
+  const here = track.samples[near.index].dist;
   const speed = car.speed;
 
   // Desatolar: parado (bateu, rodou ou ficou preso) → dá ré virando por um tempo.
   if (brain.reverseFor > 0) {
     brain.reverseFor -= dt;
-    const target = pointOnTrack(TRACK, here + 15, 0);
+    const target = pointOnTrack(track, here + 15, 0);
     const want = wrap(Math.atan2(target.x - car.x, target.z - car.z) - car.heading);
     return { throttle: -1, steer: want > 0 ? 1 : -1 };
   }
@@ -123,7 +124,7 @@ export function botInput(
   if (brain.chasing === null || !foods.some((f) => f.active && f.dist === brain.chasing)) {
     brain.chasing = null;
     for (const food of foods) {
-      const ahead = (food.dist - here + TRACK.length) % TRACK.length;
+      const ahead = (food.dist - here + track.length) % track.length;
       if (!food.active || ahead < 12 || ahead > 45) continue;
       // Decide uma vez por comida (a semente é a própria distância, para não ficar indeciso).
       const roll = (Math.sin(food.dist * 12.9898 + brain.lane * 78.233) * 43758.5453) % 1;
@@ -132,11 +133,11 @@ export function botInput(
     }
   }
   const chased = brain.chasing !== null ? foods.find((f) => f.dist === brain.chasing) : undefined;
-  const chasedAhead = chased ? (chased.dist - here + TRACK.length) % TRACK.length : Infinity;
-  if (chased && chasedAhead > TRACK.length / 2) brain.chasing = null; // já passou
+  const chasedAhead = chased ? (chased.dist - here + track.length) % track.length : Infinity;
+  if (chased && chasedAhead > track.length / 2) brain.chasing = null; // já passou
 
   const lookahead = 9 + Math.max(0, speed) * 0.42;
-  const edge = TRACK.width / 2 - 2.5;
+  const edge = track.width / 2 - 2.5;
   let lane = chased && chasedAhead < 45
     ? chased.side
     : clamp(brain.lane + Math.sin(brain.time / brain.sway) * 2, -edge, edge);
@@ -159,16 +160,17 @@ export function botInput(
     if (ahead < 6) blocked = true;
     break;
   }
-  const target = pointOnTrack(TRACK, here + lookahead, lane);
+  const target = pointOnTrack(track, here + lookahead, lane);
 
   const want = wrap(Math.atan2(target.x - car.x, target.z - car.z) - car.heading);
   const wobble = Math.sin(brain.time * 2.3) * brain.wobble;
   const steer = clamp(-want * 3 + wobble, -1, 1);
 
   // Velocidade alvo: mais devagar quanto mais a pista vira à frente.
-  const turn = turnAhead(near.index, 24 + Math.max(0, speed) * 0.9);
-  const corner = 1 - clamp((turn - 0.4) * 0.5, 0, 0.45);
-  const offTrack = near.distance > TRACK.width / 2 + 1;
+  const turn = turnAhead(track, near.index, 24 + Math.max(0, speed) * 0.9);
+  // Esquina de 90° (rua) pede bem mais freio que as curvas abertas do autódromo.
+  const corner = 1 - clamp((turn - 0.4) * 0.5, 0, 0.6);
+  const offTrack = near.distance > track.width / 2 + 1;
   const desired = (offTrack ? CAR.grassMaxSpeed : CAR.maxSpeed) * brain.skill * corner * pace;
 
   let throttle = 0;

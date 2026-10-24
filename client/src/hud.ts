@@ -1,5 +1,5 @@
 // Partes do HUD desenhadas em canvas 2D: conta-giros e minimapa.
-import { TRACK } from "@nfbmc/shared";
+import { RACES, RACE_IDS, STREETS, raceMarker, type RaceId, type Track } from "@nfbmc/shared";
 
 import { gearFor } from "./audio.ts";
 import type { CarView } from "./scene.ts";
@@ -73,36 +73,74 @@ export function createTacho(canvas: HTMLCanvasElement) {
   };
 }
 
-/** Minimapa redondo com a pista e os carros. */
+export interface MinimapView {
+  cars: Map<string, CarView>;
+  myId: string;
+  /** Corrida em andamento: o mapa mostra o traçado inteiro. Sem corrida, segue o carro. */
+  race: RaceId | null;
+}
+
+/** Minimapa redondo: ruas, traçado, pontos de encontro e carros. */
 export function createMinimap(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext("2d")!;
   const size = canvas.width;
-  const xs = TRACK.samples.map((s) => s.x);
-  const zs = TRACK.samples.map((s) => s.z);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minZ = Math.min(...zs);
-  const maxZ = Math.max(...zs);
-  const scale = (size - 40) / Math.max(maxX - minX, maxZ - minZ);
-  // Visto de cima com +Z para cima da tela, +X fica à esquerda.
-  const toMap = (x: number, z: number): [number, number] => [
-    size / 2 - (x - (minX + maxX) / 2) * scale,
-    size / 2 - (z - (minZ + maxZ) / 2) * scale,
-  ];
+  const raceBounds = new Map<RaceId, { x: number; z: number; radius: number }>();
+  for (const id of RACE_IDS) {
+    const xs = RACES[id].track.samples.map((s) => s.x);
+    const zs = RACES[id].track.samples.map((s) => s.z);
+    const [minX, maxX, minZ, maxZ] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
+    raceBounds.set(id, { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2, radius: Math.max(maxX - minX, maxZ - minZ) / 2 + 25 });
+  }
 
-  return (cars: Map<string, CarView>, myId: string) => {
-    ctx.clearRect(0, 0, size, size);
+  const drawTrack = (track: Track, scale: number, toMap: (x: number, z: number) => [number, number], color: string, width: number) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(2, width * scale);
     ctx.lineJoin = "round";
-    ctx.strokeStyle = "#8a7a66";
-    ctx.lineWidth = TRACK.width * scale;
     ctx.beginPath();
-    for (const s of TRACK.samples) ctx.lineTo(...toMap(s.x, s.z));
+    for (const s of track.samples) ctx.lineTo(...toMap(s.x, s.z));
     ctx.closePath();
     ctx.stroke();
+  };
 
-    const start = TRACK.samples[0];
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(...toMap(start.x, start.z), 3, 3);
+  return ({ cars, myId, race }: MinimapView) => {
+    const me = cars.get(myId);
+    const view = race ? raceBounds.get(race)! : { x: me?.x ?? 0, z: me?.z ?? 0, radius: 260 };
+    const scale = (size / 2 - 6) / view.radius;
+    // Visto de cima com +Z para cima da tela, +X fica à esquerda.
+    const toMap = (x: number, z: number): [number, number] => [
+      size / 2 - (x - view.x) * scale,
+      size / 2 - (z - view.z) * scale,
+    ];
+
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = "#5b5148";
+    for (const street of STREETS) {
+      const [x1, y1] = toMap(street.maxX, street.maxZ);
+      const [x2, y2] = toMap(street.minX, street.minZ);
+      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+    }
+    drawTrack(RACES.autodromo.track, scale, toMap, "#5b5148", RACES.autodromo.track.width);
+    if (race) {
+      drawTrack(RACES[race].track, scale, toMap, "#ff9a1f", 7 / scale);
+      const start = RACES[race].track.samples[0];
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(...toMap(start.x, start.z), 4, 4);
+    } else {
+      // Pontos de encontro das corridas.
+      for (const id of RACE_IDS) {
+        const m = raceMarker(id);
+        const [mx, my] = toMap(m.x, m.z);
+        ctx.fillStyle = "#ff9a1f";
+        ctx.beginPath();
+        ctx.arc(mx, my, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#16110d";
+        ctx.font = "bold 10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("🏁", mx, my + 1);
+      }
+    }
 
     const drawCar = (car: CarView, radius: number) => {
       ctx.fillStyle = car.color;
@@ -111,12 +149,23 @@ export function createMinimap(canvas: HTMLCanvasElement) {
       ctx.fill();
     };
     for (const [id, car] of cars) if (id !== myId && car.visible) drawCar(car, 4);
-    const me = cars.get(myId);
     if (me?.visible) {
-      drawCar(me, 6);
+      // Seta na direção do carro.
+      const [cx, cy] = toMap(me.x, me.z);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(-me.heading);
+      ctx.fillStyle = me.color;
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -8);
+      ctx.lineTo(6, 6);
+      ctx.lineTo(-6, 6);
+      ctx.closePath();
+      ctx.fill();
       ctx.stroke();
+      ctx.restore();
     }
   };
 }
