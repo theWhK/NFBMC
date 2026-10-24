@@ -3,31 +3,273 @@
   font-family: system-ui, sans-serif;
   background: #1d1a17;
   color: #f5ebe0;
+  --ketchup: #e63946;
+  --cheese: #e9c46a;
+  --panel: rgba(29, 26, 23, 0.88);
 }
 
 body {
   margin: 0;
+  overflow: hidden;
 }
 
-main {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 16px;
+[hidden] {
+  display: none !important;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+#topbar {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.panel {
+  position: fixed;
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 18px 22px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+.panel.center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  max-width: min(560px, calc(100vw - 32px));
+  box-sizing: border-box;
+}
+
+.panel.side {
+  top: 48px;
+  right: 16px;
+  width: 240px;
 }
 
 h1 {
-  font-size: 1.4rem;
+  margin: 0 0 8px;
+  font-size: 1.8rem;
 }
 
-canvas {
+h1 small {
+  color: var(--cheese);
+  font-size: 1rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+h2 {
+  margin: 0 0 8px;
+}
+
+label {
+  display: block;
+  margin: 12px 0;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+input {
   display: block;
   width: 100%;
-  height: auto;
-  background: #2b2622;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 10px 12px;
+  font-size: 1.1rem;
   border-radius: 8px;
+  border: 1px solid #5b5148;
+  background: #2b2622;
+  color: inherit;
+}
+
+button {
+  width: 100%;
+  padding: 12px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ketchup);
+  color: white;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.1);
+}
+
+#lobby-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 14px;
+}
+
+#lobby-list li {
+  padding: 3px 0;
+}
+
+.dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+#hud {
+  position: fixed;
+  top: 48px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stat {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 6px 12px;
+  min-width: 110px;
+}
+
+.stat span {
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.stat strong {
+  font-size: 1.5rem;
+}
+
+.stat.big strong {
+  color: var(--cheese);
+  font-size: 2rem;
+}
+
+#turbo {
+  background: #ff9f1c;
+  color: #1d1a17;
+  font-weight: 900;
+  text-align: center;
+  border-radius: 10px;
+  padding: 6px;
+  animation: pulse 0.3s infinite alternate;
+}
+
+@keyframes pulse {
+  to {
+    transform: scale(1.08);
+  }
+}
+
+#countdown {
+  position: fixed;
+  top: 35%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 9rem;
+  font-weight: 900;
+  color: var(--cheese);
+  text-shadow: 0 6px 0 #8d5524, 0 10px 30px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+#message {
+  position: fixed;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 1.2rem;
+  text-align: center;
+}
+
+#popups {
+  position: fixed;
+  top: 55%;
+  left: 50%;
+  pointer-events: none;
+}
+
+.popup {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--cheese);
+  text-shadow: 0 3px 0 #8d5524;
+  white-space: nowrap;
+  animation: rise 1.2s ease-out forwards;
+}
+
+@keyframes rise {
+  to {
+    transform: translate(-50%, -90px);
+    opacity: 0;
+  }
+}
+
+#results table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+#results th,
+#results td {
+  padding: 5px 8px;
+  text-align: right;
+}
+
+#results th:nth-child(2),
+#results td:nth-child(2) {
+  text-align: left;
+}
+
+#results td:last-child {
+  color: var(--cheese);
+  font-weight: bold;
+}
+
+#results tr.me {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#minimap {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  background: var(--panel);
+  border-radius: 14px;
+}
+
+#controls {
+  position: fixed;
+  left: 16px;
+  bottom: 8px;
+  margin: 0;
 }
 
 .hint {
   opacity: 0.7;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
