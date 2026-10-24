@@ -15,6 +15,7 @@ test("Lista Gorda: as calorias ficam na ficha e aparecem no menu, mesmo voltando
 
   // Voltando ao site no mesmo navegador: o menu mostra a Lista Gorda e a ficha continua.
   await page.goto("/");
+  await page.getByTestId("lista-menu").click();
   await expect(page.getByTestId("hall")).toContainText("Comilão");
   await expect(page.getByTestId("hall")).toContainText("98.765");
   await page.getByTestId("world-solo-button").click();

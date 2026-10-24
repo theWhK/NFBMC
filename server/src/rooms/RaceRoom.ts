@@ -19,6 +19,7 @@ import {
   nearestSample,
   pointOnTrack,
   stepCar,
+  pickColor,
   DIFFICULTY_LABELS,
   SOLO_DEFAULT_BOTS,
   type CreateOptions,
@@ -156,7 +157,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     player.name = sanitizeName(options?.name, `Jogador ${this.joinCount}`);
 
     const usedColors = new Set([...this.state.players.values()].map((p) => p.color));
-    player.color = PLAYER_COLORS.find((c) => !usedColors.has(c)) ?? PLAYER_COLORS[0];
+    player.color = pickColor(options?.color, usedColors);
 
     this.placeOnGrid(player, this.state.players.size);
     this.state.players.set(client.sessionId, player);

@@ -7,10 +7,11 @@ import { Sound } from "./audio.ts";
 import { createMinimap, createTacho } from "./hud.ts";
 import { LOGO_SVG } from "./logo.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
-import { fetchListaGorda, joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
+import { createMenu, type MenuEntry } from "./menu.ts";
+import { joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
 import { RaceMode } from "./race-mode.ts";
 import { GameScene } from "./scene.ts";
-import { $, escapeHtml, hideModeUi, kcal, setHtml, ui } from "./ui.ts";
+import { $, hideModeUi, ui } from "./ui.ts";
 import { WorldMode } from "./world-mode.ts";
 
 ui.logo.innerHTML = LOGO_SVG;
@@ -150,7 +151,7 @@ function setLoading(text: string | null) {
 }
 
 async function enterWorld(spawn?: RaceId) {
-  const room = await joinWorld({ name: playerName, token, solo: soloWorld, spawn });
+  const room = await joinWorld({ name: playerName, token, solo: soloWorld, spawn, color: menu.color() });
   room.onLeave(() => {
     if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
   });
@@ -169,7 +170,7 @@ async function goRace(message: GoRaceMessage) {
     const world = mode.room;
     setMode(null);
     await world.leave();
-    const room = await joinEventRace(message.roomId, { name: playerName, token });
+    const room = await joinEventRace(message.roomId, { name: playerName, token, color: menu.color() });
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });
@@ -246,16 +247,16 @@ frame();
 
 // --- Menu ------------------------------------------------------------------
 
-type Entry = "world" | "world-solo" | "quick" | "solo";
-
-async function start(entry: Entry) {
+async function start(entry: MenuEntry) {
+  // Saiu do menu: a vitrine sai de cena.
+  scene?.setShowcase(null);
   if (entry === "world" || entry === "world-solo") {
     soloWorld = entry === "world-solo";
     // ?spawn=centro na URL nasce direto num ponto de encontro (atalho para testes).
     const spawn = new URLSearchParams(location.search).get("spawn");
     await enterWorld(isRaceId(spawn) ? spawn : undefined);
   } else {
-    const room = await joinQuickRace(playerName, entry === "solo");
+    const room = await joinQuickRace(playerName, entry === "solo", menu.color());
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });
@@ -266,7 +267,7 @@ async function start(entry: Entry) {
   ui.minimap.hidden = false;
 }
 
-function enter(entry: Entry) {
+function enter(entry: MenuEntry) {
   sound.unlock();
   sound.click();
   const buttons = [...ui.join.querySelectorAll("button")];
@@ -279,27 +280,20 @@ function enter(entry: Entry) {
     console.error(err);
     ui.status.textContent = "Não foi possível conectar ao servidor.";
     buttons.forEach((b) => (b.disabled = false));
+    menu.show();
   });
 }
 
-// Lista Gorda de todos os tempos, no menu.
-fetchListaGorda().then((entries) => {
-  if (!entries.length) return;
-  setHtml(ui.hallList, entries
-    .map((e) => `<li>${escapeHtml(e.name)} <strong>${kcal(e.calories)}</strong></li>`)
-    .join(""));
-  ui.hall.hidden = false;
-});
-
 ui.name.value = storage.get("nfbmc:name");
-ui.name.focus();
-ui.join.addEventListener("submit", (e) => {
-  e.preventDefault();
-  enter("world");
+
+const menu = createMenu({
+  sound,
+  scene,
+  storage,
+  token: () => token,
+  onEnter: enter,
+  onAudioChange: refreshAudioButtons,
 });
-ui.worldSolo.addEventListener("click", () => enter("world-solo"));
-ui.quick.addEventListener("click", () => enter("quick"));
-ui.solo.addEventListener("click", () => enter("solo"));
 
 // --- Gancho para os testes e2e ---------------------------------------------
 

@@ -22,6 +22,23 @@ export interface ListaGordaEntry {
   wins: number;
 }
 
+export interface ProfileSummary {
+  name: string;
+  calories: number;
+  races: number;
+  wins: number;
+}
+
+/** Ficha do jogador para o rodapé do menu (null se não houver ou o servidor não responder). */
+export async function fetchProfile(token: string): Promise<ProfileSummary | null> {
+  try {
+    const response = await fetch(`${apiBase}/api/ficha/${encodeURIComponent(token)}`);
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Lista Gorda de todos os tempos (fica vazia se o servidor não responder). */
 export async function fetchListaGorda(): Promise<ListaGordaEntry[]> {
   try {
@@ -41,10 +58,10 @@ export type WorldRoom = Awaited<ReturnType<typeof joinPublicWorld>>;
 // SDK; os casts abaixo só unificam esses tipos.
 
 /** Corrida rápida no autódromo: a sala pública da galera, ou uma sala solo contra bots. */
-export const joinQuickRace = (name: string, solo: boolean): Promise<RaceRoom> =>
+export const joinQuickRace = (name: string, solo: boolean, color?: string): Promise<RaceRoom> =>
   solo
-    ? (client.create(ROOM_NAME, { name, solo: true }) as Promise<unknown> as Promise<RaceRoom>)
-    : joinPublicRace({ name });
+    ? (client.create(ROOM_NAME, { name, solo: true, color }) as Promise<unknown> as Promise<RaceRoom>)
+    : joinPublicRace({ name, color });
 
 /** Corrida de evento disparada no mundo aberto (sala criada pelo servidor). */
 export const joinEventRace = (roomId: string, options: WorldJoinOptions): Promise<RaceRoom> =>

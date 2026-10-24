@@ -134,6 +134,16 @@ export async function flushProfiles() {
 
 setInterval(() => void flushProfiles(), FLUSH_EVERY_MS).unref();
 
+/** Ficha do token para mostrar no menu (memória ou banco), sem criar uma nova. */
+export async function peekProfile(token: unknown) {
+  if (!isToken(token)) return null;
+  const cached = profiles.get(token);
+  if (cached) return { name: cached.name, calories: cached.calories, races: cached.races, wins: cached.wins };
+  if (!pool) return null;
+  const { rows } = await pool.query("select name, calories, races, wins from players where token = $1", [token]);
+  return rows[0] ? { name: rows[0].name, calories: Number(rows[0].calories), races: rows[0].races, wins: rows[0].wins } : null;
+}
+
 /** Lista Gorda de todos os tempos: quem mais acumulou calorias. */
 export async function listaGorda(limit = 10): Promise<ListaGordaEntry[]> {
   if (pool) {
