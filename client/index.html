@@ -18,7 +18,8 @@
     <div id="topbar">
       <span id="status" data-testid="status">Digite seu apelido</span>
       · Jogadores: <span id="player-count" data-testid="player-count">0</span>
-      <button id="to-menu" class="icon" title="Voltar ao menu" data-testid="to-menu" hidden>☰</button>
+      <button id="open-map" class="icon" title="Mapa (Tab)" data-testid="open-map" hidden>🗺️</button>
+      <button id="to-menu" class="icon" title="Menu (Esc)" data-testid="to-menu" hidden>☰</button>
       <button id="toggle-music" class="icon" title="Música (M)">🎵</button>
       <button id="toggle-sfx" class="icon" title="Efeitos sonoros">🔊</button>
     </div>
@@ -201,6 +202,33 @@
     </div>
 
     <div id="loading" data-testid="loading" hidden></div>
+
+    <!-- Menu de pausa (o jogo continua rodando por trás: é multiplayer). -->
+    <div id="pause" class="pause" data-testid="pause" hidden>
+      <h2>Pausa</h2>
+      <p class="hint">O jogo continua rodando para a galera enquanto este menu está aberto.</p>
+      <div class="mw-list sub">
+        <button type="button" id="pause-resume" data-testid="pause-resume">Continuar</button>
+        <button type="button" id="pause-map" data-testid="pause-map">Mapa da cidade</button>
+        <button type="button" id="pause-music">Música</button>
+        <button type="button" id="pause-sfx">Efeitos</button>
+        <button type="button" id="pause-quit" data-testid="pause-quit">Voltar ao menu principal</button>
+      </div>
+    </div>
+
+    <!-- Mapa em tela cheia. -->
+    <div id="fullmap" class="fullmap" data-testid="fullmap" hidden>
+      <canvas id="fullmap-canvas"></canvas>
+      <div class="fullmap-legend">
+        <span><i class="me"></i>Você</span>
+        <span><i class="other"></i>Outros pilotos</span>
+        <span>🏁 Corridas</span>
+        <span>🍔 Comida</span>
+        <span><i class="cop"></i>Vigilância</span>
+        <span class="hint">Tab / Esc fecha · roda do mouse ou pinça dá zoom · arraste para mover</span>
+      </div>
+      <button type="button" id="fullmap-close" class="icon close" data-testid="fullmap-close" aria-label="Fechar mapa">✕</button>
+    </div>
 
     <!-- Quadrinhos do modo história. -->
     <div id="comic" class="comic" data-testid="comic" hidden>

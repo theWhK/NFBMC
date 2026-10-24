@@ -55,6 +55,11 @@ interface CarEntry {
   /** 0 a 1: quanto o pneu está cantando agora. */
   skid: number;
   offroad: boolean;
+  /** Última posição recebida do servidor e quando ela chegou (para extrapolar). */
+  serverX: number;
+  serverZ: number;
+  serverHeading: number;
+  receivedAt: number;
 }
 
 /** O que a cena sabe do carro seguido pela câmera, para os sons. */
@@ -337,7 +342,10 @@ export class GameScene {
         const model = makeCar(car.color, car.name, { car: car.car, cop: car.cop, traffic: car.traffic });
         this.dress(model.group);
         model.group.rotation.order = "YXZ";
-        entry = { model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false };
+        entry = {
+          model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false,
+          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time,
+        };
         this.scene.add(model.group);
         this.cars.set(id, entry);
       }
@@ -371,6 +379,13 @@ export class GameScene {
     for (const [id, entry] of this.cars) {
       const car = cars.get(id);
       if (!car) continue;
+      // Chegou posição nova do servidor (30 vezes por segundo).
+      if (car.x !== entry.serverX || car.z !== entry.serverZ || car.heading !== entry.serverHeading) {
+        entry.serverX = car.x;
+        entry.serverZ = car.z;
+        entry.serverHeading = car.heading;
+        entry.receivedAt = this.time;
+      }
       // Teleporte (voltou para o grid): pula direto, sem atravessar o mapa.
       if (Math.hypot(car.x - entry.x, car.z - entry.z) > 25) {
         entry.x = car.x;
@@ -378,9 +393,18 @@ export class GameScene {
         entry.heading = car.heading;
       }
       const previousHeading = entry.heading;
-      entry.x = damp(entry.x, car.x, 18, dt);
-      entry.z = damp(entry.z, car.z, 18, dt);
-      entry.heading = dampAngle(entry.heading, car.heading, 18, dt);
+      // Extrapolação: entre uma atualização e outra o carro segue andando com a
+      // velocidade e a direção que o servidor mandou, e só o erro pequeno é
+      // corrigido aos poucos. Antes, o carro "corria atrás" de cada atualização
+      // nova e a câmera tremia 30 vezes por segundo.
+      const age = Math.min(this.time - entry.receivedAt, 0.15);
+      const predictedX = entry.serverX + Math.sin(entry.serverHeading) * car.speed * age;
+      const predictedZ = entry.serverZ + Math.cos(entry.serverHeading) * car.speed * age;
+      entry.x += Math.sin(entry.heading) * car.speed * dt;
+      entry.z += Math.cos(entry.heading) * car.speed * dt;
+      entry.x = damp(entry.x, predictedX, 8, dt);
+      entry.z = damp(entry.z, predictedZ, 8, dt);
+      entry.heading = dampAngle(entry.heading, entry.serverHeading, 14, dt);
 
       // Força lateral = velocidade de giro × velocidade. Acima de um limite o pneu canta.
       const turnRate = dt > 0 ? Math.atan2(Math.sin(entry.heading - previousHeading), Math.cos(entry.heading - previousHeading)) / dt : 0;

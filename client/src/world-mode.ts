@@ -166,7 +166,7 @@ export class WorldMode {
       boost: me.boost > 0,
     } : null);
     ctx.updateOtherEngines(cars, room.sessionId, me);
-    ctx.drawMinimap({ cars, myId: room.sessionId, race: null });
+    ctx.drawMinimap({ cars, myId: room.sessionId, race: null, foods: [...(room.state.stands ?? [])] });
     ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
     ui.nitroFill.style.width = `${Math.min(100, (me.boost / 2.5) * 100)}%`;
     ui.speedlines.hidden = !(me.boost > 0);

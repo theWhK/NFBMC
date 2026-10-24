@@ -23,6 +23,7 @@ test("modo história: prólogo, Lista Gorda, objetivo na cidade e duelo contra o
   await expect(page.getByTestId("story-objective")).toContainText("Izzy Iogurte");
   expect((await page.evaluate(() => Object.values(window.__nfbmc!.players())[0])).car).toBe("uno");
   await page.getByTestId("to-menu").click();
+  await page.getByTestId("pause-quit").click();
   await expect(page.getByTestId("story-menu")).toBeVisible();
 
   // Requisitos cumpridos (atalho pelo progresso salvo): o desafio libera.

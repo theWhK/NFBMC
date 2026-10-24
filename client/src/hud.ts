@@ -1,5 +1,17 @@
 // Partes do HUD desenhadas em canvas 2D: conta-giros e minimapa.
-import { LAKE, QUAY_Z, RACES, RACE_IDS, ROADS, carSpec, raceMarker, type RaceId, type Track } from "@nfbmc/shared";
+import {
+  DISTRICTS,
+  LAKE,
+  QUAY_Z,
+  RACES,
+  RACE_IDS,
+  ROADS,
+  WORLD_BOUNDS,
+  carSpec,
+  raceMarker,
+  type RaceId,
+  type Track,
+} from "@nfbmc/shared";
 
 import type { CarView } from "./scene.ts";
 
@@ -112,6 +124,8 @@ export interface MinimapView {
   myId: string;
   /** Corrida em andamento: o mapa mostra o traçado inteiro. Sem corrida, segue o carro. */
   race: RaceId | null;
+  /** Comidas (para o mapa em tela cheia). */
+  foods?: { x: number; z: number; active: boolean }[];
 }
 
 /** Minimapa redondo: ruas, traçado, pontos de encontro e carros. */
@@ -218,5 +232,209 @@ export function createMinimap(canvas: HTMLCanvasElement) {
       ctx.stroke();
       ctx.restore();
     }
+  };
+}
+
+export type FullMapView = MinimapView;
+
+/**
+ * Mapa da cidade em tela cheia: bairros com nome, ruas na largura certa, lago,
+ * mar, corridas, comida e carros. Roda do mouse ou pinça dão zoom; arrastar move.
+ */
+export function createFullMap(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext("2d")!;
+  const bounds = WORLD_BOUNDS;
+  let center = { x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2 };
+  let zoom = 1;
+  let width = 1;
+  let height = 1;
+  let ratio = 1;
+
+  const fitScale = () => Math.min(width / (bounds.maxX - bounds.minX + 60), height / (bounds.maxZ - bounds.minZ + 60));
+  const scale = () => fitScale() * zoom;
+  // Mesma orientação do minimapa: +Z para cima, +X para a esquerda.
+  const toMap = (x: number, z: number): [number, number] => [
+    width / 2 - (x - center.x) * scale(),
+    height / 2 - (z - center.z) * scale(),
+  ];
+
+  const resize = () => {
+    ratio = Math.min(window.devicePixelRatio, 2);
+    width = canvas.clientWidth || window.innerWidth;
+    height = canvas.clientHeight || window.innerHeight;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+  };
+
+  // Zoom e arrasto (mouse e toque).
+  const pointers = new Map<number, { x: number; y: number }>();
+  let pinchStart = 0;
+  let zoomStart = 1;
+  const setZoom = (value: number) => (zoom = Math.max(1, Math.min(8, value)));
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    setZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+  }, { passive: false });
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
+      zoomStart = zoom;
+    }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    const previous = pointers.get(e.pointerId);
+    if (!previous) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      if (pinchStart > 0) setZoom(zoomStart * (Math.hypot(a.x - b.x, a.y - b.y) / pinchStart));
+    } else {
+      // Arrastar move o mapa (o sinal acompanha a orientação invertida do toMap).
+      center = { x: center.x + (e.clientX - previous.x) / scale(), z: center.z + (e.clientY - previous.y) / scale() };
+    }
+  });
+  const release = (e: PointerEvent) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchStart = 0;
+  };
+  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointercancel", release);
+
+  const draw = ({ cars, myId, race, foods }: FullMapView) => {
+    if (canvas.width !== Math.round((canvas.clientWidth || window.innerWidth) * ratio)) resize();
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    const s = scale();
+    ctx.fillStyle = "#24506e";
+    ctx.fillRect(0, 0, width, height);
+
+    // Bairros.
+    for (const district of DISTRICTS) {
+      ctx.fillStyle = district.ground;
+      ctx.beginPath();
+      for (const [x, z] of district.polygon) ctx.lineTo(...toMap(x, z));
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Lago.
+    ctx.fillStyle = "#2f7aa0";
+    ctx.beginPath();
+    ctx.ellipse(...toMap(LAKE.x, LAKE.z), LAKE.rx * s, LAKE.rz * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ruas: borda escura e asfalto por cima.
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    for (const [color, extra] of [["#1b1714", 4], ["#5b5148", 0]] as const) {
+      ctx.strokeStyle = color;
+      for (const road of ROADS) {
+        ctx.lineWidth = Math.max(2, road.width * s) + extra;
+        ctx.beginPath();
+        for (const [x, z] of road.points) ctx.lineTo(...toMap(x, z));
+        ctx.stroke();
+      }
+    }
+    const drawTrack = (track: Track, color: string, lineWidth: number) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      for (const p of track.samples) ctx.lineTo(...toMap(p.x, p.z));
+      ctx.closePath();
+      ctx.stroke();
+    };
+    drawTrack(RACES.autodromo.track, "#5b5148", Math.max(2, RACES.autodromo.track.width * s));
+    if (race) drawTrack(RACES[race].track, "#ff9a1f", Math.max(3, 5 * s));
+
+    // Nomes dos bairros.
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${Math.round(14 + 4 * Math.min(zoom, 2))}px 'Black Ops One', sans-serif`;
+    for (const district of DISTRICTS) {
+      const cx = district.polygon.reduce((sum, p) => sum + p[0], 0) / district.polygon.length;
+      const cz = district.polygon.reduce((sum, p) => sum + p[1], 0) / district.polygon.length;
+      const [mx, my] = toMap(cx, cz);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(10, 8, 6, 0.85)";
+      ctx.strokeText(district.name.toUpperCase(), mx, my);
+      ctx.fillStyle = "rgba(255, 241, 214, 0.9)";
+      ctx.fillText(district.name.toUpperCase(), mx, my);
+    }
+
+    // Comida (só quando dá para ver: com zoom).
+    if (zoom >= 1.6) {
+      ctx.font = `${Math.round(10 + zoom * 2)}px sans-serif`;
+      for (const food of foods ?? []) if (food.active) ctx.fillText("🍔", ...toMap(food.x, food.z));
+    }
+
+    // Corridas.
+    if (!race) {
+      for (const id of RACE_IDS) {
+        const m = raceMarker(id);
+        const [mx, my] = toMap(m.x, m.z);
+        ctx.fillStyle = "#ff9a1f";
+        ctx.beginPath();
+        ctx.arc(mx, my, 11, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#16110d";
+        ctx.stroke();
+        ctx.font = "13px sans-serif";
+        ctx.fillText("🏁", mx, my + 1);
+        ctx.font = "13px 'Russo One', sans-serif";
+        ctx.lineWidth = 3;
+        ctx.strokeText(RACES[id].name, mx, my - 20);
+        ctx.fillStyle = "#ffc42e";
+        ctx.fillText(RACES[id].name, mx, my - 20);
+      }
+    }
+
+    // Carros: trânsito (pontinhos), viaturas (piscando), outros pilotos e você (seta).
+    const flash = Math.floor(performance.now() / 160) % 2 === 0;
+    for (const [id, car] of cars) {
+      if (id === myId || !car.visible) continue;
+      const [cx, cy] = toMap(car.x, car.z);
+      ctx.beginPath();
+      ctx.arc(cx, cy, car.traffic ? 2.5 : car.cop ? 6 : 6, 0, Math.PI * 2);
+      ctx.fillStyle = car.traffic ? "#b8b0a4" : car.cop ? (flash ? "#ff2a2a" : "#2a6bff") : car.color;
+      ctx.fill();
+      if (!car.traffic && !car.cop) {
+        ctx.font = "12px 'Russo One', sans-serif";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#16110d";
+        ctx.strokeText(car.name, cx, cy - 13);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(car.name, cx, cy - 13);
+      }
+    }
+    const me = cars.get(myId);
+    if (me) {
+      const [cx, cy] = toMap(me.x, me.z);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(-me.heading);
+      ctx.fillStyle = me.color;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(10, 10);
+      ctx.lineTo(-10, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  return {
+    draw,
+    /** Abre centralizado em quem joga, com um pouco de zoom. */
+    focus: (x: number, z: number) => {
+      resize();
+      center = { x, z };
+      zoom = 2;
+    },
   };
 }
