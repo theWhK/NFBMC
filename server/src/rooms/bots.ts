@@ -16,7 +16,7 @@ import {
 } from "@nfbmc/shared";
 
 /** Nomes dos bots: os rivais da Lista Gorda (lista no shared, que o menu também mostra). */
-export const BOT_NAMES = RIVALS.map((r) => r.name);
+export const BOT_NAMES: string[] = RIVALS.map((r) => r.name);
 
 /**
  * Por dificuldade: quanto da velocidade máxima o bot usa e quanto ele vai atrás

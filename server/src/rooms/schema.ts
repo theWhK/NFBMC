@@ -59,6 +59,8 @@ export const RaceState = schema({
   laps: t.uint8().default(3),
   /** Corrida disparada do mundo aberto (larga sozinha e devolve todo mundo ao mundo). */
   event: t.boolean().default(false),
+  /** Duelo do modo história contra um rival da Lista Gorda (larga sozinho). */
+  challenge: t.boolean().default(false),
   /** Sala privada de um jogador só, contra bots. */
   solo: t.boolean().default(false),
   /** Quantos bots entram na próxima corrida, e em que dificuldade. */

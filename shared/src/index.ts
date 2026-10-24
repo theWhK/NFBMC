@@ -3,6 +3,7 @@
 export * from "./track.ts";
 export * from "./physics.ts";
 export * from "./cars.ts";
+export * from "./story.ts";
 export * from "./world.ts";
 
 export const ROOM_NAME = "race";
@@ -139,6 +140,10 @@ export const RIVALS = [
 export interface CreateOptions extends JoinOptions {
   /** Corrida sozinho contra bots, numa sala privada. */
   solo?: boolean;
+  /** Pista da corrida (padrão: autódromo). */
+  raceId?: string;
+  /** Duelo do modo história: um rival só, com o carro e a habilidade dele. */
+  rival?: { name: string; car: string; skill: number };
 }
 
 /** Entrar no mundo aberto. */

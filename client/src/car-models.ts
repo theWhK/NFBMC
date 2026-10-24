@@ -229,6 +229,23 @@ const DESIGNS: Record<BodyStyle, Design> = {
       wing(add, -1.95, 0.45, 1.9, "#6b4a2b");
     },
   },
+  m3: {
+    length: 4.5, width: 1.86,
+    lower: [[-2.25, 0.26], [2.25, 0.26], [2.3, 0.56], [1.3, 0.76], [-1.7, 0.82], [-2.25, 0.74]],
+    cabin: [[-1.6, 0.8], [-0.8, 1.26], [0.3, 1.27], [1.1, 0.77]],
+    wheels: { rear: -1.38, front: 1.36, radius: 0.35, track: 1.66 },
+    extras: (add) => {
+      // Gorgonzola: veias azuis pela carroceria prata (a pintura clássica de corrida, versão queijo).
+      const veins: [number, number, number][] = [[-0.5, 1.6, 0.4], [0.3, 1.1, -0.3], [0.6, 0.2, 0.5], [-0.2, -0.6, -0.4], [0.45, -1.5, 0.3], [-0.6, -1.0, 0.6]];
+      for (const [x, z, rot] of veins) {
+        const y = Math.max(heightAt(DESIGNS.m3.lower, z), heightAt(DESIGNS.m3.cabin, z)) + 0.02;
+        for (let k = 0; k < 4; k++) add.box(0.07, 0.02, 0.32, k % 2 ? "#2a4fd1" : "#3a6bff", x + Math.sin(rot) * k * 0.25, y, z + Math.cos(rot) * k * 0.25);
+      }
+      add.box(1.88, 0.16, 4.52, "#2a4fd1", 0, 0.42, 0); // faixa azul lateral
+      wing(add, -2.05, 0.4, 1.75, "#c9ced6");
+      add.box(1.8, 0.05, 0.3, "#1b1b1b", 0, 0.26, 2.32);
+    },
+  },
   a3: {
     length: 4.2, width: 1.76,
     lower: [[-2.1, 0.24], [2.1, 0.24], [2.14, 0.58], [1.3, 0.77], [-2.1, 0.84]],
