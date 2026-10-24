@@ -460,3 +460,89 @@ h2 {
   opacity: 0.75;
   font-size: 0.85rem;
 }
+
+.quick {
+  font-size: 0.85rem;
+  text-shadow: 0 1px 3px #000;
+  margin-top: 4px;
+}
+
+button.link {
+  display: inline;
+  padding: 0;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--mustard);
+  text-decoration: underline;
+  transform: none;
+}
+
+#world-hud {
+  position: fixed;
+  top: 44px;
+  left: 18px;
+  font-family: var(--hud);
+  text-shadow: 0 2px 0 #000, 0 0 12px rgba(0, 0, 0, 0.6);
+  max-width: 260px;
+}
+
+#world-hud .hud-row {
+  transform: skewX(-8deg);
+}
+
+#world-hud .hint {
+  font-family: system-ui, sans-serif;
+}
+
+.stamp.small {
+  font-size: 1.1rem;
+}
+
+#leaderboard {
+  width: 220px;
+  padding: 12px 16px;
+}
+
+#leaderboard ol {
+  margin: 0;
+  padding-left: 1.4em;
+}
+
+#leaderboard li {
+  padding: 2px 0;
+  font-size: 0.9rem;
+}
+
+#leaderboard li strong {
+  float: right;
+  font-family: var(--hud);
+  color: var(--mustard);
+}
+
+.panel.bottom {
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(380px, calc(100vw - 32px));
+  box-sizing: border-box;
+}
+
+.panel.bottom button#start-race {
+  width: 100%;
+}
+
+#loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(22, 17, 13, 0.75);
+  font: 2rem var(--hud);
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--mustard);
+}

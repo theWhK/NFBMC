@@ -11,22 +11,28 @@ import {
   PLACE_BONUS,
   PLAYER_COLORS,
   RESULTS_SECONDS,
-  TOTAL_LAPS,
-  TRACK,
+  RACES,
+  EVENT_JOIN_SECONDS,
+  collideWorld,
+  isOnRoad,
+  isRaceId,
   nearestSample,
   pointOnTrack,
   stepCar,
   DIFFICULTY_LABELS,
   SOLO_DEFAULT_BOTS,
   type CreateOptions,
+  type EventRaceOptions,
+  type Track,
+  type WorldJoinOptions,
   type Difficulty,
   type DriveInput,
   type FoodKind,
   type InputMessage,
-  type JoinOptions,
   type Phase,
 } from "@nfbmc/shared";
 
+import { addCalories } from "../profiles.ts";
 import { BOT_NAMES, botInput, createBrain, type Brain, type FoodSpot } from "./bots.ts";
 import { Food, Player, RaceState, Result } from "./schema.ts";
 
@@ -35,28 +41,18 @@ const clamp = (value: number, min: number, max: number) =>
 
 /** A pista é dividida em setores; só conta a volta quem passou por todos, em ordem. */
 const SECTORS = 4;
-/** Até onde o carro pode ir antes de bater na "cerca" invisível do mapa. */
-const WORLD_LIMIT = 220;
-
-function sectorOf(index: number) {
-  return Math.floor((index / TRACK.samples.length) * SECTORS);
-}
-
-/** Posição no grid de largada: duas colunas, atrás da linha de chegada. */
-function gridSlot(slot: number) {
-  const row = Math.floor(slot / 2);
-  const side = slot % 2 === 0 ? 3.5 : -3.5;
-  return pointOnTrack(TRACK, -8 - row * 7, side);
-}
 
 /** Comidas espalhadas pela pista: [metros a partir da largada, lado, tipo]. */
-const FOOD_LAYOUT: [number, number, FoodKind][] = [];
-for (let dist = 60, i = 0; dist < TRACK.length - 30; dist += 45, i++) {
+function foodLayout(track: Track) {
+  const layout: [number, number, FoodKind][] = [];
   const kinds: FoodKind[] = ["fries", "burger", "soda"];
   const sides = [-4.5, 0, 4.5];
-  FOOD_LAYOUT.push([dist, sides[i % 3], kinds[i % 3]]);
-  // A cada três grupos, uma fileira com mais comida para disputar.
-  if (i % 3 === 2) FOOD_LAYOUT.push([dist + 8, -4.5, "burger"]);
+  for (let dist = 60, i = 0; dist < track.length - 30; dist += 45, i++) {
+    layout.push([dist, sides[i % 3], kinds[i % 3]]);
+    // A cada três grupos, uma fileira com mais comida para disputar.
+    if (i % 3 === 2) layout.push([dist + 8, -4.5, "burger"]);
+  }
+  return layout;
 }
 
 function sanitizeName(raw: unknown, fallback: string) {
@@ -70,11 +66,15 @@ const isDifficulty = (value: unknown): value is Difficulty =>
   typeof value === "string" && value in DIFFICULTY_LABELS;
 
 /**
- * Sala de corrida. A sala pública é uma só, onde todo mundo cai; a sala solo é
- * privada, de um jogador contra bots. Fluxo: lobby (todos dirigem livres) →
- * alguém aperta "Começar" → contagem → corrida de TOTAL_LAPS voltas comendo o
- * que aparecer → resultado (calorias + bônus de colocação) → lobby de novo.
+ * Sala de corrida, numa das pistas de Porto Gordo. Três jeitos de existir:
+ * - pública (corrida rápida com a galera): uma só, onde todo mundo cai;
+ * - solo: privada, de um jogador contra bots;
+ * - evento: criada pelo mundo aberto quando alguém dispara uma corrida num
+ *   ponto de encontro. Larga sozinha quando todo mundo chega e, no fim, manda
+ *   todos de volta para o mundo.
  *
+ * Fluxo: lobby (todos dirigem livres) → "Começar" → contagem → corrida comendo
+ * o que aparecer → resultado (calorias + bônus de colocação) → lobby de novo.
  * O cliente só manda acelerar/virar; quem move os carros é o servidor.
  */
 export class RaceRoom extends Room<{ state: RaceState }> {
@@ -87,7 +87,13 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   private sectors = new Map<string, number>();
   private respawnAt = new Map<Food, number>();
   private brains = new Map<string, Brain>();
+  private tokens = new Map<string, string>();
   private joinCount = 0;
+  private track: Track = RACES.autodromo.track;
+  private layout = foodLayout(this.track);
+  /** Corrida de evento: quantos jogadores esperar e até quando. */
+  private expected = 0;
+  private age = 0;
 
   messages = {
     input: (client: Client, message: InputMessage) => {
@@ -110,17 +116,31 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     },
   };
 
-  onCreate(options?: CreateOptions) {
+  onCreate(options?: CreateOptions & Partial<EventRaceOptions>) {
+    const race = RACES[isRaceId(options?.raceId) ? options.raceId : "autodromo"];
+    this.track = race.track;
+    this.layout = foodLayout(this.track);
+    this.state.raceId = race.id;
+    this.state.laps = race.laps;
+
     if (options?.solo) {
       // Sala solo: some da busca do "entrar" e só cabe quem criou.
       this.setPrivate(true);
       this.maxClients = 1;
       this.state.solo = true;
       this.state.botCount = SOLO_DEFAULT_BOTS;
+    } else if (typeof options?.expected === "number" && options.expected > 0) {
+      // Evento do mundo aberto: só entra quem foi chamado (pelo id da sala).
+      this.setPrivate(true);
+      this.expected = clamp(Math.round(options.expected), 1, MAX_PLAYERS);
+      this.maxClients = this.expected;
+      this.state.event = true;
+      this.state.botCount = clamp(Math.round(options.bots ?? 0), 0, MAX_PLAYERS - 1);
+      if (isDifficulty(options.difficulty)) this.state.difficulty = options.difficulty;
     }
-    for (const [dist, side, kind] of FOOD_LAYOUT) {
+    for (const [dist, side, kind] of this.layout) {
       const food = new Food();
-      const point = pointOnTrack(TRACK, dist, side);
+      const point = pointOnTrack(this.track, dist, side);
       food.kind = kind;
       food.x = point.x;
       food.z = point.z;
@@ -129,7 +149,8 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     this.setSimulationInterval((deltaMs) => this.update(Math.min(deltaMs, 100) / 1000));
   }
 
-  onJoin(client: Client, options?: JoinOptions) {
+  onJoin(client: Client, options?: WorldJoinOptions) {
+    if (typeof options?.token === "string") this.tokens.set(client.sessionId, options.token);
     const player = new Player();
     this.joinCount++;
     player.name = sanitizeName(options?.name, `Jogador ${this.joinCount}`);
@@ -145,6 +166,18 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     this.state.players.delete(client.sessionId);
     this.controls.delete(client.sessionId);
     this.sectors.delete(client.sessionId);
+    this.tokens.delete(client.sessionId);
+  }
+
+  /** Posição no grid de largada: duas colunas, atrás da linha de chegada. */
+  private gridSlot(slot: number) {
+    const row = Math.floor(slot / 2);
+    const side = slot % 2 === 0 ? 3.5 : -3.5;
+    return pointOnTrack(this.track, -8 - row * 7, side);
+  }
+
+  private sectorOf(index: number) {
+    return Math.floor((index / this.track.samples.length) * SECTORS);
   }
 
   private setPhase(phase: Phase, timer = 0) {
@@ -153,7 +186,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   }
 
   private placeOnGrid(player: Player, slot: number) {
-    const spot = gridSlot(slot);
+    const spot = this.gridSlot(slot);
     player.x = spot.x;
     player.z = spot.z;
     player.heading = spot.heading;
@@ -217,6 +250,15 @@ export class RaceRoom extends Room<{ state: RaceState }> {
 
   private update(dt: number) {
     const phase = this.state.phase as Phase;
+    this.age += dt;
+
+    if (this.state.event && phase === "lobby") {
+      // Larga quando todo mundo chegou (ou cansou de esperar); sala abandonada fecha.
+      const everyone = this.state.players.size >= this.expected;
+      if (this.state.players.size > 0 && (everyone || this.age > EVENT_JOIN_SECONDS)) this.startCountdown();
+      else if (this.age > EVENT_JOIN_SECONDS * 3) this.disconnect();
+      return;
+    }
 
     if (phase !== "lobby" && phase !== "results" && this.racers().length === 0) {
       // Todo mundo que estava correndo saiu.
@@ -245,6 +287,13 @@ export class RaceRoom extends Room<{ state: RaceState }> {
         this.state.timer -= dt;
         this.drive(dt, [...this.state.players.entries()]);
         if (this.state.timer <= 0) {
+          if (this.state.event) {
+            // Fim do evento: todo mundo volta para o mundo aberto.
+            this.broadcast("backToWorld", { raceId: this.state.raceId });
+            this.clock.setTimeout(() => this.disconnect(), 3000);
+            this.state.timer = Infinity;
+            return;
+          }
           this.removeBots();
           this.state.players.forEach((p) => (p.racing = false));
           this.setPhase("lobby");
@@ -256,7 +305,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   /** Os bots decidem o que "apertar" neste tick, como se fossem jogadores. */
   private driveBots(dt: number) {
     if (this.brains.size === 0) return;
-    const foods: FoodSpot[] = FOOD_LAYOUT.map(([dist, side], i) => ({ dist, side, active: this.state.foods[i].active }));
+    const foods: FoodSpot[] = this.layout.map(([dist, side], i) => ({ dist, side, active: this.state.foods[i].active }));
     // Ritmo: um pouco mais lento quando está muito na frente do humano mais
     // adiantado, um pouco mais rápido quando está muito atrás.
     const humans = [...this.state.players.values()].filter((p) => !p.bot && p.racing);
@@ -270,7 +319,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
         pace = lead > 120 ? 0.93 : lead < -150 ? 1.06 : 1;
       }
       const others = [...this.state.players.values()].filter((p) => p !== bot && p.racing);
-      this.controls.set(id, botInput(brain, bot, dt, foods, others, pace));
+      this.controls.set(id, botInput(brain, this.track, bot, dt, foods, others, pace));
     }
   }
 
@@ -280,17 +329,11 @@ export class RaceRoom extends Room<{ state: RaceState }> {
 
     for (const [sessionId, player] of cars) {
       const input = this.controls.get(sessionId) ?? { throttle: 0, steer: 0 };
-      const near = nearestSample(TRACK, player.x, player.z);
-      const onGrass = near.distance > TRACK.width / 2 + 1;
+      const onGrass = !isOnRoad(player.x, player.z);
 
       player.boost = Math.max(0, player.boost - dt);
       stepCar(player, input, dt, onGrass, player.boost > 0);
-
-      if (Math.abs(player.x) > WORLD_LIMIT || Math.abs(player.z) > WORLD_LIMIT) {
-        player.x = clamp(player.x, -WORLD_LIMIT, WORLD_LIMIT);
-        player.z = clamp(player.z, -WORLD_LIMIT, WORLD_LIMIT);
-        player.speed *= -0.3;
-      }
+      collideWorld(player);
 
       if (racing && !player.finished) {
         this.countLaps(sessionId, player);
@@ -302,16 +345,16 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   }
 
   private countLaps(sessionId: string, player: Player) {
-    const { index } = nearestSample(TRACK, player.x, player.z);
-    const sector = sectorOf(index);
+    const { index } = nearestSample(this.track, player.x, player.z);
+    const sector = this.sectorOf(index);
     const last = this.sectors.get(sessionId) ?? 0;
 
     if (sector === (last + 1) % SECTORS) {
       this.sectors.set(sessionId, sector);
       if (sector === 0) {
         player.lap++;
-        if (player.lap > TOTAL_LAPS) {
-          player.lap = TOTAL_LAPS;
+        if (player.lap > this.state.laps) {
+          player.lap = this.state.laps;
           player.finished = true;
           player.finishTime = this.state.raceTime;
           if (!this.racers().some(([, p]) => p.finished && p !== player)) {
@@ -322,12 +365,13 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     }
 
     // Metros totais desde a largada. Antes de cruzar a linha (lap 0) fica negativo.
-    const dist = TRACK.samples[index].dist;
+    const length = this.track.length;
+    const dist = this.track.samples[index].dist;
     const lapsDone = player.lap - 1;
-    player.progress = lapsDone * TRACK.length + (player.lap === 0 ? dist - TRACK.length : dist);
+    player.progress = lapsDone * length + (player.lap === 0 ? dist - length : dist);
     // Se o carro voltou para trás da linha sem completar a volta, não ganha uma volta de presente.
     if (player.lap > 0 && sector === SECTORS - 1 && this.sectors.get(sessionId) !== SECTORS - 1) {
-      player.progress -= TRACK.length;
+      player.progress -= length;
     }
   }
 
@@ -387,6 +431,8 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       row.bonus = p.finished ? (PLACE_BONUS[p.place - 1] ?? 0) : 0;
       row.total = p.calories + row.bonus;
       rows.push(row);
+      // O que comeu e ganhou na corrida entra na conta do jogador no mundo aberto.
+      if (!p.bot) addCalories(this.tokens.get(sessionId), row.total);
     });
     // Empate em calorias: quem chegou antes leva.
     rows.sort((a, b) => b.total - a.total || (a.place || 99) - (b.place || 99));

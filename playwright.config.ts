@@ -4,7 +4,11 @@ const PORT = Number(process.env.E2E_PORT ?? 2567);
 
 export default defineConfig({
   testDir: "e2e",
-  timeout: 30_000,
+  // A cidade em 3D é pesada no Chromium headless (desenha na CPU), e os testes do
+  // mundo aberto trocam de sala; 60 s dá folga sem esconder travamento.
+  timeout: 60_000,
+  // Todos os testes usam o mesmo servidor e as mesmas salas públicas: um de cada vez.
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {

@@ -2,13 +2,14 @@
 
 export * from "./track.ts";
 export * from "./physics.ts";
+export * from "./world.ts";
 
 export const ROOM_NAME = "race";
+export const WORLD_ROOM_NAME = "world";
 
 export const MAX_PLAYERS = 8;
 export const NAME_MAX_LENGTH = 16;
 
-export const TOTAL_LAPS = 3;
 export const COUNTDOWN_SECONDS = 3;
 /** Depois que o primeiro cruza a chegada, quanto tempo os outros têm para terminar. */
 export const FINISH_GRACE_SECONDS = 45;
@@ -30,6 +31,10 @@ export const FOOD: Record<FoodKind, { calories: number; boostSeconds: number; la
 
 export const FOOD_PICKUP_RADIUS = 3;
 export const FOOD_RESPAWN_SECONDS = 8;
+/** No mundo aberto a comida das barraquinhas demora mais para voltar. */
+export const STAND_RESPAWN_SECONDS = 25;
+/** Corrida de evento (saindo do mundo aberto): espera a galera entrar até este tempo. */
+export const EVENT_JOIN_SECONDS = 8;
 
 export type Difficulty = "facil" | "medio" | "dificil";
 
@@ -55,6 +60,31 @@ export interface JoinOptions {
 export interface CreateOptions extends JoinOptions {
   /** Corrida sozinho contra bots, numa sala privada. */
   solo?: boolean;
+}
+
+/** Entrar no mundo aberto. */
+export interface WorldJoinOptions extends JoinOptions {
+  /** Mundo só seu (privado). */
+  solo?: boolean;
+  /** Ficha do jogador nesta sessão (guarda as calorias entre o mundo e as corridas). */
+  token?: string;
+  /** Voltando de uma corrida: nasce no ponto de encontro dela. */
+  spawn?: string;
+}
+
+/** Corrida disparada de um ponto do mundo aberto. */
+export interface EventRaceOptions {
+  raceId: string;
+  /** Quantos jogadores vêm do mundo (a contagem começa quando todos entrarem). */
+  expected: number;
+  bots: number;
+  difficulty: Difficulty;
+}
+
+/** Mensagem do mundo para o cliente: vá para esta sala de corrida. */
+export interface GoRaceMessage {
+  roomId: string;
+  raceId: string;
 }
 
 export const PLAYER_COLORS = [

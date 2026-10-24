@@ -21,16 +21,20 @@
 
     <form id="join" class="menu">
       <div id="logo"></div>
-      <p class="tagline">3 voltas. Comida na pista. Ganha quem terminar com <strong>mais calorias</strong>.</p>
+      <p class="tagline">Rode por Porto Gordo, coma tudo e dispute corridas. Ganha quem tiver <strong>mais calorias</strong>.</p>
       <label>
         Seu apelido de piloto
         <input id="name" data-testid="name-input" maxlength="16" autocomplete="off" placeholder="ex.: Rei do X-Tudo" />
       </label>
       <div class="modes">
-        <button type="button" id="solo" data-testid="solo-button">Correr sozinho</button>
-        <button type="submit" data-testid="join-button">Multiplayer</button>
+        <button type="submit" id="world" data-testid="world-button">Porto Gordo com a galera</button>
+        <button type="button" id="world-solo" data-testid="world-solo-button">Porto Gordo sozinho</button>
       </div>
-      <p class="hint">Sozinho: você contra os bots da Lista Gorda. Multiplayer: a sala da galera.</p>
+      <div class="quick">
+        Corrida rápida no autódromo:
+        <button type="button" id="quick" class="link" data-testid="join-button">com a galera</button> ·
+        <button type="button" id="solo" class="link" data-testid="solo-button">sozinho contra bots</button>
+      </div>
       <p class="hint">↑/W acelera · ↓/S freia · ←→/AD vira · M liga/desliga a música</p>
     </form>
 
@@ -81,6 +85,41 @@
       </table>
       <p class="hint" id="results-timer"></p>
     </div>
+
+    <div id="world-hud" hidden>
+      <div class="hud-row kcal"><span>🍔 kcal na sessão</span><strong id="world-calories" data-testid="world-calories">0</strong></div>
+      <p class="hint">Siga as colunas de luz 🏁 no mapa para achar corridas. Comida nas esquinas!</p>
+    </div>
+
+    <div id="leaderboard" class="panel side" hidden>
+      <p class="stamp small">Lista Gorda</p>
+      <ol id="leaderboard-list" data-testid="leaderboard"></ol>
+    </div>
+
+    <div id="marker-panel" class="panel bottom" data-testid="marker-panel" hidden>
+      <h2 id="marker-title"></h2>
+      <p class="hint" id="marker-info"></p>
+      <p id="marker-people"></p>
+      <div class="setting">
+        <span>Bots</span>
+        <span class="stepper">
+          <button type="button" id="marker-bots-minus" class="small" aria-label="Menos bots">−</button>
+          <strong id="marker-bots" data-testid="marker-bots">3</strong>
+          <button type="button" id="marker-bots-plus" class="small" aria-label="Mais bots">+</button>
+        </span>
+      </div>
+      <div class="setting">
+        <span>Dificuldade</span>
+        <select id="marker-difficulty">
+          <option value="facil">Fácil</option>
+          <option value="medio" selected>Médio</option>
+          <option value="dificil">Difícil</option>
+        </select>
+      </div>
+      <button id="start-race" data-testid="start-race-button">Começar corrida (Enter)</button>
+    </div>
+
+    <div id="loading" data-testid="loading" hidden></div>
 
     <canvas id="minimap" width="180" height="180" hidden></canvas>
 

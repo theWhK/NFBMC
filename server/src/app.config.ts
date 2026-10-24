@@ -1,9 +1,10 @@
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { defineServer, defineRoom } from "colyseus";
-import { ROOM_NAME } from "@nfbmc/shared";
+import { ROOM_NAME, WORLD_ROOM_NAME } from "@nfbmc/shared";
 
 import { RaceRoom } from "./rooms/RaceRoom.ts";
+import { WorldRoom } from "./rooms/WorldRoom.ts";
 import { checkDatabase } from "./db.ts";
 
 // Build do Vite (client/dist). Em produção o próprio servidor entrega o cliente,
@@ -14,6 +15,7 @@ const clientDist = process.env.CLIENT_DIST
 const server = defineServer({
   rooms: {
     [ROOM_NAME]: defineRoom(RaceRoom),
+    [WORLD_ROOM_NAME]: defineRoom(WorldRoom),
   },
 
   express: (app) => {

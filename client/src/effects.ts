@@ -126,7 +126,7 @@ export class Effects {
       const wz = z - fz * 1.3 - fx * side * 1.1;
       if (!offroad) {
         this.quat.setFromAxisAngle(this.up, heading);
-        this.matrix.compose(new THREE.Vector3(wx, 0.07, wz), this.quat, new THREE.Vector3(1, 1, 1));
+        this.matrix.compose(new THREE.Vector3(wx, 0.14, wz), this.quat, new THREE.Vector3(1, 1, 1));
         this.skids.setMatrixAt(this.nextSkid, this.matrix);
         this.nextSkid = (this.nextSkid + 1) % MAX_SKIDS;
       }

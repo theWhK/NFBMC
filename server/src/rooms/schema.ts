@@ -49,6 +49,11 @@ export type Result = SchemaType<typeof Result>;
 
 export const RaceState = schema({
   phase: t.string().default("lobby"),
+  /** Qual corrida de Porto Gordo é esta, e quantas voltas tem. */
+  raceId: t.string().default("autodromo"),
+  laps: t.uint8().default(3),
+  /** Corrida disparada do mundo aberto (larga sozinha e devolve todo mundo ao mundo). */
+  event: t.boolean().default(false),
   /** Sala privada de um jogador só, contra bots. */
   solo: t.boolean().default(false),
   /** Quantos bots entram na próxima corrida, e em que dificuldade. */
@@ -64,3 +69,34 @@ export const RaceState = schema({
   results: t.array(Result),
 });
 export type RaceState = SchemaType<typeof RaceState>;
+
+// --- Mundo aberto ------------------------------------------------------------
+
+export const WorldPlayer = schema({
+  name: t.string().default(""),
+  color: t.string().default("#ffffff"),
+  x: t.number().default(0),
+  z: t.number().default(0),
+  heading: t.number().default(0),
+  speed: t.number().default(0),
+  boost: t.number().default(0),
+  /** Calorias acumuladas na sessão (mundo + corridas). */
+  calories: t.uint32().default(0),
+});
+export type WorldPlayer = SchemaType<typeof WorldPlayer>;
+
+export const Stand = schema({
+  kind: t.string().default("burger"),
+  x: t.number().default(0),
+  z: t.number().default(0),
+  active: t.boolean().default(true),
+});
+export type Stand = SchemaType<typeof Stand>;
+
+export const WorldState = schema({
+  /** Mundo só de um jogador. */
+  solo: t.boolean().default(false),
+  players: t.map(WorldPlayer),
+  stands: t.array(Stand),
+});
+export type WorldState = SchemaType<typeof WorldState>;
