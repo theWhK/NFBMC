@@ -162,8 +162,9 @@ export function createMinimap(canvas: HTMLCanvasElement) {
     const flash = Math.floor(performance.now() / 160) % 2 === 0;
     for (const [id, car] of cars) {
       if (id === myId || !car.visible) continue;
-      // Viaturas piscam vermelho/azul no mapa.
-      drawCar(car.cop ? { ...car, color: flash ? "#ff2a2a" : "#2a6bff" } : car, car.cop ? 5 : 4);
+      // Viaturas piscam vermelho/azul no mapa; o trânsito é só um pontinho cinza.
+      if (car.traffic) drawCar({ ...car, color: "#b8b0a4" }, 2);
+      else drawCar(car.cop ? { ...car, color: flash ? "#ff2a2a" : "#2a6bff" } : car, car.cop ? 5 : 4);
     }
     if (me?.visible) {
       // Seta na direção do carro.

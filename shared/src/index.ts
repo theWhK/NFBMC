@@ -59,6 +59,8 @@ export const POLICE = {
   heatPerStand: 0.4,
   /** Batida numa viatura. */
   heatPerHit: 0.75,
+  /** Batida forte num carro do trânsito. */
+  heatPerTrafficHit: 0.3,
   /** Em perseguição o calor sobe devagar sozinho (a coisa vai ficando séria). */
   heatPerSecondChased: 0.04,
   /** Sem perseguição, o calor baixa devagar. */
@@ -78,6 +80,10 @@ export const POLICE = {
   /** Calorias de prêmio por nível ao escapar. */
   escapeBonusPerStar: 300,
 } as const;
+
+/** Tipos de carro do trânsito (o cliente desenha cada um de um jeito). */
+export const TRAFFIC_KINDS = ["sedan", "kombi", "picape"] as const;
+export type TrafficKind = (typeof TRAFFIC_KINDS)[number];
 
 /** Viaturas atrás de um jogador, conforme o nível de procurado. */
 export const copsForStars = (stars: number) => (stars <= 0 ? 0 : Math.min(3, 1 + Math.floor(stars / 2)));

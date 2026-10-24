@@ -10,6 +10,7 @@ import {
   PLAYER_COLORS,
   POLICE,
   ROOM_NAME,
+  TRAFFIC_KINDS,
   copsForStars,
   STANDS,
   STAND_RESPAWN_SECONDS,
@@ -30,7 +31,15 @@ import {
 
 import { loadProfile, setCalories, type Profile } from "../profiles.ts";
 import { copInput, createCopBrain, spawnPoint, type CopBrain } from "./cops.ts";
-import { Cop, Stand, WorldPlayer, WorldState } from "./schema.ts";
+import { Cop, Npc, Stand, WorldPlayer, WorldState } from "./schema.ts";
+import { spawnTraffic, trafficInput, type TrafficBrain } from "./traffic.ts";
+
+/** Carros do trânsito: alguns por jogador, até um limite, só por perto de quem joga. */
+const TRAFFIC_PER_PLAYER = 16;
+const MAX_TRAFFIC = 32;
+const TRAFFIC_DESPAWN_DISTANCE = 300;
+/** Cores discretas de carro de rua (os jogadores têm as cores vivas). */
+const TRAFFIC_COLORS = ["#8a8f98", "#5b6470", "#d8d4c8", "#7a2e2e", "#2e4a6b", "#4a5a3a", "#c9b27a", "#3a3a3a"];
 
 /** Limite de viaturas na cidade, somando todos os jogadores. */
 const MAX_COPS = 12;
@@ -72,6 +81,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   private leaving = new Set<string>();
   private copBrains = new Map<string, CopBrain>();
   private copCount = 0;
+  private trafficBrains = new Map<string, TrafficBrain>();
+  private trafficCount = 0;
   /** Última batida em viatura por jogador (para não somar calor a cada tick do encosto). */
   private lastCopHit = new Map<string, number>();
   private time = 0;
@@ -203,9 +214,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     }
 
     this.driveCops(dt);
+    this.driveTraffic(dt);
 
-    // Carros (jogadores e viaturas) que se encostam são empurrados para longe um do outro.
-    const all: [string, WorldPlayer | Cop][] = [...cars, ...this.state.cops.entries()];
+    // Carros (jogadores, viaturas e trânsito) que se encostam são empurrados para longe um do outro.
+    const all: [string, WorldPlayer | Cop | Npc][] = [...cars, ...this.state.cops.entries(), ...this.state.traffic.entries()];
     const minDist = CAR.radius * 2;
     for (let i = 0; i < all.length; i++) {
       for (let j = i + 1; j < all.length; j++) {
@@ -222,11 +234,14 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         b.z += (dz / dist) * push;
         a.speed *= 0.9;
         b.speed *= 0.9;
-        // Jogador batendo em viatura esquenta a situação (a viatura batendo nele, não).
-        const [player, playerId, cop] = a instanceof Cop
-          ? (b instanceof Cop ? [null, "", null] : [b, all[j][0], a])
-          : b instanceof Cop ? [a, all[i][0], b] : [null, "", null];
-        if (player && cop && Math.abs(player.speed) > 10 && Math.abs(player.speed) > Math.abs(cop.speed)) this.hitCop(playerId);
+        // Jogador batendo em viatura ou no trânsito esquenta a situação (o contrário, não).
+        const [player, playerId, other] = a instanceof WorldPlayer
+          ? [a, all[i][0], b]
+          : b instanceof WorldPlayer ? [b, all[j][0], a] : [null, "", null];
+        if (player && other && !(other instanceof WorldPlayer) && Math.abs(player.speed) > Math.max(10, Math.abs(other.speed))) {
+          if (other instanceof Cop) this.hitCop(playerId, POLICE.heatPerHit);
+          else if (Math.abs(player.speed) > 15) this.hitCop(playerId, POLICE.heatPerTrafficHit);
+        }
       }
     }
 
@@ -257,12 +272,61 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     }
   }
 
-  private hitCop(sessionId: string) {
+  private hitCop(sessionId: string, heat: number) {
     const player = this.state.players.get(sessionId);
     const last = this.lastCopHit.get(sessionId) ?? -Infinity;
     if (!player || this.time - last < 1) return;
     this.lastCopHit.set(sessionId, this.time);
-    player.heat = Math.min(POLICE.maxHeat, player.heat + POLICE.heatPerHit);
+    player.heat = Math.min(POLICE.maxHeat, player.heat + heat);
+  }
+
+  // --- Trânsito --------------------------------------------------------------
+
+  private removeTraffic(id: string) {
+    this.state.traffic.delete(id);
+    this.trafficBrains.delete(id);
+  }
+
+  private driveTraffic(dt: number) {
+    const players = [...this.state.players.values()];
+    // Sem ninguém na cidade, sem trânsito.
+    if (players.length === 0) {
+      for (const id of [...this.state.traffic.keys()]) this.removeTraffic(id);
+      return;
+    }
+
+    // Some quem ficou longe de todo mundo; aparece carro novo (um por tick) se faltar.
+    for (const [id, npc] of this.state.traffic) {
+      const closest = Math.min(...players.map((p) => Math.hypot(p.x - npc.x, p.z - npc.z)));
+      if (closest > TRAFFIC_DESPAWN_DISTANCE) this.removeTraffic(id);
+    }
+    const target = Math.min(MAX_TRAFFIC, TRAFFIC_PER_PLAYER * players.length);
+    if (this.state.traffic.size < target) {
+      const spawned = spawnTraffic(players);
+      if (spawned) {
+        const npc = new Npc();
+        Object.assign(npc, spawned.car);
+        npc.kind = TRAFFIC_KINDS[Math.floor(Math.random() * TRAFFIC_KINDS.length)];
+        npc.color = TRAFFIC_COLORS[Math.floor(Math.random() * TRAFFIC_COLORS.length)];
+        const id = `npc-${++this.trafficCount}`;
+        this.state.traffic.set(id, npc);
+        this.trafficBrains.set(id, spawned.brain);
+      }
+    }
+
+    const everyone = [...players, ...this.state.cops.values(), ...this.state.traffic.values()];
+    for (const [id, npc] of this.state.traffic) {
+      const brain = this.trafficBrains.get(id)!;
+      // Só os carros por perto importam para frear (evita olhar a cidade inteira).
+      const nearby = everyone.filter((o) => o !== npc && Math.abs(o.x - npc.x) < 20 && Math.abs(o.z - npc.z) < 20);
+      const input = trafficInput(brain, npc, nearby, dt);
+      if (!input) {
+        this.removeTraffic(id);
+        continue;
+      }
+      stepCar(npc, input, dt, !isOnRoad(npc.x, npc.z), false);
+      collideWorld(npc);
+    }
   }
 
   private driveCops(dt: number) {
