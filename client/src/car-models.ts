@@ -270,12 +270,61 @@ const DESIGNS: Record<BodyStyle, Design> = {
 
 const lambert = (color: THREE.ColorRepresentation) => new THREE.MeshLambertMaterial({ color });
 
-/** Extruda um perfil lateral na largura; o resultado tem a frente para +Z. */
-function extrudeProfile(profile: Profile, width: number) {
+/** Suaviza um contorno fechado (Chaikin): quinas viram curvas, como numa carroceria de verdade. */
+function smooth(profile: Profile, passes: number): Profile {
+  let points = profile;
+  for (let k = 0; k < passes; k++) {
+    const next: Profile = [];
+    for (let i = 0; i < points.length; i++) {
+      const [ax, ay] = points[i];
+      const [bx, by] = points[(i + 1) % points.length];
+      next.push([ax * 0.75 + bx * 0.25, ay * 0.75 + by * 0.25], [ax * 0.25 + bx * 0.75, ay * 0.25 + by * 0.75]);
+    }
+    points = next;
+  }
+  return points;
+}
+
+/**
+ * Troca a borda de baixo do perfil (os dois primeiros pontos, da traseira para
+ * a frente) por uma borda com as caixas de roda recortadas em arco.
+ */
+function cutWheelArches(design: Design): Profile {
+  const [[rearX, bottom], [frontX]] = design.lower;
+  const { rear, front, radius } = design.wheels;
+  const arch = radius + 0.06;
+  const bottomEdge: Profile = [[rearX, bottom]];
+  for (const center of [rear, front]) {
+    for (let k = 0; k <= 12; k++) {
+      const angle = Math.PI - (k / 12) * Math.PI;
+      const x = center + Math.cos(angle) * arch;
+      // O arco não pode comer o capô: fica pelo menos 9 cm abaixo do contorno de cima.
+      const y = Math.min(radius + Math.sin(angle) * arch, heightAt(design.lower, x) - 0.09);
+      bottomEdge.push([x, Math.max(bottom, y)]);
+    }
+  }
+  bottomEdge.push([frontX, bottom]);
+  return [...bottomEdge, ...design.lower.slice(2)];
+}
+
+/**
+ * Extruda um perfil lateral na largura; o resultado tem a frente para +Z.
+ * `taper` fecha as laterais para cima (de 0 a `taper` entre `from` e `to` de
+ * altura), como as laterais de um carro, que se inclinam para dentro.
+ */
+function extrudeProfile(profile: Profile, width: number, taper = 0, from = 0, to = 2) {
   const shape = new THREE.Shape(profile.map(([x, y]) => new THREE.Vector2(x, y)));
-  const geometry = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 2 });
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: 3, curveSegments: 4 });
   geometry.translate(0, 0, -width / 2);
   geometry.rotateY(-Math.PI / 2);
+  if (taper > 0) {
+    const position = geometry.attributes.position;
+    for (let i = 0; i < position.count; i++) {
+      const t = Math.min(1, Math.max(0, (position.getY(i) - from) / (to - from)));
+      position.setX(i, position.getX(i) * (1 - taper * t));
+    }
+    geometry.computeVertexNormals();
+  }
   return geometry;
 }
 
@@ -287,33 +336,31 @@ export interface BuiltBody {
   length: number;
 }
 
+const DARK_TRIM = "#1b1b1d";
+
 /** Monta a carroceria de um estilo, na cor dada. */
 export function buildBody(style: BodyStyle, colorValue: string, livery?: (add: Adder, design: { length: number; width: number }) => void): BuiltBody {
   const design = DESIGNS[style];
   const color = new THREE.Color(colorValue);
   const shell = new THREE.Group();
+  const half = design.width / 2;
 
-  const body = new THREE.Mesh(extrudeProfile(design.lower, design.width), lambert(color));
-  const glass = new THREE.Mesh(extrudeProfile(design.cabin, design.width * 0.86), lambert("#26323d"));
-  // O teto (topo da estufa) na cor do carro: uma placa por cima do vidro.
+  const lowerTop = Math.max(...design.lower.map((p) => p[1]));
   const roofHeight = Math.max(...design.cabin.map((p) => p[1]));
-  const roofPoints = design.cabin.filter((p) => p[1] > roofHeight - 0.05).map((p) => p[0]);
-  const roofLength = Math.max(0.4, Math.max(...roofPoints) - Math.min(...roofPoints) + 0.15);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(design.width * 0.84, 0.05, roofLength), lambert(color));
-  roof.position.set(0, roofHeight + 0.03, (Math.max(...roofPoints) + Math.min(...roofPoints)) / 2);
-  shell.add(body, glass, roof);
+  const cabinBase = Math.min(...design.cabin.map((p) => p[1]));
 
-  // Faróis e lanternas.
-  const front = design.lower.reduce((m, p) => Math.max(m, p[0]), -Infinity);
-  const rear = design.lower.reduce((m, p) => Math.min(m, p[0]), Infinity);
-  const headY = heightAt(design.lower, front - 0.05) - 0.15;
-  for (const side of [-1, 1]) {
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: "#fff3b0" }));
-    head.position.set(side * design.width * 0.32, Math.max(0.45, headY), front + 0.05);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.06), new THREE.MeshBasicMaterial({ color: "#ff3a2a" }));
-    tail.position.set(side * design.width * 0.32, Math.max(0.5, heightAt(design.lower, rear + 0.05) - 0.18), rear - 0.05);
-    shell.add(head, tail);
-  }
+  // Carroceria: perfil com as caixas de roda recortadas e arredondado; as laterais fecham um pouco em cima.
+  const body = new THREE.Mesh(extrudeProfile(smooth(cutWheelArches(design), 2), design.width, 0.06, lowerTop - 0.35, lowerTop), lambert(color));
+  // Estufa: vidros, bem mais fechada em cima (as janelas se inclinam para dentro).
+  const cabinTaper = 0.22;
+  const glass = new THREE.Mesh(extrudeProfile(smooth(design.cabin, 1), design.width * 0.88, cabinTaper, cabinBase, roofHeight), lambert("#2a3a48"));
+  const roofPoints = design.cabin.filter((p) => p[1] > roofHeight - 0.05).map((p) => p[0]);
+  const roofFront = Math.max(...roofPoints);
+  const roofRear = Math.min(...roofPoints);
+  const roofWidth = design.width * 0.88 * (1 - cabinTaper);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(roofWidth, 0.05, Math.max(0.4, roofFront - roofRear + 0.1)), lambert(color));
+  roof.position.set(0, roofHeight - 0.01, (roofFront + roofRear) / 2);
+  shell.add(body, glass, roof);
 
   const add: Adder = {
     box: (w, h, l, c, x, y, z, rotX = 0) => {
@@ -348,13 +395,84 @@ export function buildBody(style: BodyStyle, colorValue: string, livery?: (add: A
       shell.add(m);
     },
   };
+
+  /** Barra fina de um ponto a outro (no perfil: z ao longo do carro, y altura), num lado x. */
+  const strut = (x: number, from: [number, number], to: [number, number], thickness: number, c: THREE.ColorRepresentation) => {
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(thickness, thickness, length + thickness), lambert(c));
+    m.position.set(x, (from[1] + to[1]) / 2, (from[0] + to[0]) / 2);
+    m.rotation.x = -Math.atan2(to[1] - from[1], to[0] - from[0]);
+    shell.add(m);
+  };
+  const cabinHalf = (y: number) => (design.width * 0.88 / 2) * (1 - cabinTaper * Math.min(1, Math.max(0, (y - cabinBase) / (roofHeight - cabinBase))));
+
+  // Colunas na cor do carro (A na frente, C atrás e B no meio), dividindo os vidros.
+  const cabinSorted = [...design.cabin].sort((a, b) => a[0] - b[0]);
+  const aBase = cabinSorted[cabinSorted.length - 1];
+  const cBase = cabinSorted[0];
+  const aTop: [number, number] = [roofFront, roofHeight];
+  const cTop: [number, number] = [roofRear, roofHeight];
+  const bZ = (roofFront + roofRear) / 2 - 0.1;
+  for (const side of [-1, 1]) {
+    const midA = (aBase[1] + roofHeight) / 2;
+    strut(side * (cabinHalf(midA) + 0.01), aBase, aTop, 0.09, color);
+    strut(side * (cabinHalf((cBase[1] + roofHeight) / 2) + 0.01), cBase, cTop, 0.11, color);
+    strut(side * (cabinHalf((cabinBase + roofHeight) / 2) + 0.01), [bZ, cabinBase], [bZ, roofHeight], 0.08, color);
+    // Retrovisor na base da coluna A.
+    add.box(0.16, 0.1, 0.18, color, side * (half + 0.06), aBase[1] + 0.06, aBase[0] - 0.12);
+    add.box(0.02, 0.08, 0.14, "#9fb4c4", side * (half + 0.14), aBase[1] + 0.06, aBase[0] - 0.12);
+    // Linha da porta e maçaneta.
+    add.box(0.012, Math.max(0.2, cabinBase - 0.4), 0.012, DARK_TRIM, side * (half + 0.012), (cabinBase + 0.36) / 2 + 0.02, bZ);
+    add.box(0.03, 0.035, 0.14, DARK_TRIM, side * (half + 0.02), cabinBase - 0.12, bZ + 0.3);
+  }
+
+  // Reflexo de desenho nos vidros (dois riscos brancos no para-brisa).
+  const shineAngle = Math.atan2(aTop[1] - aBase[1], aTop[0] - aBase[0]);
+  for (const [offset, widthShine] of [[-0.18, 0.1], [0.12, 0.05]] as const) {
+    const shine = new THREE.Mesh(new THREE.PlaneGeometry(widthShine, 0.42), new THREE.MeshBasicMaterial({ color: "#eaf6ff", transparent: true, opacity: 0.55 }));
+    shine.position.set(offset, (aBase[1] + roofHeight) / 2 + 0.01, (aBase[0] + roofFront) / 2 + 0.03);
+    shine.rotation.order = "YXZ";
+    shine.rotation.x = -(Math.PI / 2 - shineAngle);
+    shine.rotation.z = 0.5;
+    shell.add(shine);
+  }
+
+  // Frente e traseira: grade, para-choques, faróis, lanternas e placas.
+  const front = design.lower.reduce((m, p) => Math.max(m, p[0]), -Infinity);
+  const rear = design.lower.reduce((m, p) => Math.min(m, p[0]), Infinity);
+  const bottom = design.lower[0][1];
+  const frontTop = heightAt(design.lower, front - 0.08);
+  const rearTop = heightAt(design.lower, rear + 0.08);
+  add.box(design.width * 0.96, 0.12, 0.12, DARK_TRIM, 0, bottom + 0.08, front);
+  add.box(design.width * 0.96, 0.12, 0.12, DARK_TRIM, 0, bottom + 0.08, rear);
+  add.box(design.width * 0.42, Math.max(0.08, (frontTop - bottom) * 0.32), 0.05, "#111214", 0, bottom + (frontTop - bottom) * 0.42, front + 0.04);
+  add.box(0.36, 0.12, 0.02, "#f4f4ef", 0, bottom + 0.2, front + 0.08);
+  add.box(0.36, 0.12, 0.02, "#f4f4ef", 0, bottom + (rearTop - bottom) * 0.45, rear - 0.07);
+  for (const side of [-1, 1]) {
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.06), new THREE.MeshBasicMaterial({ color: "#fff6c8" }));
+    head.position.set(side * design.width * 0.33, bottom + (frontTop - bottom) * 0.72, front + 0.02);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.11, 0.06), new THREE.MeshBasicMaterial({ color: "#ff3a2a" }));
+    tail.position.set(side * design.width * 0.34, bottom + (rearTop - bottom) * 0.75, rear - 0.02);
+    shell.add(head, tail);
+    // Saia lateral escura, entre as rodas.
+    add.box(0.04, 0.07, Math.max(0.2, design.wheels.front - design.wheels.rear - (design.wheels.radius + 0.06) * 2), DARK_TRIM,
+      side * (half + 0.01), bottom + 0.04, (design.wheels.front + design.wheels.rear) / 2);
+  }
+
+  // Fundo das caixas de roda, escuro (para não ver o chão através do arco).
+  for (const z of [design.wheels.rear, design.wheels.front]) {
+    add.box(design.width - 0.75, design.wheels.radius * 1.6, (design.wheels.radius + 0.06) * 2, "#0d0d0f", 0, design.wheels.radius + 0.05, z);
+  }
+
   if (livery) livery(add, design);
   else design.extras?.(add, color);
 
-  const { rear: wr, front: wf, radius, track } = design.wheels;
+  // Rodas rentes à lateral, aparecendo pelo arco.
+  const { rear: wr, front: wf, radius } = design.wheels;
+  const wheelX = half - 0.17;
   const wheels = [
-    { x: -track / 2, z: wf, radius }, { x: track / 2, z: wf, radius },
-    { x: -track / 2, z: wr, radius }, { x: track / 2, z: wr, radius },
+    { x: -wheelX, z: wf, radius }, { x: wheelX, z: wf, radius },
+    { x: -wheelX, z: wr, radius }, { x: wheelX, z: wr, radius },
   ];
   return { shell, wheels, length: design.length };
 }

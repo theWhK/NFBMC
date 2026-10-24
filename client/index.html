@@ -233,7 +233,9 @@
     <!-- Quadrinhos do modo história. -->
     <div id="comic" class="comic" data-testid="comic" hidden>
       <div class="comic-panel" id="comic-panel">
+        <div class="comic-speed"></div>
         <div class="comic-art" id="comic-art"></div>
+        <div class="comic-sfx" id="comic-sfx"></div>
         <div class="comic-speaker" id="comic-speaker"></div>
         <div class="comic-text" id="comic-text"></div>
       </div>
@@ -246,11 +248,17 @@
 
     <!-- Apresentação do rival (estilo Borderlands). -->
     <div id="rival-intro" class="rival-intro" data-testid="rival-intro" hidden>
+      <div class="lines"></div>
       <div class="band"></div>
       <div class="rank" id="rival-rank"></div>
       <div class="name" id="rival-name"></div>
       <div class="title" id="rival-title"></div>
-      <div class="car" id="rival-car"></div>
+      <div class="versus" id="rival-versus">
+        <div class="side you"><small>Você</small><strong id="vs-you"></strong><span id="vs-you-stat"></span></div>
+        <div class="vs">VS</div>
+        <div class="side them"><small id="vs-them-label"></small><strong id="vs-them"></strong><span id="vs-them-stat"></span></div>
+      </div>
+      <div class="skip-hint">Clique ou Enter para pular</div>
     </div>
 
     <!-- Resultado do duelo. -->
