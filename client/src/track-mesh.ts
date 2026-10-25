@@ -72,7 +72,8 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
     new THREE.MeshLambertMaterial({ map: checkerTexture(), polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }),
   );
   line.rotation.x = -Math.PI / 2;
-  line.rotation.z = heading + Math.PI / 2;
+  // Com o plano deitado, o eixo X dele vira (cos, 0, -sin) do ângulo: igual ao pórtico, atravessando a pista.
+  line.rotation.z = heading;
   line.position.set(start.x, 0.13, start.z);
   group.add(line);
 
