@@ -3,7 +3,7 @@
 // "estufa" de vidro, rodas do tamanho certo e a piada de comida de cada um.
 // No perfil, x vai da traseira (-) para a frente (+) e y é a altura, em metros.
 import * as THREE from "three";
-import type { BodyStyle } from "@nfbmc/shared";
+import { BODY_SIZE, type BodyStyle } from "@nfbmc/shared";
 
 type Profile = [number, number][];
 
@@ -51,7 +51,7 @@ function heightAt(profile: Profile, x: number) {
 
 const DESIGNS: Record<BodyStyle, Design> = {
   fusca: {
-    length: 4.05, width: 1.55,
+    ...BODY_SIZE.fusca,
     lower: [[-2.0, 0.35], [2.0, 0.35], [2.05, 0.62], [1.6, 0.92], [0.9, 1.0], [-1.1, 1.0], [-1.8, 0.86], [-2.05, 0.58]],
     cabin: [[-1.15, 0.98], [-0.65, 1.5], [0.3, 1.52], [0.95, 0.98]],
     wheels: { rear: -1.25, front: 1.2, radius: 0.33, track: 1.45 },
@@ -64,7 +64,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   uno: {
-    length: 3.65, width: 1.55,
+    ...BODY_SIZE.uno,
     lower: [[-1.82, 0.32], [1.82, 0.32], [1.86, 0.75], [1.4, 0.86], [-1.82, 0.92]],
     cabin: [[-1.76, 0.9], [-1.7, 1.48], [0.6, 1.48], [1.25, 0.86]],
     wheels: { rear: -1.15, front: 1.2, radius: 0.29, track: 1.38 },
@@ -76,7 +76,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   gol: {
-    length: 3.8, width: 1.6,
+    ...BODY_SIZE.gol,
     lower: [[-1.9, 0.32], [1.9, 0.32], [1.94, 0.72], [1.35, 0.85], [-1.9, 0.9]],
     cabin: [[-1.82, 0.88], [-1.65, 1.36], [0.5, 1.36], [1.2, 0.85]],
     wheels: { rear: -1.2, front: 1.25, radius: 0.3, track: 1.42 },
@@ -88,7 +88,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   sedan: {
-    length: 4.5, width: 1.75,
+    ...BODY_SIZE.sedan,
     lower: [[-2.25, 0.33], [2.25, 0.33], [2.28, 0.62], [1.4, 0.8], [-1.5, 0.86], [-2.25, 0.8]],
     cabin: [[-1.6, 0.84], [-0.9, 1.36], [0.5, 1.36], [1.3, 0.8]],
     wheels: { rear: -1.35, front: 1.35, radius: 0.31, track: 1.55 },
@@ -101,7 +101,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   hatch: {
-    length: 4.2, width: 1.78,
+    ...BODY_SIZE.hatch,
     lower: [[-2.1, 0.33], [2.1, 0.33], [2.13, 0.66], [1.3, 0.86], [-2.1, 0.92]],
     cabin: [[-2.0, 0.9], [-1.85, 1.42], [0.35, 1.42], [1.15, 0.85]],
     wheels: { rear: -1.3, front: 1.32, radius: 0.32, track: 1.56 },
@@ -113,7 +113,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   opala: {
-    length: 4.8, width: 1.8,
+    ...BODY_SIZE.opala,
     lower: [[-2.4, 0.35], [2.4, 0.35], [2.43, 0.7], [0.9, 0.82], [-1.8, 0.8], [-2.4, 0.76]],
     cabin: [[-1.9, 0.8], [-1.0, 1.32], [0.0, 1.32], [0.8, 0.82]],
     wheels: { rear: -1.5, front: 1.45, radius: 0.33, track: 1.6 },
@@ -124,7 +124,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   muscle: {
-    length: 4.8, width: 1.9,
+    ...BODY_SIZE.muscle,
     lower: [[-2.4, 0.36], [2.4, 0.36], [2.45, 0.72], [1.0, 0.9], [-2.0, 0.9], [-2.4, 0.85]],
     cabin: [[-2.1, 0.88], [-0.8, 1.32], [0.1, 1.33], [0.9, 0.88]],
     wheels: { rear: -1.5, front: 1.45, radius: 0.34, track: 1.65 },
@@ -137,7 +137,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   supra: {
-    length: 4.5, width: 1.81,
+    ...BODY_SIZE.supra,
     lower: [[-2.25, 0.3], [2.25, 0.3], [2.3, 0.55], [1.2, 0.78], [-1.8, 0.8], [-2.25, 0.72]],
     cabin: [[-1.6, 0.78], [-0.7, 1.22], [0.2, 1.24], [1.0, 0.76]],
     wheels: { rear: -1.35, front: 1.3, radius: 0.33, track: 1.58 },
@@ -151,7 +151,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   skyline: {
-    length: 4.6, width: 1.79,
+    ...BODY_SIZE.skyline,
     lower: [[-2.3, 0.32], [2.3, 0.32], [2.32, 0.68], [1.3, 0.84], [-2.3, 0.88]],
     cabin: [[-1.7, 0.86], [-1.0, 1.34], [0.4, 1.36], [1.2, 0.83]],
     wheels: { rear: -1.4, front: 1.38, radius: 0.33, track: 1.58 },
@@ -164,7 +164,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   porsche: {
-    length: 4.45, width: 1.85,
+    ...BODY_SIZE.porsche,
     lower: [[-2.22, 0.32], [2.22, 0.32], [2.25, 0.6], [1.5, 0.78], [0.9, 0.84], [-1.6, 0.95], [-2.22, 0.7]],
     cabin: [[-1.9, 0.86], [-0.9, 1.3], [0.0, 1.3], [0.85, 0.84]],
     wheels: { rear: -1.3, front: 1.32, radius: 0.34, track: 1.6 },
@@ -175,7 +175,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   wedge: {
-    length: 4.6, width: 2.0,
+    ...BODY_SIZE.wedge,
     lower: [[-2.3, 0.3], [2.3, 0.3], [2.35, 0.45], [0.6, 0.8], [-2.3, 0.9]],
     cabin: [[-1.2, 0.85], [-0.4, 1.16], [0.3, 1.13], [1.3, 0.66]],
     wheels: { rear: -1.45, front: 1.35, radius: 0.35, track: 1.7 },
@@ -187,7 +187,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   ferrari: {
-    length: 4.7, width: 2.0,
+    ...BODY_SIZE.ferrari,
     lower: [[-2.35, 0.3], [2.35, 0.3], [2.45, 0.42], [1.6, 0.62], [0.8, 0.75], [-1.8, 0.86], [-2.35, 0.78]],
     cabin: [[-1.0, 0.8], [-0.3, 1.12], [0.3, 1.12], [1.1, 0.72]],
     wheels: { rear: -1.45, front: 1.4, radius: 0.35, track: 1.7 },
@@ -201,7 +201,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   veyron: {
-    length: 4.46, width: 2.0,
+    ...BODY_SIZE.veyron,
     lower: [[-2.23, 0.3], [2.23, 0.3], [2.27, 0.5], [1.4, 0.75], [-1.9, 0.88], [-2.23, 0.8]],
     cabin: [[-1.3, 0.86], [-0.4, 1.2], [0.4, 1.18], [1.25, 0.74]],
     wheels: { rear: -1.35, front: 1.35, radius: 0.36, track: 1.7 },
@@ -217,7 +217,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   hyper: {
-    length: 4.3, width: 2.0,
+    ...BODY_SIZE.hyper,
     lower: [[-2.15, 0.28], [2.15, 0.28], [2.2, 0.42], [0.9, 0.7], [-2.15, 0.84]],
     cabin: [[-0.9, 0.78], [-0.2, 1.1], [0.4, 1.08], [1.2, 0.66]],
     wheels: { rear: -1.35, front: 1.3, radius: 0.36, track: 1.72 },
@@ -230,7 +230,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   m3: {
-    length: 4.5, width: 1.86,
+    ...BODY_SIZE.m3,
     lower: [[-2.25, 0.26], [2.25, 0.26], [2.3, 0.56], [1.3, 0.76], [-1.7, 0.82], [-2.25, 0.74]],
     cabin: [[-1.6, 0.8], [-0.8, 1.26], [0.3, 1.27], [1.1, 0.77]],
     wheels: { rear: -1.38, front: 1.36, radius: 0.35, track: 1.66 },
@@ -247,7 +247,7 @@ const DESIGNS: Record<BodyStyle, Design> = {
     },
   },
   a3: {
-    length: 4.2, width: 1.76,
+    ...BODY_SIZE.a3,
     lower: [[-2.1, 0.24], [2.1, 0.24], [2.14, 0.58], [1.3, 0.77], [-2.1, 0.84]],
     cabin: [[-2.0, 0.82], [-1.8, 1.3], [0.3, 1.32], [1.1, 0.79]],
     wheels: { rear: -1.28, front: 1.3, radius: 0.36, track: 1.66 },

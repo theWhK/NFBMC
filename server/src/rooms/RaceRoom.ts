@@ -1,6 +1,5 @@
 import { Room, type Client, type CloseCode } from "colyseus";
 import {
-  CAR,
   COUNTDOWN_SECONDS,
   FINISH_GRACE_SECONDS,
   FOOD,
@@ -20,6 +19,8 @@ import {
   pointOnTrack,
   stepCar,
   pickColor,
+  carHalfSize,
+  collideCars,
   DEFAULT_CAR,
   PLAYER_CARS,
   carSpec,
@@ -45,6 +46,7 @@ import { recordRace } from "../profiles.ts";
 import { BOT_NAMES, botInput, createBrain, type Brain, type FoodSpot } from "./bots.ts";
 import { Food, Player, RaceState, Result } from "./schema.ts";
 import { realTimeSteps } from "./tick.ts";
+import { Motions, carBody, readInput, resetToRoad } from "./vehicles.ts";
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -100,6 +102,9 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   private tokens = new Map<string, string>();
   /** Motor e câmbio de cada carro (giro, marcha, acelerador). */
   private drives = new Map<string, DriveState>();
+  private motions = new Motions();
+  private lastReset = new Map<string, number>();
+  private lastHorn = new Map<string, number>();
   private joinCount = 0;
   private track: Track = RACES.autodromo.track;
   private layout = foodLayout(this.track);
@@ -111,11 +116,18 @@ export class RaceRoom extends Room<{ state: RaceState }> {
 
   messages = {
     input: (client: Client, message: InputMessage) => {
-      if (!Number.isFinite(message?.throttle) || !Number.isFinite(message?.steer)) return;
-      this.controls.set(client.sessionId, {
-        throttle: clamp(message.throttle, -1, 1),
-        steer: clamp(message.steer, -1, 1),
-      });
+      const input = readInput(message);
+      if (input) this.controls.set(client.sessionId, input);
+    },
+    horn: (client: Client) => this.horn(client),
+    reset: (client: Client) => {
+      // Voltar para a pista (quando empaca), no máximo a cada 3 s.
+      const player = this.state.players.get(client.sessionId);
+      const last = this.lastReset.get(client.sessionId) ?? -Infinity;
+      if (!player || this.age - last < 3) return;
+      this.lastReset.set(client.sessionId, this.age);
+      resetToRoad(player, this.track);
+      this.motions.reset(client.sessionId);
     },
     start: () => {
       if (this.state.phase === "lobby" && this.state.players.size > 0) this.startCountdown();
@@ -203,6 +215,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     this.sectors.delete(client.sessionId);
     this.tokens.delete(client.sessionId);
     this.drives.delete(client.sessionId);
+    this.motions.delete(client.sessionId);
   }
 
   /** Posição no grid de largada: duas colunas, atrás da linha de chegada. */
@@ -290,6 +303,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     grid.forEach(([sessionId, player]) => {
       this.placeOnGrid(player, slot++);
       this.drives.set(sessionId, createDrive(carSpec(player.car), player.manual));
+      this.motions.reset(sessionId);
       player.racing = true;
       player.lap = 0;
       player.progress = 0;
@@ -409,8 +423,10 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       const spec = carSpec(player.car);
       let drive = this.drives.get(sessionId);
       if (!drive) this.drives.set(sessionId, (drive = createDrive(spec, player.manual)));
-      stepCar(player, drive, spec, input, dt, onGrass, player.boost > 0);
-      collideWorld(player);
+      const motion = this.motions.get(sessionId);
+      stepCar(player, drive, spec, input, dt, onGrass, player.boost > 0, motion);
+      const size = carHalfSize(player.car);
+      collideWorld(player, size.halfLength, size.halfWidth, motion);
       player.rpm = Math.round(drive.rpm);
       player.gear = drive.gear;
 
@@ -420,7 +436,16 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       }
     }
 
-    this.bump(cars);
+    // Batidas entre carros: caixas do tamanho de cada um, com impulso e giro.
+    collideCars(cars.map(([id, p]) => carBody(p, this.motions.get(id), p.car)));
+  }
+
+  /** Buzina: os outros jogadores ouvem (no máximo duas vezes por segundo). */
+  private horn(client: Client) {
+    const last = this.lastHorn.get(client.sessionId) ?? -Infinity;
+    if (this.age - last < 0.5) return;
+    this.lastHorn.set(client.sessionId, this.age);
+    this.broadcast("horn", { id: client.sessionId }, { except: client });
   }
 
   private countLaps(sessionId: string, player: Player) {
@@ -471,28 +496,6 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       if (this.state.raceTime < at) continue;
       food.active = true;
       this.respawnAt.delete(food);
-    }
-  }
-
-  /** Carros que se encostam são empurrados para longe um do outro. */
-  private bump(cars: [string, Player][]) {
-    const minDist = CAR.radius * 2;
-    for (let i = 0; i < cars.length; i++) {
-      for (let j = i + 1; j < cars.length; j++) {
-        const a = cars[i][1];
-        const b = cars[j][1];
-        const dx = b.x - a.x;
-        const dz = b.z - a.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist >= minDist || dist === 0) continue;
-        const push = (minDist - dist) / 2;
-        a.x -= (dx / dist) * push;
-        a.z -= (dz / dist) * push;
-        b.x += (dx / dist) * push;
-        b.z += (dz / dist) * push;
-        a.speed *= 0.9;
-        b.speed *= 0.9;
-      }
     }
   }
 

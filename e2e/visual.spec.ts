@@ -20,6 +20,11 @@ test("3D: menu, garagem e cidade desenham sem erros", async ({ page }) => {
   await page.keyboard.down("ArrowUp");
   await page.waitForTimeout(1500);
   await page.keyboard.up("ArrowUp");
+  // C troca a câmera (só existe com o 3D ligado), passando por todas até voltar.
+  for (const name of ["Longe", "Baixa", "Capô", "Perseguição"]) {
+    await page.keyboard.press("KeyC");
+    await expect(page.locator(".popup").last()).toContainText(`Câmera: ${name}`);
+  }
 
   expect(errors).toEqual([]);
 });

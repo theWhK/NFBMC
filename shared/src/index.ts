@@ -3,6 +3,7 @@
 export * from "./track.ts";
 export * from "./physics.ts";
 export * from "./cars.ts";
+export * from "./collision.ts";
 export * from "./story.ts";
 export * from "./world.ts";
 
@@ -94,6 +95,8 @@ export const copsForStars = (stars: number) => (stars <= 0 ? 0 : Math.min(3, 1 +
 export interface InputMessage {
   throttle: number;
   steer: number;
+  /** Freio de mão (Espaço). */
+  handbrake?: boolean;
 }
 
 export interface JoinOptions {

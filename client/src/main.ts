@@ -119,14 +119,19 @@ document.addEventListener("visibilitychange", () => {
   sendInput();
 });
 
+/** Freio de mão: Espaço no teclado, botão na tela do celular. */
+const HANDBRAKE = new Set(["Space", "TouchHandbrake"]);
+
 function currentInput(): InputMessage {
   let throttle = 0;
   let steer = 0;
+  let handbrake = false;
   for (const code of keys) {
     throttle += THROTTLE[code] ?? 0;
     steer += STEER[code] ?? 0;
+    if (HANDBRAKE.has(code)) handbrake = true;
   }
-  return { throttle: Math.sign(throttle), steer: Math.sign(steer) };
+  return { throttle: Math.sign(throttle), steer: Math.sign(steer), handbrake };
 }
 
 // --- Contexto dos modos ----------------------------------------------------
@@ -197,6 +202,9 @@ function setMode(next: WorldMode | RaceMode | null) {
   closeOverlays();
   $("touch").classList.toggle("manual", menu.manual());
   mode = next;
+  mode?.onHorn(remoteHorn);
+  // O foco não fica num botão do menu (o Espaço é o freio de mão).
+  (document.activeElement as HTMLElement | null)?.blur?.();
   updateRotateHint();
   lastSent = "";
   sendInput();
@@ -390,7 +398,44 @@ function shift(direction: number) {
 
 const pause = $("pause");
 const fullMapEl = $("fullmap");
-const overlayOpen = () => !pause.hidden || !fullMapEl.hidden;
+const help = $("help");
+const overlayOpen = () => !pause.hidden || !fullMapEl.hidden || !help.hidden;
+
+function openHelp() {
+  pause.hidden = true;
+  fullMapEl.hidden = true;
+  help.hidden = false;
+  releaseControls();
+  $<HTMLButtonElement>("help-close").focus();
+}
+
+/** Comandos do carro que não são acelerar/virar (teclado ou botões do celular). */
+function carAction(action: "horn" | "camera" | "reset") {
+  if (!mode) return;
+  if (action === "horn") {
+    sound.horn();
+    mode.sendHorn();
+  } else if (action === "camera") {
+    const name = scene?.cycleCamera();
+    if (name) showPopup(`Câmera: ${name}`);
+  } else {
+    mode.sendReset();
+    showPopup("De volta para a rua");
+  }
+}
+
+/** Buzina de outro jogador: volume pela distância e lado esquerdo/direito. */
+function remoteHorn(id: string) {
+  const view = lastMapView;
+  const car = view?.cars.get(id);
+  const me = view?.cars.get(view.myId);
+  if (!car || !me) return;
+  const dx = car.x - me.x;
+  const dz = car.z - me.z;
+  const distance = Math.hypot(dx, dz);
+  const pan = distance > 0 ? (dx * -Math.cos(me.heading) + dz * Math.sin(me.heading)) / distance : 0;
+  sound.horn(Math.max(0, 1 - distance / 120), pan);
+}
 
 /** Ao abrir a pausa ou o mapa, solta tudo (o carro não fica acelerando sozinho). */
 function releaseControls() {
@@ -425,12 +470,21 @@ function openMap() {
 function closeOverlays() {
   pause.hidden = true;
   fullMapEl.hidden = true;
+  help.hidden = true;
 }
 
 $("to-menu").addEventListener("click", openPause);
 $("open-map").addEventListener("click", openMap);
 $("pause-resume").addEventListener("click", closeOverlays);
 $("pause-map").addEventListener("click", openMap);
+$("pause-help").addEventListener("click", openHelp);
+$("help-close").addEventListener("click", closeOverlays);
+for (const button of document.querySelectorAll<HTMLButtonElement>("#touch [data-action]")) {
+  button.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    carAction(button.dataset.action as "horn" | "camera" | "reset");
+  });
+}
 $("fullmap-close").addEventListener("click", closeOverlays);
 $("pause-music").addEventListener("click", () => {
   sound.toggle("music");
@@ -449,16 +503,25 @@ $("pause-quit").addEventListener("click", () => {
 
 window.addEventListener("keydown", (e) => {
   if (document.activeElement === ui.name) return;
-  if (mode && e.code === "Escape") {
+  // Pausa: Esc ou P (Esc também fecha mapa e ajuda).
+  if (mode && (e.code === "Escape" || (e.code === "KeyP" && help.hidden))) {
     e.preventDefault();
     if (overlayOpen()) closeOverlays();
     else openPause();
     return;
   }
-  if (mode && e.code === "Tab") {
+  // Mapa: M ou Tab.
+  if (mode && (e.code === "KeyM" || e.code === "Tab") && pause.hidden && help.hidden) {
     e.preventDefault();
     if (!fullMapEl.hidden) closeOverlays();
     else openMap();
+    return;
+  }
+  // Lista de comandos: F1.
+  if (mode && e.code === "F1") {
+    e.preventDefault();
+    if (!help.hidden) closeOverlays();
+    else openHelp();
     return;
   }
   // Na pausa, ↑↓ andam entre as opções (Enter aperta a que estiver em foco).
@@ -471,14 +534,19 @@ window.addEventListener("keydown", (e) => {
   }
   // Com a pausa ou o mapa aberto, nada de dirigir.
   if (overlayOpen()) return;
-  if (e.code === "KeyM") {
+  if (e.code === "KeyN") {
     sound.toggle("music");
     refreshAudioButtons();
+    showPopup(`Música ${sound.prefs.music ? "ligada" : "desligada"}`);
   }
+  if (!e.repeat && e.code === "KeyH") carAction("horn");
+  if (!e.repeat && e.code === "KeyC") carAction("camera");
+  if (!e.repeat && e.code === "KeyR") carAction("reset");
   if (!e.repeat && (e.code === "KeyE" || e.code === "ShiftLeft" || e.code === "ShiftRight")) shift(1);
   if (!e.repeat && (e.code === "KeyQ" || e.code === "ControlLeft" || e.code === "ControlRight")) shift(-1);
   if (mode instanceof WorldMode) mode.handleKey(e.code);
-  if (!(e.code in THROTTLE) && !(e.code in STEER)) return;
+  if (!(e.code in THROTTLE) && !(e.code in STEER) && !HANDBRAKE.has(e.code)) return;
+  // (Sem isto, o Espaço "clicaria" o último botão em foco e as setas rolariam a página.)
   e.preventDefault();
   keys.add(e.code);
   sendInput();

@@ -163,9 +163,21 @@ export function copInput(brain: CopBrain, cop: CarState, spec: CarSpec, target: 
   let throttle = 0;
   if (cop.speed < desired - 1) throttle = 1;
   else if (cop.speed > desired + 3) throttle = -1;
+  // Chegando no alvo: no máximo a velocidade dele mais um pouco (para encostar
+  // e cercar) mais o que dá para frear até ficar a ~6 m dele. Sem isso, com a
+  // colisão de verdade, a viatura chegava a toda e saía empurrando o carro rua
+  // afora em vez de cercar e autuar.
+  if (brain.seesTarget) {
+    // Já colada (menos de 8 m), fica um pouco abaixo da velocidade dele: se mirasse
+    // acima, empurraria o carro, ele ganharia velocidade e ela aceleraria mais.
+    const margin = distance < 8 ? -2 : 3;
+    const closing = Math.max(0, target.speed) + margin + Math.sqrt(2 * spec.brake * 0.6 * Math.max(0, distance - 6));
+    if (cop.speed > closing + 1) throttle = cop.speed > 0.5 ? -1 : 0;
+    else if (cop.speed > closing - 1 && throttle > 0) throttle = 0;
+  }
 
   // A partir de 2 estrelas, a viatura "pisa fundo" (turbo) quando está longe, alinhada
   // e com folga até a próxima curva.
-  const boost = stars >= 2 && distance > 35 && Math.abs(want) < 0.3 && desired > cop.speed + 12;
+  const boost = stars >= 2 && distance > 60 && Math.abs(want) < 0.3 && desired > cop.speed + 12 && throttle > 0;
   return { input: { throttle, steer }, boost };
 }

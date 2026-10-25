@@ -22,7 +22,22 @@ export interface DriveInput {
   throttle: number;
   /** -1 vira para a esquerda, 1 para a direita. */
   steer: number;
+  /** Freio de mão: trava a traseira (freia e deixa o carro escorregar de lado: drift). */
+  handbrake?: boolean;
 }
+
+/**
+ * Movimento "extra" de um carro, fora da direção em que ele aponta: o empurrão
+ * de lado de uma batida ou do drift (vx, vz em m/s) e o giro (rad/s). Os pneus
+ * vão segurando e isso some em menos de um segundo.
+ */
+export interface CarMotion {
+  vx: number;
+  vz: number;
+  spin: number;
+}
+
+export const createMotion = (): CarMotion => ({ vx: 0, vz: 0, spin: 0 });
 
 /** Estado do trem de força (só no servidor; o giro e a marcha vão para o estado da sala). */
 export interface DriveState {
@@ -41,8 +56,10 @@ export interface DriveState {
 }
 
 export const CAR = {
-  /** Raio de colisão (todos os carros são "círculos" para bater). */
-  radius: 1.8,
+  /** Meia largura padrão (m), para colisão com o cenário quando não se sabe o carro. */
+  halfWidth: 0.9,
+  /** Meio comprimento padrão (m). */
+  halfLength: 2.1,
   /** Turbo da comida: aceleração extra (m/s²). */
   boostAccel: 9,
 } as const;
@@ -102,6 +119,7 @@ export function stepCar(
   dt: number,
   onGrass: boolean,
   boosting: boolean,
+  motion?: CarMotion,
 ) {
   const gas = boosting ? 1 : Math.max(0, input.throttle);
   const brakeInput = Math.max(0, -input.throttle);
@@ -165,10 +183,36 @@ export function stepCar(
   }
   car.speed = next;
 
+  // Freio de mão: segura a traseira (freia um pouco) e o carro vira bem mais.
+  const handbrake = !!input.handbrake && Math.abs(car.speed) > 3;
+  if (handbrake) {
+    const drop = 4.5 * dt;
+    car.speed = Math.abs(car.speed) <= drop ? 0 : car.speed - Math.sign(car.speed) * drop;
+  }
+
   // Direção: parado não vira; na ré o volante inverte; em alta perde esterço (saindo de frente).
   const grip = clamp(car.speed / 8, -1, 1);
   const highSpeed = 1 / (1 + (Math.abs(car.speed) / 50) ** 2 * spec.understeer * 2);
-  car.heading -= input.steer * spec.turn * grip * highSpeed * (onGrass ? 0.8 : 1) * dt;
+  const oldHeading = car.heading;
+  car.heading -= input.steer * spec.turn * grip * highSpeed * (onGrass ? 0.8 : 1) * (handbrake ? 1.3 : 1) * dt;
+
+  if (motion) {
+    // Drift: com a traseira travada, parte da velocidade continua na direção
+    // antiga (o carro escorrega de lado em vez de só virar).
+    if (handbrake) {
+      const keep = 0.6;
+      motion.vx += (Math.sin(oldHeading) - Math.sin(car.heading)) * car.speed * keep;
+      motion.vz += (Math.cos(oldHeading) - Math.cos(car.heading)) * car.speed * keep;
+    }
+    // Empurrão lateral e giro (batidas, drift): os pneus vão segurando.
+    car.heading += motion.spin * dt;
+    car.x += motion.vx * dt;
+    car.z += motion.vz * dt;
+    const tireGrip = Math.exp(-(handbrake ? 1.2 : onGrass ? 2.5 : 4) * dt);
+    motion.vx *= tireGrip;
+    motion.vz *= tireGrip;
+    motion.spin *= Math.exp(-5 * dt);
+  }
   car.heading = Math.atan2(Math.sin(car.heading), Math.cos(car.heading));
 
   car.x += Math.sin(car.heading) * car.speed * dt;

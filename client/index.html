@@ -18,9 +18,9 @@
     <div id="topbar">
       <span id="status" data-testid="status">Digite seu apelido</span>
       · Jogadores: <span id="player-count" data-testid="player-count">0</span>
-      <button id="open-map" class="icon" title="Mapa (Tab)" data-testid="open-map" hidden>🗺️</button>
+      <button id="open-map" class="icon" title="Mapa (M)" data-testid="open-map" hidden>🗺️</button>
       <button id="to-menu" class="icon" title="Menu (Esc)" data-testid="to-menu" hidden>☰</button>
-      <button id="toggle-music" class="icon" title="Música (M)">🎵</button>
+      <button id="toggle-music" class="icon" title="Música (N)">🎵</button>
       <button id="toggle-sfx" class="icon" title="Efeitos sonoros">🔊</button>
     </div>
 
@@ -90,7 +90,7 @@
           <button type="button" id="opt-gearbox" data-testid="opt-gearbox">Câmbio: automático</button>
           <button type="button" id="opt-quality" data-testid="opt-quality">Gráficos: automático</button>
         </div>
-        <p class="hint">↑/W acelera · ↓/S freia (parado: ré) · ←→/AD vira · E/Shift sobe marcha · Q/Ctrl desce (câmbio manual) · Enter dispara corrida no ponto · M liga/desliga a música</p>
+        <p class="hint">Todos os comandos: F1 dentro do jogo (ou "Controles" na pausa).</p>
       </section>
 
       <section class="mw-screen" data-screen-id="credits" hidden>
@@ -210,10 +210,32 @@
       <div class="mw-list sub">
         <button type="button" id="pause-resume" data-testid="pause-resume">Continuar</button>
         <button type="button" id="pause-map" data-testid="pause-map">Mapa da cidade</button>
+        <button type="button" id="pause-help" data-testid="pause-help">Controles</button>
         <button type="button" id="pause-music">Música</button>
         <button type="button" id="pause-sfx">Efeitos</button>
         <button type="button" id="pause-quit" data-testid="pause-quit">Voltar ao menu principal</button>
       </div>
+    </div>
+
+    <!-- Lista de comandos (F1). -->
+    <div id="help" class="panel center help" data-testid="help" hidden>
+      <h2>Controles</h2>
+      <table>
+        <tr><td><kbd>↑</kbd> <kbd>W</kbd></td><td>Acelerar</td></tr>
+        <tr><td><kbd>↓</kbd> <kbd>S</kbd></td><td>Frear (parado, segure para dar ré)</td></tr>
+        <tr><td><kbd>←</kbd><kbd>→</kbd> <kbd>A</kbd><kbd>D</kbd></td><td>Virar</td></tr>
+        <tr><td><kbd>Espaço</kbd></td><td>Freio de mão (drift)</td></tr>
+        <tr><td><kbd>E</kbd> <kbd>Shift</kbd> / <kbd>Q</kbd> <kbd>Ctrl</kbd></td><td>Subir / descer marcha (câmbio manual)</td></tr>
+        <tr><td><kbd>H</kbd></td><td>Buzina (a galera ouve)</td></tr>
+        <tr><td><kbd>C</kbd></td><td>Trocar câmera (perseguição, longe, baixa, capô)</td></tr>
+        <tr><td><kbd>R</kbd></td><td>Voltar para a rua (quando empacar)</td></tr>
+        <tr><td><kbd>M</kbd></td><td>Mapa da cidade</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>Começar a corrida (no ponto de encontro)</td></tr>
+        <tr><td><kbd>Esc</kbd> <kbd>P</kbd></td><td>Pausa</td></tr>
+        <tr><td><kbd>N</kbd></td><td>Liga/desliga a música</td></tr>
+        <tr><td><kbd>F1</kbd></td><td>Esta lista</td></tr>
+      </table>
+      <button type="button" id="help-close" data-testid="help-close">Fechar</button>
     </div>
 
     <!-- Mapa em tela cheia. -->
@@ -225,7 +247,7 @@
         <span>🏁 Corridas</span>
         <span>🍔 Comida</span>
         <span><i class="cop"></i>Vigilância</span>
-        <span class="hint">Tab / Esc fecha · roda do mouse ou pinça dá zoom · arraste para mover</span>
+        <span class="hint">M / Esc fecha · roda do mouse ou pinça dá zoom · arraste para mover</span>
       </div>
       <button type="button" id="fullmap-close" class="icon close" data-testid="fullmap-close" aria-label="Fechar mapa">✕</button>
     </div>
@@ -277,11 +299,17 @@
         <button type="button" data-key="TouchLeft" data-testid="touch-left" aria-label="Virar à esquerda">◀</button>
         <button type="button" data-key="TouchRight" data-testid="touch-right" aria-label="Virar à direita">▶</button>
       </div>
+      <div class="touch-extra">
+        <button type="button" data-action="horn" data-testid="touch-horn" aria-label="Buzina">📯</button>
+        <button type="button" data-action="camera" aria-label="Trocar câmera">🎥</button>
+        <button type="button" data-action="reset" aria-label="Voltar para a rua">↺</button>
+      </div>
       <div class="touch-shift">
         <button type="button" data-shift="1" data-testid="touch-shift-up" aria-label="Subir marcha">+</button>
         <button type="button" data-shift="-1" data-testid="touch-shift-down" aria-label="Descer marcha">−</button>
       </div>
       <div class="touch-pedals">
+        <button type="button" data-key="TouchHandbrake" data-testid="touch-handbrake" class="handbrake" aria-label="Freio de mão">FREIO<br />DE MÃO</button>
         <button type="button" data-key="TouchDown" data-testid="touch-brake" class="brake" aria-label="Freio e ré">FREIO</button>
         <button type="button" data-key="TouchUp" data-testid="touch-gas" class="gas" aria-label="Acelerar">ACELERA</button>
       </div>

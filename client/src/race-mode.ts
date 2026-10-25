@@ -276,6 +276,19 @@ export class RaceMode {
     this.room.send("shift", { direction });
   }
 
+  sendHorn() {
+    this.room.send("horn");
+  }
+
+  sendReset() {
+    this.room.send("reset");
+  }
+
+  /** Buzina de outro jogador (o main toca o som com o volume pela distância). */
+  onHorn(handler: (id: string) => void) {
+    this.room.onMessage("horn", (message: { id: string }) => handler(message.id));
+  }
+
   snapshot() {
     const result: Record<string, PlayerSnapshot> = {};
     this.room.state.players?.forEach((p, id) => {

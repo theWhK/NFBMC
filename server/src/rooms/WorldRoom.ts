@@ -1,6 +1,5 @@
 import { Room, matchMaker, type Client, type CloseCode } from "colyseus";
 import {
-  CAR,
   DIFFICULTY_LABELS,
   FOOD,
   FOOD_PICKUP_RADIUS,
@@ -20,6 +19,9 @@ import {
   raceMarker,
   stepCar,
   pickColor,
+  TRAFFIC_SIZE,
+  carHalfSize,
+  collideCars,
   DEFAULT_CAR,
   carSpec,
   createDrive,
@@ -40,6 +42,7 @@ import { loadProfile, setCalories, type Profile } from "../profiles.ts";
 import { copInput, createCopBrain, spawnPoint, type CopBrain } from "./cops.ts";
 import { Cop, Npc, Stand, WorldPlayer, WorldState } from "./schema.ts";
 import { realTimeSteps } from "./tick.ts";
+import { Motions, carBody, readInput, resetToRoad } from "./vehicles.ts";
 import { spawnTraffic, trafficInput, type TrafficBrain } from "./traffic.ts";
 
 /** Carros do trânsito: alguns por jogador, até um limite, só por perto de quem joga. */
@@ -85,6 +88,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   private controls = new Map<string, DriveInput>();
   /** Motor e câmbio de cada carro (jogadores, viaturas e trânsito). */
   private drives = new Map<string, DriveState>();
+  private motions = new Motions();
+  private lastReset = new Map<string, number>();
+  private lastHorn = new Map<string, number>();
   private profiles = new Map<string, Profile>();
   private respawnAt = new Map<Stand, number>();
   /** Quem já foi chamado para uma corrida (não entra em outra enquanto sai daqui). */
@@ -100,11 +106,24 @@ export class WorldRoom extends Room<{ state: WorldState }> {
 
   messages = {
     input: (client: Client, message: InputMessage) => {
-      if (!Number.isFinite(message?.throttle) || !Number.isFinite(message?.steer)) return;
-      this.controls.set(client.sessionId, {
-        throttle: clamp(message.throttle, -1, 1),
-        steer: clamp(message.steer, -1, 1),
-      });
+      const input = readInput(message);
+      if (input) this.controls.set(client.sessionId, input);
+    },
+    horn: (client: Client) => {
+      // Buzina: os outros ouvem (no máximo duas vezes por segundo).
+      const last = this.lastHorn.get(client.sessionId) ?? -Infinity;
+      if (this.time - last < 0.5) return;
+      this.lastHorn.set(client.sessionId, this.time);
+      this.broadcast("horn", { id: client.sessionId }, { except: client });
+    },
+    reset: (client: Client) => {
+      // Voltar para a rua (quando empaca), no máximo a cada 3 s.
+      const player = this.state.players.get(client.sessionId);
+      const last = this.lastReset.get(client.sessionId) ?? -Infinity;
+      if (!player || this.time - last < 3) return;
+      this.lastReset.set(client.sessionId, this.time);
+      resetToRoad(player);
+      this.motions.reset(client.sessionId);
     },
     shift: (client: Client, message: ShiftMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -189,6 +208,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.leaving.delete(client.sessionId);
     this.lastCopHit.delete(client.sessionId);
     this.drives.delete(client.sessionId);
+    this.motions.delete(client.sessionId);
     this.removeCops(client.sessionId);
   }
 
@@ -235,8 +255,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       player.boost = Math.max(0, player.boost - dt);
       const spec = carSpec(player.car);
       const drive = this.driveOf(sessionId, spec, player.manual);
-      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), player.boost > 0);
-      collideWorld(player);
+      const motion = this.motions.get(sessionId);
+      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), player.boost > 0, motion);
+      const size = carHalfSize(player.car);
+      collideWorld(player, size.halfLength, size.halfWidth, motion);
       player.rpm = Math.round(drive.rpm);
       player.gear = drive.gear;
       this.eat(sessionId, player);
@@ -245,32 +267,20 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.driveCops(dt);
     this.driveTraffic(dt);
 
-    // Carros (jogadores, viaturas e trânsito) que se encostam são empurrados para longe um do outro.
+    // Batidas entre todos os carros (jogadores, viaturas e trânsito): caixas do
+    // tamanho de cada um, com impulso pela massa e giro.
     const all: [string, WorldPlayer | Cop | Npc][] = [...cars, ...this.state.cops.entries(), ...this.state.traffic.entries()];
-    const minDist = CAR.radius * 2;
-    for (let i = 0; i < all.length; i++) {
-      for (let j = i + 1; j < all.length; j++) {
-        const a = all[i][1];
-        const b = all[j][1];
-        const dx = b.x - a.x;
-        const dz = b.z - a.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist >= minDist || dist === 0) continue;
-        const push = (minDist - dist) / 2;
-        a.x -= (dx / dist) * push;
-        a.z -= (dz / dist) * push;
-        b.x += (dx / dist) * push;
-        b.z += (dz / dist) * push;
-        a.speed *= 0.9;
-        b.speed *= 0.9;
-        // Jogador batendo em viatura ou no trânsito esquenta a situação (o contrário, não).
-        const [player, playerId, other] = a instanceof WorldPlayer
-          ? [a, all[i][0], b]
-          : b instanceof WorldPlayer ? [b, all[j][0], a] : [null, "", null];
-        if (player && other && !(other instanceof WorldPlayer) && Math.abs(player.speed) > Math.max(10, Math.abs(other.speed))) {
-          if (other instanceof Cop) this.hitCop(playerId, POLICE.heatPerHit);
-          else if (Math.abs(player.speed) > 15) this.hitCop(playerId, POLICE.heatPerTrafficHit);
-        }
+    // (Trânsito não tem carro da garagem: os ids dele começam com "npc-".)
+    const bodies = all.map(([id, c]) => carBody(c, this.motions.get(id), id.startsWith("npc-") ? null : (c as WorldPlayer | Cop).car));
+    for (const impact of collideCars(bodies)) {
+      // Jogador batendo forte em viatura ou no trânsito esquenta a situação (sendo atingido, não).
+      for (const [mine, other] of [[impact.a, impact.b], [impact.b, impact.a]]) {
+        const [playerId, player] = all[mine];
+        const target = all[other][1];
+        if (!(player instanceof WorldPlayer) || target instanceof WorldPlayer) continue;
+        if (Math.abs(player.speed) <= Math.abs(target.speed)) continue;
+        if (target instanceof Cop && impact.speed > 6) this.hitCop(playerId, POLICE.heatPerHit);
+        else if (target instanceof Npc && impact.speed > 12) this.hitCop(playerId, POLICE.heatPerTrafficHit);
       }
     }
 
@@ -305,6 +315,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       this.state.cops.delete(id);
       this.copBrains.delete(id);
       this.drives.delete(id);
+      this.motions.delete(id);
     }
   }
 
@@ -322,6 +333,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.state.traffic.delete(id);
     this.trafficBrains.delete(id);
     this.drives.delete(id);
+    this.motions.delete(id);
   }
 
   private driveTraffic(dt: number) {
@@ -363,8 +375,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       }
       // O trânsito anda num carro popular comum, com câmbio automático.
       const spec = carSpec("uno");
-      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z), false);
-      collideWorld(npc);
+      const motion = this.motions.get(id);
+      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z), false, motion);
+      collideWorld(npc, TRAFFIC_SIZE.length / 2, TRAFFIC_SIZE.width / 2, motion);
     }
   }
 
@@ -383,8 +396,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const spec = carSpec(cop.car);
       const { input, boost } = copInput(brain, cop, spec, target, stars, dt);
       cop.boost = boost ? 1 : 0;
-      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z), boost);
-      collideWorld(cop);
+      const motion = this.motions.get(id);
+      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z), boost, motion);
+      const size = carHalfSize(cop.car);
+      collideWorld(cop, size.halfLength, size.halfWidth, motion);
     }
   }
 

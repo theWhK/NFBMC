@@ -25,6 +25,8 @@ test("Vigilância Sanitária: com nível de procurado, viaturas chegam e autuam 
   await expect(page.getByTestId("banner")).toContainText("Autuado", { timeout: 30_000 });
   await expect.poll(async () => (await page.evaluate(() => window.__nfbmc!.police()))!.cops.length).toBe(0);
   await expect(page.getByTestId("wanted")).toBeHidden();
+  // A viatura encosta para autuar (não empurra o carro para fora do ponto de encontro).
+  await expect(page.getByTestId("marker-panel")).toBeVisible();
   await expect(page.getByTestId("start-race-button")).toBeEnabled();
 
   await context.close();
