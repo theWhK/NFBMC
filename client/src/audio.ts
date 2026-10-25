@@ -358,4 +358,34 @@ export class Sound {
   click() {
     this.tone(1200, 0.05, "square", 0.08);
   }
+
+  // --- Abertura ----------------------------------------------------------------
+
+  /** "Fuuush" de vinheta: ruído varrendo do grave para o agudo. */
+  whoosh() {
+    this.burst(0.9, "bandpass", 220, 0.5, 0, 4200);
+  }
+
+  /** Pancada grave de trailer de cinema. */
+  boom() {
+    this.tone(70, 1.4, "sine", 0.7, 0, 28);
+    this.burst(0.6, "lowpass", 900, 0.6, 0, 80);
+  }
+
+  /** Brilho de logo: acorde agudo subindo. */
+  shimmer() {
+    [784, 988, 1175, 1568].forEach((f, i) => this.tone(f, 0.9 - i * 0.12, "triangle", 0.06, i * 0.06));
+  }
+
+  /** Lancheira caindo no chão. */
+  thud() {
+    this.bump();
+    this.burst(0.25, "lowpass", 300, 0.5, 0.02);
+  }
+
+  /** Uma subida de sirene só ("uóóó"). */
+  wail() {
+    this.tone(620, 0.7, "sawtooth", 0.08, 0, 1150);
+    this.tone(1150, 0.6, "sawtooth", 0.06, 0.7, 640);
+  }
 }

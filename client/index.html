@@ -89,6 +89,7 @@
           <button type="button" id="opt-sfx" data-testid="opt-sfx">Efeitos: ligados</button>
           <button type="button" id="opt-gearbox" data-testid="opt-gearbox">Câmbio: automático</button>
           <button type="button" id="opt-quality" data-testid="opt-quality">Gráficos: automático</button>
+          <button type="button" id="opt-intro" data-testid="opt-intro">Abertura: ligada</button>
         </div>
         <p class="hint">Todos os comandos: F1 dentro do jogo (ou "Controles" na pausa).</p>
       </section>
@@ -96,7 +97,10 @@
       <section class="mw-screen" data-screen-id="credits" hidden>
         <h2>Créditos</h2>
         <p>Feito para a galera do Will, com muito colesterol.</p>
-        <p class="hint">Paródia carinhosa de Need for Speed: Most Wanted (2005). Músicas e sons gerados no próprio jogo. Fontes Russo One e Black Ops One (OFL).</p>
+        <p class="hint">Paródia carinhosa de Need for Speed: Most Wanted (2005). EAT Games, LunchBox e Nhamvidia são de mentira, com logos desenhados à mão. Músicas, sons e locução gerados no próprio jogo. Fontes Russo One e Black Ops One (OFL).</p>
+        <div class="mw-list sub">
+          <button type="button" id="credits-intro" data-testid="credits-intro">Ver a abertura</button>
+        </div>
       </section>
 
       <p class="mw-hint" id="menu-hint"></p>
@@ -253,6 +257,12 @@
     </div>
 
     <!-- Quadrinhos do modo história. -->
+    <!-- Abertura: aviso, vinhetas de mentira, trailer e "Aperte Enter" (client/src/intro.ts). -->
+    <div id="intro" class="intro" data-testid="intro" hidden>
+      <div id="intro-stage" class="intro-stage"></div>
+      <button type="button" id="intro-skip" class="link intro-skip" data-testid="intro-skip">Pular abertura ▶▶</button>
+    </div>
+
     <div id="comic" class="comic" data-testid="comic" hidden>
       <div class="comic-panel" id="comic-panel">
         <div class="comic-speed"></div>

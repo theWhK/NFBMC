@@ -2,7 +2,7 @@
 // Cada música é uma função chamada a cada semicolcheia (16 passos por compasso)
 // que decide o que tocar naquele instante.
 
-export type SongName = "lobby" | "race" | "pursuit";
+export type SongName = "lobby" | "race" | "pursuit" | "trailer";
 
 const midiToFreq = (note: number) => 440 * 2 ** ((note - 69) / 12);
 
@@ -222,7 +222,44 @@ const PURSUIT: Song = {
   },
 };
 
-const SONGS: Record<SongName, Song> = { race: RACE, lobby: LOBBY, pursuit: PURSUIT };
+/**
+ * Trailer da abertura: começa só com o "coração" e o pad, vai somando chimbal,
+ * baixo e caixa, e no 5º compasso entra o riff pesado (Ré menor, i–VI–VII–V).
+ */
+const TRAILER: Song = {
+  bpm: 140,
+  step(i, t, s, inst) {
+    const bar = Math.floor(i / 16);
+    const pos = i % 16;
+    const chords: [number, boolean][] = [[38, true], [34, false], [36, false], [33, false]];
+    const [root, minor] = chords[bar % 4];
+    const full = bar >= 4;
+
+    if (pos === 0) inst.pad(t, triad(root + 12, minor), s * 16, full ? 0.04 : 0.06);
+    if (!full) {
+      // Batida de coração, cada vez mais presente.
+      if (pos === 0 || pos === 3) inst.kick(t, 0.6 + bar * 0.1);
+      if (bar >= 2 && pos % 2 === 0) inst.hat(t, false, 0.05 + (bar - 2) * 0.03);
+      if (bar >= 2 && pos % 4 === 0) inst.bass(t, root - 12, s * 3, 0.3);
+      // Virada de caixa crescendo para a entrada do riff.
+      if (bar === 3 && pos >= 8) inst.snare(t, 0.15 + (pos - 8) * 0.07);
+      return;
+    }
+    if (pos % 4 === 0 || pos === 10) inst.kick(t);
+    if (pos === 4 || pos === 12) inst.snare(t, 0.55);
+    if (pos % 2 === 1) inst.hat(t, pos === 15, 0.08);
+    if (pos % 2 === 0) inst.bass(t, root - 12 + (pos === 14 ? 12 : 0), s * 1.8, 0.4);
+    const hits: Record<number, number> = { 0: 3, 3: 3, 6: 2, 8: 4, 14: 2 };
+    if (pos in hits) inst.power(t, root + 12, s * hits[pos]);
+    // Sirene ao fundo, como na perseguição.
+    if (pos === 0 && bar % 2 === 1) {
+      inst.lead(t, root + 36, s * 3, 0.04);
+      inst.lead(t + s * 4, root + 37, s * 3, 0.04);
+    }
+  },
+};
+
+const SONGS: Record<SongName, Song> = { race: RACE, lobby: LOBBY, pursuit: PURSUIT, trailer: TRAILER };
 
 export class Music {
   private instruments: Instruments;

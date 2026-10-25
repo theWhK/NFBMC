@@ -14,6 +14,7 @@ import {
 } from "@nfbmc/shared";
 
 import type { Sound } from "./audio.ts";
+import { introEnabled, setIntroEnabled } from "./intro.ts";
 import { fetchListaGorda, fetchProfile } from "./net.ts";
 import type { GameScene } from "./scene.ts";
 import { escapeHtml, kcal, setHtml, ui } from "./ui.ts";
@@ -216,6 +217,14 @@ export function createMenu(options: MenuOptions) {
     const next = qualityOrder[(qualityOrder.indexOf(currentQuality) + 1) % qualityOrder.length];
     storage.set(QUALITY_KEY, next);
     location.reload();
+  });
+  // Abertura (aviso, logos e trailer) ao abrir o jogo.
+  const optIntro = document.getElementById("opt-intro") as HTMLButtonElement;
+  const refreshIntro = () => (optIntro.textContent = `Abertura: ${introEnabled() ? "ligada" : "desligada"}`);
+  refreshIntro();
+  optIntro.addEventListener("click", () => {
+    setIntroEnabled(!introEnabled());
+    refreshIntro();
   });
   optGearbox.addEventListener("click", () => {
     manual = !manual;
