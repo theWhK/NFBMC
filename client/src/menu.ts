@@ -14,7 +14,9 @@ import {
 } from "@nfbmc/shared";
 
 import type { Sound } from "./audio.ts";
-import { fetchListaGorda, fetchProfile } from "./net.ts";
+import { introEnabled, setIntroEnabled } from "./intro.ts";
+import { whereLabel } from "./coop.ts";
+import { fetchListaGorda, fetchOnline, fetchProfile } from "./net.ts";
 import type { GameScene } from "./scene.ts";
 import { escapeHtml, kcal, setHtml, ui } from "./ui.ts";
 
@@ -217,6 +219,14 @@ export function createMenu(options: MenuOptions) {
     storage.set(QUALITY_KEY, next);
     location.reload();
   });
+  // Abertura (aviso, logos e trailer) ao abrir o jogo.
+  const optIntro = document.getElementById("opt-intro") as HTMLButtonElement;
+  const refreshIntro = () => (optIntro.textContent = `Abertura: ${introEnabled() ? "ligada" : "desligada"}`);
+  refreshIntro();
+  optIntro.addEventListener("click", () => {
+    setIntroEnabled(!introEnabled());
+    refreshIntro();
+  });
   optGearbox.addEventListener("click", () => {
     manual = !manual;
     storage.set(GEARBOX_KEY, manual ? "1" : "0");
@@ -244,6 +254,23 @@ export function createMenu(options: MenuOptions) {
     setHtml(ui.hallList, entries.map((e) => `<li>${escapeHtml(e.name)} <strong>${kcal(e.calories)}</strong></li>`).join(""));
     ui.hall.hidden = false;
   });
+
+  // Co-op: quantos estão online (selo no item) e quem, onde (na dica do item).
+  const worldButton = document.getElementById("world") as HTMLButtonElement;
+  const onlineBadge = document.getElementById("online-badge")!;
+  const worldHint = worldButton.dataset.hint ?? "";
+  const refreshOnline = async () => {
+    if (ui.join.hidden) return;
+    const pilots = await fetchOnline();
+    onlineBadge.hidden = pilots.length === 0;
+    onlineBadge.textContent = `${pilots.length} online`;
+    const names = pilots.slice(0, 5).map((p) => `${p.name} (${whereLabel(p)})`).join(", ");
+    const more = pilots.length > 5 ? ` e mais ${pilots.length - 5}` : "";
+    worldButton.dataset.hint = pilots.length ? `${worldHint} Online agora: ${names}${more}.` : `${worldHint} Ninguém online agora.`;
+    if (active === items && items[selected] === worldButton) hint.textContent = worldButton.dataset.hint;
+  };
+  void refreshOnline();
+  setInterval(() => void refreshOnline(), 8000);
 
   // Ficha do jogador no rodapé.
   const token = options.token();
@@ -289,7 +316,10 @@ export function createMenu(options: MenuOptions) {
     color: () => color,
     car: () => car,
     manual: () => manual,
-    /** Volta a mostrar a vitrine (ex.: ao sair do jogo). */
-    show: () => showcase(),
+    /** Volta a mostrar a vitrine (ex.: ao sair do jogo) e atualiza quem está online. */
+    show: () => {
+      showcase();
+      void refreshOnline();
+    },
   };
 }

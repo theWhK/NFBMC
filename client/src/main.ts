@@ -15,6 +15,7 @@ import {
 
 import { Sound } from "./audio.ts";
 import { createFullMap, createMinimap, createTacho, type MinimapView } from "./hud.ts";
+import { introEnabled, playIntro } from "./intro.ts";
 import { LOGO_SVG } from "./logo.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import { createMenu, type MenuEntry } from "./menu.ts";
@@ -168,6 +169,7 @@ const ctx: ModeContext = {
     const nearest = new Map([...others].sort(([, a], [, b]) => a.distance - b.distance).slice(0, 6));
     sound.updateOthers(nearest);
   },
+  focusMap: (x, z) => fullMap.focus(x, z),
   detectBump(previous, speed) {
     const now = performance.now();
     const drop = Math.abs(previous.speed) - Math.abs(speed);
@@ -323,7 +325,7 @@ function setLoading(text: string | null) {
 }
 
 async function enterWorld(spawn?: RaceId) {
-  const room = await joinWorld({ ...carOptions(), token, solo: soloWorld, spawn });
+  const room = await joinWorld({ ...carOptions(), token, solo: soloWorld, spawn, story: storyMode });
   room.onLeave(() => {
     if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
   });
@@ -532,6 +534,11 @@ window.addEventListener("keydown", (e) => {
     buttons[(index + (e.code === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length].focus();
     return;
   }
+  // Desafio de outro piloto na tela: Y aceita, X amarela (até com o mapa aberto).
+  if (!e.repeat && mode instanceof WorldMode && help.hidden && pause.hidden && mode.answerChallengeKey(e.code)) {
+    e.preventDefault();
+    return;
+  }
   // Com a pausa ou o mapa aberto, nada de dirigir.
   if (overlayOpen()) return;
   if (e.code === "KeyN") {
@@ -648,6 +655,30 @@ const menu = createMenu({
     if (!story.story.seenPrologue) void playComic(PROLOGUE).then(() => story.markPrologueSeen());
   },
 });
+
+// --- Abertura ----------------------------------------------------------------
+
+/** Aviso, logos de mentira e trailer; no fim (ou ao pular), o menu. */
+async function runIntro() {
+  ui.join.hidden = true;
+  $("topbar").hidden = true;
+  await playIntro(sound, {
+    // O trailer passa com o M3 Gorgonzola na vitrine, como o M3 GTR do original.
+    onTrailer: () => scene?.setShowcase(carSpec("m3").color, "m3"),
+  });
+  ui.join.hidden = false;
+  $("topbar").hidden = false;
+  menu.show();
+  sound.song("lobby");
+}
+
+/**
+ * Toca ao abrir o jogo, a não ser que tenha sido desligada nas Opções. Nos testes
+ * automáticos (navigator.webdriver) fica desligada; `?intro=1` força, `?intro=0` pula.
+ */
+const introParam = new URLSearchParams(location.search).get("intro");
+if (introParam === "1" || (introParam !== "0" && !navigator.webdriver && introEnabled())) void runIntro();
+$("credits-intro").addEventListener("click", () => void runIntro());
 
 $("story-go").addEventListener("click", () => enter("story"));
 $("story-challenge").addEventListener("click", () => enter("challenge"));

@@ -1,7 +1,7 @@
 // Conexão com o servidor: as duas salas (mundo aberto e corrida) e seus tipos.
 import { ColyseusSDK } from "@colyseus/sdk";
 import type server from "@nfbmc/server/app.config";
-import { ROOM_NAME, WORLD_ROOM_NAME, type CreateOptions, type WorldJoinOptions } from "@nfbmc/shared";
+import { ROOM_NAME, WORLD_ROOM_NAME, type CreateOptions, type OnlinePilot, type WorldJoinOptions } from "@nfbmc/shared";
 
 // Em produção o cliente é servido pelo próprio servidor do jogo (mesma origem).
 // Em dev o Vite roda na 5173 e o servidor na 2567, na mesma máquina.
@@ -43,6 +43,16 @@ export async function fetchProfile(token: string): Promise<ProfileSummary | null
 export async function fetchListaGorda(): Promise<ListaGordaEntry[]> {
   try {
     const response = await fetch(`${apiBase}/api/lista-gorda`);
+    return response.ok ? await response.json() : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Quem está jogando agora, em qualquer sala (fica vazia se o servidor não responder). */
+export async function fetchOnline(): Promise<OnlinePilot[]> {
+  try {
+    const response = await fetch(`${apiBase}/api/online`);
     return response.ok ? await response.json() : [];
   } catch {
     return [];

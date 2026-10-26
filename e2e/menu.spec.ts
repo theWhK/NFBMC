@@ -25,3 +25,40 @@ test("menu: navega pelo teclado, mostra os rivais e guarda a cor da garagem", as
 
   await context.close();
 });
+
+// Nos testes a abertura fica desligada (navigator.webdriver); ?intro=1 força.
+test("abertura: aviso, vinhetas de mentira, trailer e título; Esc pula tudo", async ({ page }) => {
+  await page.goto("/?intro=1");
+  const intro = page.getByTestId("intro");
+  await expect(intro).toHaveAttribute("data-step", "aviso");
+  await expect(intro).toContainText("Aviso à saúde");
+  // O menu fica escondido por baixo.
+  await expect(page.getByTestId("story-menu")).toBeHidden();
+
+  // Cada tecla pula uma vinheta; o trailer inteiro conta como uma.
+  for (const step of ["eat", "lunchbox", "nhamvidia", "cidade", "titulo"]) {
+    await page.keyboard.press("Enter");
+    await expect(intro).toHaveAttribute("data-step", step);
+  }
+  await expect(intro).toContainText("Aperte Enter");
+  await page.keyboard.press("Enter");
+  await expect(intro).toBeHidden();
+  // O Enter do título não "vazou" para o menu (abriria o modo história e o prólogo).
+  await expect(page.getByTestId("story-menu")).toHaveClass(/selected/);
+  await expect(page.getByTestId("comic")).toBeHidden();
+
+  // Créditos → "Ver a abertura"; Esc pula direto para o menu.
+  await page.locator('[data-screen="credits"]').click();
+  await page.getByTestId("credits-intro").click();
+  await expect(intro).toHaveAttribute("data-step", "aviso");
+  await page.keyboard.press("Escape");
+  await expect(intro).toBeHidden();
+  await expect(page.getByTestId("story-menu")).toBeVisible();
+
+  // Dá para desligar nas Opções (e fica guardado).
+  await page.getByTestId("options-menu").click();
+  await page.getByTestId("opt-intro").click();
+  await expect(page.getByTestId("opt-intro")).toHaveText("Abertura: desligada");
+  await page.reload();
+  await expect(page.getByTestId("opt-intro")).toHaveText("Abertura: desligada");
+});
