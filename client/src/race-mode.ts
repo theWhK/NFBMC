@@ -108,7 +108,9 @@ export class RaceMode {
       : null;
     if (!me) return;
 
-    ctx.sound.updateMine(followId === room.sessionId && followed ? {
+    // Pausado: motores calados (a música continua).
+    const paused = this.paused();
+    ctx.sound.updateMine(followId === room.sessionId && followed && !paused ? {
       speed: me.speed,
       rpm: me.rpm,
       redline: carSpec(me.car).redline,
@@ -117,7 +119,8 @@ export class RaceMode {
       offroad: followed.offroad,
       boost: me.boost > 0,
     } : null);
-    ctx.updateOtherEngines(cars, room.sessionId, me);
+    if (paused) ctx.sound.updateOthers(new Map());
+    else ctx.updateOtherEngines(cars, room.sessionId, me);
     ctx.drawMinimap({ cars, myId: room.sessionId, race: this.raceId, foods: [...(room.state.foods ?? [])] });
     this.updateUi();
   }
@@ -274,6 +277,19 @@ export class RaceMode {
 
   sendShift(direction: number) {
     this.room.send("shift", { direction });
+  }
+
+  /** Sala de um jogador só: dá para pausar (o servidor para a simulação). */
+  pausable() {
+    return !!this.room.state.pausable;
+  }
+
+  paused() {
+    return !!this.room.state.paused;
+  }
+
+  sendPause(paused: boolean) {
+    this.room.send("pause", { paused });
   }
 
   sendHorn() {

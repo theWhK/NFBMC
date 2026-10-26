@@ -163,9 +163,11 @@ export class WorldMode {
     const myCops = [...(room.state.cops?.values() ?? [])].filter((c) => c.target === room.sessionId);
     const nearestCop = myCops.length ? Math.min(...myCops.map((c) => Math.hypot(c.x - me.x, c.z - me.z))) : null;
     ctx.sound.song(myCops.length ? "pursuit" : "lobby");
-    ctx.sound.updateSiren(myCops.length ? nearestCop : null);
+    // Pausado: motores e sirene calados (a música continua).
+    const paused = this.paused();
+    ctx.sound.updateSiren(myCops.length && !paused ? nearestCop : null);
     this.updatePursuitUi(me, myCops.length > 0);
-    ctx.sound.updateMine(followed ? {
+    ctx.sound.updateMine(followed && !paused ? {
       speed: me.speed,
       rpm: me.rpm,
       redline: carSpec(me.car).redline,
@@ -174,7 +176,8 @@ export class WorldMode {
       offroad: followed.offroad,
       boost: me.boost > 0,
     } : null);
-    ctx.updateOtherEngines(cars, room.sessionId, me);
+    if (paused) ctx.sound.updateOthers(new Map());
+    else ctx.updateOtherEngines(cars, room.sessionId, me);
     ctx.drawMinimap({ cars, myId: room.sessionId, race: null, foods: [...(room.state.stands ?? [])] });
     this.coop.frame(room.sessionId, me);
     ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
@@ -275,6 +278,19 @@ export class WorldMode {
 
   sendShift(direction: number) {
     this.room.send("shift", { direction });
+  }
+
+  /** Sala de um jogador só: dá para pausar (o servidor para a simulação). */
+  pausable() {
+    return !!this.room.state.pausable;
+  }
+
+  paused() {
+    return !!this.room.state.paused;
+  }
+
+  sendPause(paused: boolean) {
+    this.room.send("pause", { paused });
   }
 
   sendHorn() {

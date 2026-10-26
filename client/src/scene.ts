@@ -203,6 +203,8 @@ export class GameScene {
   private cameraTarget = new THREE.Vector3();
   private clock = new THREE.Clock();
   private time = 0;
+  /** Jogo pausado (modo solo/história): o quadro congela, sem extrapolar nada. */
+  paused = false;
   /** Resolução adaptativa: cai quando o FPS fica baixo (PC fraco ou sem placa de vídeo). */
   // No celular começa um pouco mais baixa: a tela é pequena e a bateria agradece.
   private pixelRatio = Math.min(window.devicePixelRatio, window.matchMedia?.("(pointer: coarse)").matches ? 1.5 : 2);
@@ -398,7 +400,7 @@ export class GameScene {
   /** Desenha um quadro. `followId` é o carro que a câmera persegue. */
   render(cars: Map<string, CarView>, followId: string | undefined): FollowedInfo | null {
     const rawDt = this.clock.getDelta();
-    const dt = Math.min(rawDt, 0.1);
+    const dt = this.paused ? 0 : Math.min(rawDt, 0.1);
     this.time += dt;
     this.adaptResolution(rawDt);
 
