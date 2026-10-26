@@ -157,6 +157,8 @@ export interface WorldJoinOptions extends JoinOptions {
   token?: string;
   /** Voltando de uma corrida: nasce no ponto de encontro dela. */
   spawn?: string;
+  /** Mundo do modo história (só muda o que a lista de online mostra). */
+  story?: boolean;
 }
 
 /** Corrida disparada de um ponto do mundo aberto. */
@@ -166,6 +168,46 @@ export interface EventRaceOptions {
   expected: number;
   bots: number;
   difficulty: Difficulty;
+}
+
+// --- Co-op: quem está online e desafios entre pilotos --------------------------
+
+/** Onde um piloto online está agora. */
+export type PresenceWhere = "world" | "solo" | "story" | "race" | "event" | "duel";
+
+/** Uma linha de `GET /api/online` (o menu e o mapa mostram). */
+export interface OnlinePilot {
+  name: string;
+  color: string;
+  car: string;
+  where: PresenceWhere;
+  /** Pista, quando está numa corrida. */
+  raceId?: string;
+  calories: number;
+}
+
+/** Quanto tempo o desafiado tem para responder. */
+export const CHALLENGE_SECONDS = 20;
+
+/** Cliente → mundo: desafiar outro piloto da mesma cidade para um pega. */
+export interface ChallengeMessage {
+  to: string;
+  raceId: string;
+}
+
+/** Mundo → desafiado: alguém chamou você para um pega. */
+export interface ChallengeInvite {
+  id: string;
+  fromName: string;
+  color: string;
+  raceId: string;
+  seconds: number;
+}
+
+/** Desafiado → mundo: aceita ou amarela. */
+export interface ChallengeReply {
+  id: string;
+  accept: boolean;
 }
 
 /** Mensagem do mundo para o cliente: vá para esta sala de corrida. */

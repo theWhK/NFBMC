@@ -18,6 +18,7 @@ import {
   type TrafficKind,
 } from "@nfbmc/shared";
 
+import { CoopPanel } from "./coop.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import type { WorldRoom } from "./net.ts";
 import type { CarView } from "./scene.ts";
@@ -41,6 +42,8 @@ export class WorldMode {
 
   /** Ganchos do modo história (calorias ganhas e fugas da Vigilância). */
   private hooks: WorldHooks;
+  /** Co-op: quem está online (no mapa) e os desafios para um pega. */
+  private coop: CoopPanel;
 
   constructor(
     room: WorldRoom,
@@ -52,6 +55,7 @@ export class WorldMode {
     this.room = room;
     this.ctx = ctx;
     this.hooks = hooks;
+    this.coop = new CoopPanel(room, ctx.sound, ctx.focusMap);
     room.onMessage("profile", (message: { token: string; races: number; wins: number; bestRace: number }) => {
       onToken(message.token);
       ui.worldStats.textContent = message.races > 0
@@ -123,6 +127,11 @@ export class WorldMode {
     if (code === "Enter") this.startRace();
   }
 
+  /** Y/X respondem a um desafio na tela (funciona até com o mapa aberto). */
+  answerChallengeKey(code: string) {
+    return this.coop.answerKey(code);
+  }
+
   frame() {
     const { room, ctx } = this;
     if (!this.sceneReady) {
@@ -167,6 +176,7 @@ export class WorldMode {
     } : null);
     ctx.updateOtherEngines(cars, room.sessionId, me);
     ctx.drawMinimap({ cars, myId: room.sessionId, race: null, foods: [...(room.state.stands ?? [])] });
+    this.coop.frame(room.sessionId, me);
     ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
     ui.nitroFill.style.width = `${Math.min(100, (me.boost / 2.5) * 100)}%`;
     ui.speedlines.hidden = !(me.boost > 0);
@@ -175,6 +185,7 @@ export class WorldMode {
     ui.worldHud.hidden = false;
     ui.dash.hidden = false;
     ui.leaderboard.hidden = false;
+    (ui.leaderboard.querySelector(".hint") as HTMLElement).hidden = !!room.state.solo;
     ui.count.textContent = String(room.state.players.size);
     ui.worldCalories.textContent = kcal(me.calories);
     this.updateDistrict(me.x, me.z);
@@ -308,6 +319,7 @@ export class WorldMode {
 
   dispose() {
     if (this.bannerTimer) clearTimeout(this.bannerTimer);
+    this.coop.dispose();
     ui.markerBotsMinus.onclick = ui.markerBotsPlus.onclick = ui.startRace.onclick = null;
     ui.markerDifficulty.onchange = null;
   }

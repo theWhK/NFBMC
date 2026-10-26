@@ -169,6 +169,7 @@ const ctx: ModeContext = {
     const nearest = new Map([...others].sort(([, a], [, b]) => a.distance - b.distance).slice(0, 6));
     sound.updateOthers(nearest);
   },
+  focusMap: (x, z) => fullMap.focus(x, z),
   detectBump(previous, speed) {
     const now = performance.now();
     const drop = Math.abs(previous.speed) - Math.abs(speed);
@@ -324,7 +325,7 @@ function setLoading(text: string | null) {
 }
 
 async function enterWorld(spawn?: RaceId) {
-  const room = await joinWorld({ ...carOptions(), token, solo: soloWorld, spawn });
+  const room = await joinWorld({ ...carOptions(), token, solo: soloWorld, spawn, story: storyMode });
   room.onLeave(() => {
     if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
   });
@@ -531,6 +532,11 @@ window.addEventListener("keydown", (e) => {
     const buttons = [...pause.querySelectorAll<HTMLButtonElement>("button")];
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
     buttons[(index + (e.code === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length].focus();
+    return;
+  }
+  // Desafio de outro piloto na tela: Y aceita, X amarela (até com o mapa aberto).
+  if (!e.repeat && mode instanceof WorldMode && help.hidden && pause.hidden && mode.answerChallengeKey(e.code)) {
+    e.preventDefault();
     return;
   }
   // Com a pausa ou o mapa aberto, nada de dirigir.

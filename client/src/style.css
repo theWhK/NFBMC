@@ -2578,3 +2578,156 @@ kbd {
     display: none;
   }
 }
+
+/* --- Co-op: quem está online (no mapa) e desafios (client/src/coop.ts) ----- */
+
+.online-badge {
+  margin-left: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.55em;
+  font-style: normal;
+  vertical-align: middle;
+  letter-spacing: 0.04em;
+  background: #2f9e44;
+  color: #fff;
+}
+
+.online-panel {
+  position: absolute;
+  top: 56px;
+  right: 16px;
+  width: 290px;
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  padding: 10px 14px 12px;
+  box-sizing: border-box;
+  background: rgba(10, 8, 6, 0.85);
+  border-left: 3px solid var(--mustard);
+}
+
+.online-panel .stamp {
+  margin: 0 0 6px;
+}
+
+.online-panel ul {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.online-panel li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.online-panel li .who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.online-panel li strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-panel li small {
+  font-size: 0.75rem;
+  color: #cfc3b5;
+}
+
+.online-panel li button {
+  flex: none;
+}
+
+.online-race {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.online-race select {
+  flex: 1;
+  min-width: 0;
+}
+
+.online-panel .hint {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+}
+
+/* Convite: no alto da tela, por cima do jogo e do mapa. */
+.challenge-card {
+  top: 56px;
+  left: 50%;
+  z-index: 38;
+  width: min(380px, calc(100vw - 32px));
+  box-sizing: border-box;
+  transform: translateX(-50%);
+  border-left-color: var(--ketchup);
+  animation: challenge-in 0.35s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+
+@keyframes challenge-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -30px) scale(0.9);
+  }
+}
+
+.challenge-card .stamp {
+  margin: 0 0 4px;
+  color: var(--ketchup);
+}
+
+.challenge-card p {
+  margin: 0 0 8px;
+}
+
+.challenge-timer {
+  height: 5px;
+  margin-bottom: 10px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+#challenge-fill {
+  height: 100%;
+  background: var(--mustard);
+}
+
+.challenge-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.challenge-actions button {
+  flex: 1;
+}
+
+.challenge-actions .decline {
+  background: #3a332d;
+  color: #f5ebe0;
+}
+
+@media (max-height: 520px) {
+  .online-panel {
+    top: 48px;
+    width: 230px;
+    max-height: calc(100vh - 110px);
+    font-size: 0.85rem;
+  }
+
+  .challenge-card {
+    top: 44px;
+    width: min(340px, calc(100vw - 32px));
+    padding: 10px 14px;
+  }
+}

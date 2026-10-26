@@ -27,6 +27,12 @@ import {
   createDrive,
   isCarId,
   requestShift,
+  CHALLENGE_SECONDS,
+  atRace,
+  type ChallengeInvite,
+  type ChallengeMessage,
+  type ChallengeReply,
+  type RaceId,
   type DriveState,
   type ShiftMessage,
   type Difficulty,
@@ -38,6 +44,7 @@ import {
   type WorldJoinOptions,
 } from "@nfbmc/shared";
 
+import { clearPresence, setPresence } from "../presence.ts";
 import { loadProfile, setCalories, type Profile } from "../profiles.ts";
 import { copInput, createCopBrain, spawnPoint, type CopBrain } from "./cops.ts";
 import { Cop, Npc, Stand, WorldPlayer, WorldState } from "./schema.ts";
@@ -74,6 +81,14 @@ function sanitizeName(raw: unknown, fallback: string) {
 const isDifficulty = (value: unknown): value is Difficulty =>
   typeof value === "string" && value in DIFFICULTY_LABELS;
 
+/** Desafio de um piloto para outro, esperando resposta. */
+interface Invite {
+  from: string;
+  to: string;
+  raceId: RaceId;
+  expires: number;
+}
+
 /**
  * Mundo aberto de Porto Gordo. Todo mundo circula pela mesma cidade, come nas
  * barraquinhas e para nos pontos de encontro para disparar corridas. A corrida
@@ -103,6 +118,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   private lastCopHit = new Map<string, number>();
   private time = 0;
   private joinCount = 0;
+  /** Desafios diretos (co-op) esperando resposta, pelo id. */
+  private invites = new Map<string, Invite>();
+  private inviteCount = 0;
 
   messages = {
     input: (client: Client, message: InputMessage) => {
@@ -138,6 +156,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     },
     startRace: (client: Client, message: { raceId?: unknown; bots?: unknown; difficulty?: unknown }) => {
       this.startRace(client, message).catch((err) => console.error("Falha ao criar corrida", err));
+    },
+    challenge: (client: Client, message: Partial<ChallengeMessage>) => this.challenge(client, message),
+    challengeReply: (client: Client, message: Partial<ChallengeReply>) => {
+      this.replyChallenge(client, message).catch((err) => console.error("Falha ao criar o pega", err));
     },
     ...(TEST_HOOKS && {
       debugHeat: (client: Client, message: { heat?: unknown }) => {
@@ -199,9 +221,15 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       player.heading = spawn.heading;
     }
     this.state.players.set(client.sessionId, player);
+    const where = this.state.solo ? (options?.story ? "story" : "solo") : "world";
+    setPresence(this.roomId, client.sessionId, () => ({
+      name: player.name, color: player.color, car: player.car, where, calories: player.calories,
+    }));
   }
 
   onLeave(client: Client, _code: CloseCode) {
+    clearPresence(this.roomId, client.sessionId);
+    this.cancelInvites(client.sessionId, "saiu da cidade");
     this.state.players.delete(client.sessionId);
     this.controls.delete(client.sessionId);
     this.profiles.delete(client.sessionId);
@@ -228,19 +256,100 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     }
 
     const participants = [...this.state.players.keys()].filter(near).slice(0, MAX_PLAYERS);
-    participants.forEach((id) => this.leaving.add(id));
     const bots = typeof message.bots === "number" ? clamp(Math.round(message.bots), 0, MAX_PLAYERS - participants.length) : 3;
-    const options: EventRaceOptions = {
-      raceId,
-      expected: participants.length,
-      bots,
-      difficulty: isDifficulty(message.difficulty) ? message.difficulty : "medio",
-    };
+    await this.launchRace(participants, raceId, bots, isDifficulty(message.difficulty) ? message.difficulty : "medio");
+  }
+
+  /** Cria a sala da corrida (modo evento) e manda os participantes para lá. */
+  private async launchRace(participants: string[], raceId: RaceId, bots: number, difficulty: Difficulty) {
+    participants.forEach((id) => {
+      this.leaving.add(id);
+      this.cancelInvites(id, "foi para uma corrida");
+    });
+    const options: EventRaceOptions = { raceId, expected: participants.length, bots, difficulty };
     const room = await matchMaker.createRoom(ROOM_NAME, options);
     const go: GoRaceMessage = { roomId: room.roomId, raceId };
     for (const id of participants) this.clients.getById(id)?.send("goRace", go);
     // Se alguém não sair (fechou a aba no meio), libera de novo depois de um tempo.
     this.clock.setTimeout(() => participants.forEach((id) => this.leaving.delete(id)), 15_000);
+  }
+
+  // --- Co-op: desafio direto entre dois pilotos ------------------------------
+
+  private notice(sessionId: string, text: string) {
+    this.clients.getById(sessionId)?.send("notice", { text });
+  }
+
+  /** Por que este piloto não pode entrar num pega agora (null = pode). */
+  private busyReason(sessionId: string, you: boolean) {
+    const player = this.state.players.get(sessionId);
+    if (!player || this.leaving.has(sessionId)) return you ? "Você já está indo para uma corrida." : "Esse piloto já está indo para uma corrida.";
+    if (this.copsOf(sessionId).length > 0) {
+      return you ? "Despiste a Vigilância Sanitária antes de desafiar alguém!" : `${player.name} está fugindo da Vigilância. Tente daqui a pouco.`;
+    }
+    return null;
+  }
+
+  private challenge(client: Client, message: Partial<ChallengeMessage>) {
+    const from = client.sessionId;
+    const to = message?.to;
+    if (this.state.solo || typeof to !== "string" || to === from || !isRaceId(message?.raceId)) return;
+    const target = this.state.players.get(to);
+    if (!target) return;
+    const busy = this.busyReason(from, true) ?? this.busyReason(to, false);
+    if (busy) return this.notice(from, busy);
+    const pending = [...this.invites.values()];
+    if (pending.some((i) => i.from === from)) return this.notice(from, "Espere a resposta do desafio anterior.");
+    if (pending.some((i) => i.to === to || i.from === to)) return this.notice(from, `${target.name} já tem um desafio na mesa.`);
+
+    const id = `pega-${++this.inviteCount}`;
+    const raceId = message.raceId;
+    this.invites.set(id, { from, to, raceId, expires: this.time + CHALLENGE_SECONDS });
+    const challenger = this.state.players.get(from)!;
+    const invite: ChallengeInvite = { id, fromName: challenger.name, color: challenger.color, raceId, seconds: CHALLENGE_SECONDS };
+    this.clients.getById(to)?.send("challenge", invite);
+    this.notice(from, `Desafio enviado para ${target.name}!`);
+  }
+
+  private async replyChallenge(client: Client, message: Partial<ChallengeReply>) {
+    const invite = typeof message?.id === "string" ? this.invites.get(message.id) : undefined;
+    if (!invite || invite.to !== client.sessionId) return;
+    this.invites.delete(message.id!);
+    const target = this.state.players.get(invite.to);
+    if (!message.accept) {
+      this.notice(invite.from, `${target?.name ?? "O piloto"} amarelou! 🐔`);
+      return;
+    }
+    const busy = this.busyReason(invite.from, false) ?? this.busyReason(invite.to, true);
+    if (busy) {
+      this.notice(invite.to, busy);
+      this.notice(invite.from, `O pega não rolou: ${this.busyReason(invite.from, true) ?? this.busyReason(invite.to, false)}`);
+      return;
+    }
+    this.notice(invite.from, `${target?.name} aceitou! Pega ${atRace(invite.raceId)}.`);
+    // Pega é só entre os dois: sem bots.
+    await this.launchRace([invite.from, invite.to], invite.raceId, 0, "medio");
+  }
+
+  /** Desfaz os desafios de um piloto (saiu, foi correr) e avisa o outro lado. */
+  private cancelInvites(sessionId: string, why: string) {
+    for (const [id, invite] of this.invites) {
+      if (invite.from !== sessionId && invite.to !== sessionId) continue;
+      this.invites.delete(id);
+      const other = invite.from === sessionId ? invite.to : invite.from;
+      const name = this.state.players.get(sessionId)?.name ?? "O piloto";
+      if (other === invite.to) this.clients.getById(other)?.send("challengeGone", { id });
+      this.notice(other, `${name} ${why}: desafio cancelado.`);
+    }
+  }
+
+  private expireInvites() {
+    for (const [id, invite] of this.invites) {
+      if (this.time < invite.expires) continue;
+      this.invites.delete(id);
+      this.clients.getById(invite.to)?.send("challengeGone", { id });
+      this.notice(invite.from, `${this.state.players.get(invite.to)?.name ?? "O piloto"} não respondeu o desafio.`);
+    }
   }
 
   private update(dt: number) {
@@ -285,6 +394,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     }
 
     for (const [sessionId, player] of cars) this.updatePursuit(sessionId, player, dt);
+    this.expireInvites();
 
     for (const [stand, at] of this.respawnAt) {
       if (this.time < at) continue;

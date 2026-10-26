@@ -30,7 +30,7 @@
       <!-- Lista principal, à esquerda (como no menu do Most Wanted de 2005). -->
       <nav id="menu-list" class="mw-list" aria-label="Menu principal">
         <button type="button" data-screen="story" data-testid="story-menu" data-hint="Recupere o seu M3 Gorgonzola: suba a Lista Gorda do #10 ao #1 e derrote o Bruno.">Modo história</button>
-        <button type="button" id="world" data-testid="world-button" data-hint="Rode por Porto Gordo com a galera, coma tudo e dispute corridas nos pontos de encontro.">Porto Gordo</button>
+        <button type="button" id="world" data-testid="world-button" data-hint="Porto Gordo com a galera: veja no mapa (M) quem está online e desafie para um pega, coma tudo e corra nos pontos de encontro.">Co-op <span class="online-badge" id="online-badge" data-testid="online-badge" hidden></span></button>
         <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="A cidade inteira só para você (e para a Vigilância Sanitária).">Modo solo</button>
         <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida no autódromo, sem passar pela cidade.">Corrida rápida</button>
         <button type="button" data-screen="lista" data-testid="lista-menu" data-hint="Os rivais mais calóricos de Porto Gordo e o placar de todos os tempos.">Lista Gorda</button>
@@ -180,6 +180,7 @@
     <div id="leaderboard" class="panel side" hidden>
       <p class="stamp small">Lista Gorda</p>
       <ol id="leaderboard-list" data-testid="leaderboard"></ol>
+      <p class="hint">Desafie a galera pelo mapa 🗺️</p>
     </div>
 
     <div id="marker-panel" class="panel bottom" data-testid="marker-panel" hidden>
@@ -233,13 +234,25 @@
         <tr><td><kbd>H</kbd></td><td>Buzina (a galera ouve)</td></tr>
         <tr><td><kbd>C</kbd></td><td>Trocar câmera (perseguição, longe, baixa, capô)</td></tr>
         <tr><td><kbd>R</kbd></td><td>Voltar para a rua (quando empacar)</td></tr>
-        <tr><td><kbd>M</kbd></td><td>Mapa da cidade</td></tr>
+        <tr><td><kbd>M</kbd> <kbd>Tab</kbd></td><td>Mapa da cidade e pilotos online (desafiar para um pega)</td></tr>
+        <tr><td><kbd>Y</kbd> / <kbd>X</kbd></td><td>Aceitar / amarelar um desafio</td></tr>
         <tr><td><kbd>Enter</kbd></td><td>Começar a corrida (no ponto de encontro)</td></tr>
         <tr><td><kbd>Esc</kbd> <kbd>P</kbd></td><td>Pausa</td></tr>
         <tr><td><kbd>N</kbd></td><td>Liga/desliga a música</td></tr>
         <tr><td><kbd>F1</kbd></td><td>Esta lista</td></tr>
       </table>
       <button type="button" id="help-close" data-testid="help-close">Fechar</button>
+    </div>
+
+    <!-- Convite para um pega, de outro piloto (co-op). -->
+    <div id="challenge-card" class="panel challenge-card" data-testid="challenge-card" hidden>
+      <p class="stamp small">⚔️ Desafio!</p>
+      <p id="challenge-text"></p>
+      <div class="challenge-timer"><div id="challenge-fill"></div></div>
+      <div class="challenge-actions">
+        <button type="button" id="challenge-accept" data-testid="challenge-accept">Aceitar (Y)</button>
+        <button type="button" id="challenge-decline" class="decline" data-testid="challenge-decline">Amarelar (X)</button>
+      </div>
     </div>
 
     <!-- Mapa em tela cheia. -->
@@ -253,6 +266,15 @@
         <span><i class="cop"></i>Vigilância</span>
         <span class="hint">M / Esc fecha · roda do mouse ou pinça dá zoom · arraste para mover</span>
       </div>
+      <!-- Co-op: quem está online e o desafio para um pega (client/src/coop.ts). -->
+      <aside class="online-panel" data-testid="online-panel">
+        <p class="stamp small">Online agora</p>
+        <ul id="online-list" data-testid="online-list"></ul>
+        <label class="online-race">Pista do pega
+          <select id="challenge-race" data-testid="challenge-race"></select>
+        </label>
+        <p class="hint" id="online-hint"></p>
+      </aside>
       <button type="button" id="fullmap-close" class="icon close" data-testid="fullmap-close" aria-label="Fechar mapa">✕</button>
     </div>
 

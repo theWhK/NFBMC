@@ -701,6 +701,9 @@ export const RACES: Record<RaceId, RaceInfo> = {
 
 export const RACE_IDS = Object.keys(RACES) as RaceId[];
 
+/** Nome da corrida com a preposição certa: "no Circuito do Centro", "na Volta do Lago". */
+export const atRace = (id: RaceId) => `${/^(Volta|Rota)\b/.test(RACES[id].name) ? "na" : "no"} ${RACES[id].name}`;
+
 export const isRaceId = (value: unknown): value is RaceId =>
   typeof value === "string" && value in RACES;
 

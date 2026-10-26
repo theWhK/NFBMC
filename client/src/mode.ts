@@ -16,6 +16,8 @@ export interface ModeContext {
   updateOtherEngines: (cars: Map<string, CarView>, myId: string, me: { x: number; z: number; heading: number }) => void;
   /** Toca o som de batida se o carro perdeu velocidade de repente sem frear. */
   detectBump: (previous: { speed: number; bumpAt: number }, speed: number) => void;
+  /** Centraliza o mapa grande num ponto (o painel "Online agora" usa). */
+  focusMap: (x: number, z: number) => void;
 }
 
 /** Estado de um carro como os testes e2e enxergam (via window.__nfbmc). */

@@ -42,6 +42,7 @@ import {
   type Phase,
 } from "@nfbmc/shared";
 
+import { clearPresence, setPresence } from "../presence.ts";
 import { recordRace } from "../profiles.ts";
 import { BOT_NAMES, botInput, createBrain, type Brain, type FoodSpot } from "./bots.ts";
 import { Food, Player, RaceState, Result } from "./schema.ts";
@@ -207,9 +208,14 @@ export class RaceRoom extends Room<{ state: RaceState }> {
 
     this.placeOnGrid(player, this.state.players.size);
     this.state.players.set(client.sessionId, player);
+    const where = this.state.challenge ? "duel" : this.state.event ? "event" : this.state.solo ? "solo" : "race";
+    setPresence(this.roomId, client.sessionId, () => ({
+      name: player.name, color: player.color, car: player.car, where, raceId: this.state.raceId, calories: player.calories,
+    }));
   }
 
   onLeave(client: Client, _code: CloseCode) {
+    clearPresence(this.roomId, client.sessionId);
     this.state.players.delete(client.sessionId);
     this.controls.delete(client.sessionId);
     this.sectors.delete(client.sessionId);

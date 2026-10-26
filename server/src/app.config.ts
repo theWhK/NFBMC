@@ -6,6 +6,7 @@ import { ROOM_NAME, WORLD_ROOM_NAME } from "@nfbmc/shared";
 import { RaceRoom } from "./rooms/RaceRoom.ts";
 import { WorldRoom } from "./rooms/WorldRoom.ts";
 import { checkDatabase } from "./db.ts";
+import { onlinePilots } from "./presence.ts";
 import { listaGorda, peekProfile } from "./profiles.ts";
 
 // Build do Vite (client/dist). Em produção o próprio servidor entrega o cliente,
@@ -39,6 +40,12 @@ const server = defineServer({
         console.error("lista-gorda: falha no banco", err);
         res.status(503).json([]);
       }
+    });
+
+    // Quem está jogando agora e onde (o menu e o mapa do co-op mostram).
+    app.get("/api/online", (_req, res) => {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.json(onlinePilots());
     });
 
     // Ficha de um jogador (o menu mostra as calorias dele no rodapé).
