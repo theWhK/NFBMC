@@ -121,6 +121,10 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       if (input) this.controls.set(client.sessionId, input);
     },
     horn: (client: Client) => this.horn(client),
+    pause: (_client: Client, message: { paused?: unknown }) => {
+      // Só sala de um jogador só; com mais gente, o jogo não para.
+      if (this.state.pausable && typeof message?.paused === "boolean") this.state.paused = message.paused;
+    },
     reset: (client: Client) => {
       // Voltar para a pista (quando empaca), no máximo a cada 3 s.
       const player = this.state.players.get(client.sessionId);
@@ -191,7 +195,10 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       food.z = point.z;
       this.state.foods.push(food);
     }
-    this.setSimulationInterval(realTimeSteps((dt) => this.update(dt)));
+    this.state.pausable = this.maxClients === 1;
+    this.setSimulationInterval(realTimeSteps((dt) => {
+      if (!this.state.paused) this.update(dt);
+    }));
   }
 
   onJoin(client: Client, options?: WorldJoinOptions) {

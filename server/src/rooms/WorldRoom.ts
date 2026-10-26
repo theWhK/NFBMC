@@ -134,6 +134,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       this.lastHorn.set(client.sessionId, this.time);
       this.broadcast("horn", { id: client.sessionId }, { except: client });
     },
+    pause: (_client: Client, message: { paused?: unknown }) => {
+      // Só sala de um jogador só; com mais gente, o jogo não para.
+      if (this.state.pausable && typeof message?.paused === "boolean") this.state.paused = message.paused;
+    },
     reset: (client: Client) => {
       // Voltar para a rua (quando empaca), no máximo a cada 3 s.
       const player = this.state.players.get(client.sessionId);
@@ -188,7 +192,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       stand.z = spot.z;
       this.state.stands.push(stand);
     }
-    this.setSimulationInterval(realTimeSteps((dt) => this.update(dt)));
+    this.state.pausable = this.maxClients === 1;
+    this.setSimulationInterval(realTimeSteps((dt) => {
+      if (!this.state.paused) this.update(dt);
+    }));
   }
 
   async onJoin(client: Client, options?: WorldJoinOptions) {

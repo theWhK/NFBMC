@@ -63,6 +63,10 @@ export const RaceState = schema({
   challenge: t.boolean().default(false),
   /** Sala privada de um jogador só, contra bots. */
   solo: t.boolean().default(false),
+  /** Sala de um jogador só (solo, história): quem joga pode pausar o jogo. */
+  pausable: t.boolean().default(false),
+  /** Pausado (mapa, menu de pausa ou F1 abertos): a simulação inteira para. */
+  paused: t.boolean().default(false),
   /** Quantos bots entram na próxima corrida, e em que dificuldade. */
   botCount: t.uint8().default(0),
   difficulty: t.string().default("medio"),
@@ -138,6 +142,10 @@ export type Npc = SchemaType<typeof Npc>;
 export const WorldState = schema({
   /** Mundo só de um jogador. */
   solo: t.boolean().default(false),
+  /** Sala de um jogador só (solo, história): quem joga pode pausar o jogo. */
+  pausable: t.boolean().default(false),
+  /** Pausado (mapa, menu de pausa ou F1 abertos): a simulação inteira para. */
+  paused: t.boolean().default(false),
   players: t.map(WorldPlayer),
   cops: t.map(Cop),
   traffic: t.map(Npc),

@@ -118,6 +118,8 @@ document.addEventListener("visibilitychange", () => {
   keys.clear();
   touchControls.reset();
   sendInput();
+  // Jogando sozinho, sair da aba (ou atender o celular) pausa: volta no menu de pausa.
+  if (mode?.pausable() && !overlayOpen()) openPause();
 });
 
 /** Freio de mão: Espaço no teclado, botão na tela do celular. */
@@ -204,6 +206,9 @@ function setMode(next: WorldMode | RaceMode | null) {
   closeOverlays();
   $("touch").classList.toggle("manual", menu.manual());
   mode = next;
+  pauseRequested = false;
+  // O mapa não mostra o último quadro da sala anterior.
+  lastMapView = null;
   mode?.onHorn(remoteHorn);
   // O foco não fica num botão do menu (o Espaço é o freio de mão).
   (document.activeElement as HTMLElement | null)?.blur?.();
@@ -403,11 +408,37 @@ const fullMapEl = $("fullmap");
 const help = $("help");
 const overlayOpen = () => !pause.hidden || !fullMapEl.hidden || !help.hidden;
 
+/**
+ * Pausa de verdade (a simulação para no servidor) com a pausa, o mapa ou a
+ * lista de comandos abertos. Só nas salas de um jogador só (modo solo e
+ * história); com a galera, o servidor ignora e o jogo segue.
+ */
+let pauseRequested = false;
+function pauseGame(on: boolean) {
+  if (!mode || on === pauseRequested) return;
+  pauseRequested = on;
+  try {
+    mode.sendPause(on);
+  } catch {
+    // Sala já fechando: nada a pausar.
+  }
+}
+
+/** Avisos de "pausado" / "o jogo continua" na pausa e no mapa. */
+function refreshPauseNotes() {
+  const pausable = !!mode?.pausable();
+  $("pause-note").textContent = pausable
+    ? "Jogo pausado."
+    : "O jogo continua rodando para a galera enquanto este menu está aberto.";
+  $("map-paused").hidden = !pausable;
+}
+
 function openHelp() {
   pause.hidden = true;
   fullMapEl.hidden = true;
   help.hidden = false;
   releaseControls();
+  pauseGame(true);
   $<HTMLButtonElement>("help-close").focus();
 }
 
@@ -456,23 +487,36 @@ function openPause() {
   fullMapEl.hidden = true;
   pause.hidden = false;
   refreshPauseLabels();
+  refreshPauseNotes();
   releaseControls();
+  pauseGame(true);
   $<HTMLButtonElement>("pause-resume").focus();
 }
 
+/** O mapa abriu antes do primeiro quadro do minimapa (logo ao entrar): centraliza quando o carro aparecer. */
+let mapNeedsFocus = false;
+
+function focusMapOnMe() {
+  const me = lastMapView?.cars.get(lastMapView.myId);
+  mapNeedsFocus = !me;
+  if (me) fullMap.focus(me.x, me.z);
+}
+
 function openMap() {
-  if (!mode || !lastMapView) return;
+  if (!mode) return;
   pause.hidden = true;
   fullMapEl.hidden = false;
-  const me = lastMapView.cars.get(lastMapView.myId);
-  fullMap.focus(me?.x ?? 0, me?.z ?? 0);
+  focusMapOnMe();
+  refreshPauseNotes();
   releaseControls();
+  pauseGame(true);
 }
 
 function closeOverlays() {
   pause.hidden = true;
   fullMapEl.hidden = true;
   help.hidden = true;
+  pauseGame(false);
 }
 
 $("to-menu").addEventListener("click", openPause);
@@ -570,8 +614,10 @@ window.addEventListener("blur", () => {
 // --- Laço de desenho -------------------------------------------------------
 
 function frame() {
+  if (scene) scene.paused = !!mode?.paused();
   if (mode) mode.frame();
   else scene?.render(new Map(), undefined);
+  if (!fullMapEl.hidden && mapNeedsFocus) focusMapOnMe();
   if (!fullMapEl.hidden && lastMapView) fullMap.draw(lastMapView);
   requestAnimationFrame(frame);
 }
@@ -702,6 +748,7 @@ function publishTestHook() {
     mode: () => (current instanceof WorldMode ? "world" : "race"),
     raceId: () => (current instanceof RaceMode ? current.raceId : null),
     phase: () => (current instanceof RaceMode ? current.phase() : "lobby"),
+    paused: () => current.paused(),
     players: () => current.snapshot(),
     police: () => (current instanceof WorldMode ? current.policeSnapshot() : null),
     send: (type: string, message: unknown) => {
@@ -717,6 +764,7 @@ declare global {
       mode: () => "world" | "race";
       raceId: () => RaceId | null;
       phase: () => Phase;
+      paused: () => boolean;
       players: () => Record<string, PlayerSnapshot>;
       police: () => {
         heat: number;

@@ -211,7 +211,7 @@
     <!-- Menu de pausa (o jogo continua rodando por trás: é multiplayer). -->
     <div id="pause" class="pause" data-testid="pause" hidden>
       <h2>Pausa</h2>
-      <p class="hint">O jogo continua rodando para a galera enquanto este menu está aberto.</p>
+      <p class="hint" id="pause-note" data-testid="pause-note">O jogo continua rodando para a galera enquanto este menu está aberto.</p>
       <div class="mw-list sub">
         <button type="button" id="pause-resume" data-testid="pause-resume">Continuar</button>
         <button type="button" id="pause-map" data-testid="pause-map">Mapa da cidade</button>
@@ -264,6 +264,7 @@
         <span>🏁 Corridas</span>
         <span>🍔 Comida</span>
         <span><i class="cop"></i>Vigilância</span>
+        <span id="map-paused" class="paused" data-testid="map-paused" hidden>⏸ Jogo pausado</span>
         <span class="hint">M / Esc fecha · roda do mouse ou pinça dá zoom · arraste para mover</span>
       </div>
       <!-- Co-op: quem está online e o desafio para um pega (client/src/coop.ts). -->
