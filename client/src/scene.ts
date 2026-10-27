@@ -165,12 +165,14 @@ function makeMarker(id: RaceId) {
  * Qualidade gráfica: a escolhida nas Opções ou, sem escolha, automática
  * (sem placa de vídeo → baixa; celular → média; computador → alta).
  */
-function chooseQuality(renderer: THREE.WebGLRenderer): Quality {
-  let saved: string | null = null;
-  try {
-    saved = localStorage.getItem("nfbmc:quality");
-  } catch {
-    // Sem localStorage: automática.
+function chooseQuality(renderer: THREE.WebGLRenderer, choice?: string): Quality {
+  let saved: string | null = choice ?? null;
+  if (choice === undefined) {
+    try {
+      saved = localStorage.getItem("nfbmc:quality");
+    } catch {
+      // Sem localStorage: automática.
+    }
   }
   if (saved === "alto" || saved === "medio" || saved === "baixo") return saved;
   if (isSoftwareRenderer(renderer)) return "baixo";
@@ -203,7 +205,7 @@ export class GameScene {
   private markers: THREE.Group;
   private light: THREE.DirectionalLight;
   private clouds: THREE.Object3D;
-  readonly quality: Quality;
+  quality: Quality;
   private ink: InkPass | null = null;
   private sunDirection = SUN_DIRECTION;
   /** Carro de vitrine do menu (girando na reta do autódromo). */
@@ -263,6 +265,34 @@ export class GameScene {
     this.camera.position.set(0, 60, -160);
     this.resize();
     window.addEventListener("resize", () => this.resize());
+  }
+
+  /**
+   * Troca a qualidade na hora (Opções), sem recarregar a página: antes a
+   * página recarregava e a abertura inteira tocava de novo a cada clique.
+   * `choice` vazio = automática.
+   */
+  setQuality(choice: string) {
+    const next = chooseQuality(this.renderer, choice);
+    if (next === this.quality) return next;
+    this.quality = next;
+    if (next === "baixo") this.ink = null;
+    else if (!this.ink) {
+      this.ink = new InkPass(this.renderer);
+      this.resize();
+    }
+    if (next === "alto") this.enableShadows();
+    else {
+      this.renderer.shadowMap.enabled = false;
+      this.light.castShadow = false;
+    }
+    // Ligar/desligar sombra muda o shader dos materiais: recompila.
+    this.scene.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) material.needsUpdate = true;
+    });
+    return next;
   }
 
   private enableShadows() {
@@ -565,12 +595,8 @@ export class GameScene {
       const center = this.showcase.model.group.position;
       const angle = this.time * 0.25;
       this.camera.position.set(center.x + Math.sin(angle) * 8.5, 2.6, center.z + Math.cos(angle) * 8.5);
-      // Mira um pouco à esquerda do carro, para ele aparecer à direita da tela
-      // (a lista do menu fica à esquerda, como no jogo original).
-      const fx = center.x - this.camera.position.x;
-      const fz = center.z - this.camera.position.z;
-      const len = Math.hypot(fx, fz) || 1;
-      this.cameraTarget.set(center.x + (fz / len) * 4.6, 1.1, center.z - (fx / len) * 4.6);
+      // Carro no meio da tela, um pouco acima do carrossel do menu (que fica embaixo).
+      this.cameraTarget.set(center.x, -0.6, center.z);
       this.camera.fov = 50;
       this.camera.updateProjectionMatrix();
       for (const wheel of this.showcase.model.wheels) wheel.rotation.x = 0;

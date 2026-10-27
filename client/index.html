@@ -29,14 +29,14 @@
 
       <!-- Lista principal, à esquerda (como no menu do Most Wanted de 2005). -->
       <nav id="menu-list" class="mw-list" aria-label="Menu principal">
-        <button type="button" data-screen="story" data-testid="story-menu" data-hint="Recupere o seu M3 Gorgonzola: suba a Lista Gorda do #10 ao #1 e derrote o Bruno.">Modo história</button>
-        <button type="button" id="world" data-testid="world-button" data-hint="Porto Gordo com a galera: veja no mapa (M) quem está online e desafie para um pega, coma tudo e corra nos pontos de encontro.">Co-op <span class="online-badge" id="online-badge" data-testid="online-badge" hidden></span></button>
-        <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="A cidade inteira só para você (e para a Vigilância Sanitária).">Modo solo</button>
-        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida no autódromo, sem passar pela cidade.">Corrida rápida</button>
-        <button type="button" data-screen="lista" data-testid="lista-menu" data-hint="Os rivais mais calóricos de Porto Gordo e o placar de todos os tempos.">Lista Gorda</button>
-        <button type="button" data-screen="garage" data-testid="garage-menu" data-hint="Escolha a cor do seu carrinho de lanche.">Garagem</button>
-        <button type="button" data-screen="options" data-testid="options-menu" data-hint="Som, música e seu apelido de piloto.">Opções</button>
-        <button type="button" data-screen="credits" data-hint="Quem fez esta bagunça.">Créditos</button>
+        <button type="button" data-screen="story" data-testid="story-menu" data-hint="Recupere o seu M3 Gorgonzola: suba a Lista Gorda do #10 ao #1 e derrote o Bruno."><span class="icon" aria-hidden="true">📋</span><span class="label">Modo história</span></button>
+        <button type="button" id="world" data-testid="world-button" data-hint="Porto Gordo com a galera: veja no mapa (M) quem está online e desafie para um pega, coma tudo e corra nos pontos de encontro."><span class="icon" aria-hidden="true">👥</span><span class="label">Co-op</span> <span class="online-badge" id="online-badge" data-testid="online-badge" hidden></span></button>
+        <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="A cidade inteira só para você (e para a Vigilância Sanitária)."><span class="icon" aria-hidden="true">🚗</span><span class="label">Modo solo</span></button>
+        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida no autódromo, sem passar pela cidade."><span class="icon" aria-hidden="true">🏁</span><span class="label">Corrida rápida</span></button>
+        <button type="button" data-screen="lista" data-testid="lista-menu" data-hint="Os rivais mais calóricos de Porto Gordo e o placar de todos os tempos."><span class="icon" aria-hidden="true">🏆</span><span class="label">Lista Gorda</span></button>
+        <button type="button" data-screen="garage" data-testid="garage-menu" data-hint="Escolha a cor do seu carrinho de lanche."><span class="icon" aria-hidden="true">🔧</span><span class="label">Garagem</span></button>
+        <button type="button" data-screen="options" data-testid="options-menu" data-hint="Som, música e seu apelido de piloto."><span class="icon" aria-hidden="true">⚙️</span><span class="label">Opções</span></button>
+        <button type="button" data-screen="credits" data-hint="Quem fez esta bagunça."><span class="icon" aria-hidden="true">🎬</span><span class="label">Créditos</span></button>
       </nav>
 
       <!-- Telas que abrem ao lado da lista. -->
@@ -110,7 +110,8 @@
           <input id="name" data-testid="name-input" maxlength="16" autocomplete="off" placeholder="seu apelido" />
         </label>
         <span id="profile-kcal" class="kcal"></span>
-        <span class="keys">↑↓ navegar · Enter selecionar · Esc voltar</span>
+        <div class="ticker" aria-hidden="true"><span id="menu-ticker"></span></div>
+        <span class="keys">←→ navegar · Enter selecionar · Esc voltar</span>
       </footer>
     </div>
 
