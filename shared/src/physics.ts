@@ -89,14 +89,16 @@ const STEER_UP = 6;
 const STEER_BACK = 11;
 /**
  * Aderência lateral máxima (m/s²): em alta, o giro do carro fica limitado por
- * ela (antes, a 150 km/h o carro virava com 6 g e ficava arisco demais).
- * É arcade: ~3 g, bem mais que um carro de rua.
+ * ela (sem limite, a 150 km/h o carro virava com 6 g e ficava arisco demais).
+ * É arcade: ~5 g, bem mais que um carro de rua, para as esquinas da cidade
+ * caberem sem frear quase até parar. Calibrado com um "piloto de teclado"
+ * simulado (setas tudo-ou-nada, 0,15 s de atraso, entrando rápido demais).
  */
-const LATERAL_GRIP = 32;
+const LATERAL_GRIP = 50;
 /** Com o freio de mão, a traseira solta e o carro gira bem mais. */
 const HANDBRAKE_GRIP = 55;
-/** Freio de jogo: mais forte que o de verdade, para dar para frear perto da esquina. */
-const BRAKE_GAIN = 1.5;
+/** Freio de jogo: bem mais forte que o de verdade (~2 g), para dar para frear perto da esquina. */
+const BRAKE_GAIN = 2.3;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
@@ -243,7 +245,7 @@ export function stepCar(
   const oldHeading = car.heading;
   car.heading -= yaw * dt;
   // Curva forte "arrasta" os pneus: o carro perde um pouco de velocidade (ajuda a entrar na curva).
-  const scrub = Math.abs(yaw * car.speed) * 0.035 * dt;
+  const scrub = Math.abs(yaw * car.speed) * 0.06 * dt;
   car.speed = Math.abs(car.speed) <= scrub ? 0 : car.speed - Math.sign(car.speed) * scrub;
 
   if (motion) {
