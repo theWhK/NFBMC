@@ -7,6 +7,8 @@ import {
   pointOnTrack,
   RACE_IDS,
   carSpec,
+  heightAt,
+  slopeAt,
   isOnRoad,
   rampSteer,
   yawRate,
@@ -66,6 +68,8 @@ interface CarEntry {
   receivedAt: number;
   /** Volante previsto do próprio carro (o mesmo `rampSteer` do servidor). */
   steer: number;
+  /** Altura do chão embaixo do carro (relevo). */
+  y: number;
 }
 
 /** O que a cena sabe do carro seguido pela câmera, para os sons. */
@@ -149,7 +153,7 @@ function makeMarker(id: RaceId) {
   const label = markerLabel(race.name, `${race.laps} voltas · ${km} km`);
   label.position.y = 22;
   group.add(label);
-  group.position.set(spot.x, 0, spot.z);
+  group.position.set(spot.x, heightAt(spot.x, spot.z), spot.z);
   return group;
 }
 
@@ -385,7 +389,7 @@ export class GameScene {
         model.group.rotation.order = "YXZ";
         entry = {
           model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false,
-          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0,
+          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0, y: heightAt(car.x, car.z),
         };
         this.scene.add(model.group);
         this.cars.set(id, entry);
@@ -484,9 +488,13 @@ export class GameScene {
 
       const { group, flame, wheels } = entry.model;
       group.visible = car.visible;
-      group.position.set(entry.x, 0, entry.z);
-      group.rotation.y = entry.heading;
-      group.rotation.z = entry.lean;
+      // No morro, o carro sobe e desce com o chão e inclina junto (frente/trás e de lado).
+      const [sx, sz] = slopeAt(entry.x, entry.z);
+      const fx = Math.sin(entry.heading);
+      const fz = Math.cos(entry.heading);
+      entry.y = heightAt(entry.x, entry.z);
+      group.position.set(entry.x, entry.y, entry.z);
+      group.rotation.set(-Math.atan(sx * fx + sz * fz), entry.heading, entry.lean + Math.atan(sx * fz - sz * fx), "YXZ");
       for (const wheel of wheels) wheel.rotation.x += (car.speed * dt) / 0.45;
       if (entry.model.lights) {
         // Giroflex: vermelho e azul alternando rápido.
@@ -508,7 +516,7 @@ export class GameScene {
 
     this.foods.forEach((food, i) => {
       food.rotation.y = this.time * 2 + i;
-      food.position.y = 0.6 + Math.sin(this.time * 3 + i) * 0.3;
+      food.position.y = heightAt(food.position.x, food.position.z) + 0.6 + Math.sin(this.time * 3 + i) * 0.3;
     });
     if (this.markers.visible) {
       // A coluna pulsa de longe e some quando a câmera chega perto (de dentro dela, a
@@ -530,11 +538,15 @@ export class GameScene {
       const forwardX = Math.sin(followed.heading);
       const forwardZ = Math.cos(followed.heading);
       const view = CAMERAS[this.cameraMode];
-      const desired = new THREE.Vector3(followed.x - forwardX * view.back, view.height, followed.z - forwardZ * view.back);
+      // A câmera acompanha a altura do carro (e não entra no morro atrás dele numa subida).
+      const camX = followed.x - forwardX * view.back;
+      const camZ = followed.z - forwardZ * view.back;
+      const camHeight = Math.max(followed.y, heightAt(camX, camZ) + 1);
+      const desired = new THREE.Vector3(camX, camHeight + view.height, camZ);
       // No capô a câmera vai presa ao carro; nas outras, ela vem atrás com um pouco de atraso.
       if (view.back < 0) this.camera.position.copy(desired);
       else this.camera.position.lerp(desired, 1 - Math.exp(-6 * dt));
-      this.cameraTarget.set(followed.x + forwardX * view.ahead, view.lookHeight, followed.z + forwardZ * view.ahead);
+      this.cameraTarget.set(followed.x + forwardX * view.ahead, followed.y + view.lookHeight, followed.z + forwardZ * view.ahead);
       followed.model.group.visible = view.showCar && followedCar.visible;
       // Com turbo a lente abre e a câmera treme, para dar sensação de velocidade.
       const boosting = followedCar.boost > 0;

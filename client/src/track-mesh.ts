@@ -3,7 +3,7 @@
 import * as THREE from "three";
 
 import { makeFlag } from "./flag.ts";
-import type { Track } from "@nfbmc/shared";
+import { heightAt, type Track } from "@nfbmc/shared";
 
 /** Faixa ao longo da pista, entre `inner` e `outer` metros do centro (negativo = lado direito). */
 function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?: (i: number) => THREE.Color) {
@@ -14,8 +14,12 @@ function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?:
   for (let i = 0; i <= samples.length; i++) {
     const s = samples[i % samples.length];
     // Esquerda de quem corre: (tz, -tx).
-    positions.push(s.x + s.tz * inner, y, s.z - s.tx * inner);
-    positions.push(s.x + s.tz * outer, y, s.z - s.tx * outer);
+    // Acompanha o relevo.
+    const ix = s.x + s.tz * inner;
+    const iz = s.z - s.tx * inner;
+    const ox = s.x + s.tz * outer;
+    const oz = s.z - s.tx * outer;
+    positions.push(ix, heightAt(ix, iz) + y, iz, ox, heightAt(ox, oz) + y, oz);
     if (colorAt) {
       const c = colorAt(i);
       colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
@@ -76,7 +80,8 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
   line.rotation.x = -Math.PI / 2;
   // Com o plano deitado, o eixo X dele vira (cos, 0, -sin) do ângulo: igual ao pórtico, atravessando a pista.
   line.rotation.z = heading;
-  line.position.set(start.x, 0.13, start.z);
+  // Um pouco mais alta: na ladeira, o meio da linha não pode afundar no asfalto.
+  line.position.set(start.x, heightAt(start.x, start.z) + 0.25, start.z);
   group.add(line);
 
   // Pórtico de largada: duas colunas e uma faixa em cima.
@@ -94,7 +99,7 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
     gate.add(flag);
   }
   gate.rotation.y = heading;
-  gate.position.set(start.x, 0, start.z);
+  gate.position.set(start.x, heightAt(start.x, start.z), start.z);
   group.add(gate);
 
   return group;

@@ -27,13 +27,16 @@ test("pausa e mapa: no modo solo Esc e o mapa pausam o jogo de verdade, Tab abre
   // Resumo ao lado da pausa.
   await expect(page.getByTestId("pause-card")).toContainText("Modo solo");
 
-  // Continuar: 3, 2, 1 (ainda parado) e o jogo volta; sem acelerador, o carro vai perdendo velocidade.
+  // Continuar: 3, 2, 1 (ainda parado) e o jogo volta; freando, o carro perde velocidade
+  // (só soltar o acelerador não basta: numa descida o carro embala).
   await page.getByTestId("pause-resume").click();
   await expect(page.getByTestId("resume-count")).toBeVisible();
   expect(await paused()).toBe(true);
   await expect.poll(paused).toBe(false);
   await expect(page.getByTestId("resume-count")).toBeHidden();
+  await page.keyboard.down("ArrowDown");
   await expect.poll(async () => (await me()).speed, { timeout: 10_000 }).toBeLessThan(atPause.speed / 2);
+  await page.keyboard.up("ArrowDown");
 
   // O mapa também pausa (e avisa na legenda).
   await page.keyboard.press("KeyM");
@@ -110,7 +113,12 @@ test("pausa: na corrida solo os bots param junto; com a galera o jogo continua",
   await expect(other.getByTestId("pause-note")).toContainText("continua rodando");
   const speed = () => other.evaluate(() => Object.values(window.__nfbmc!.players()).find((p) => p.name === "Ana")!.speed);
   const atPause = await speed();
-  await expect.poll(speed, { timeout: 10_000 }).toBeLessThan(atPause / 2);
+  // Com a pausa aberta não dá para dirigir: o carro segue andando sem acelerador e,
+  // no plano, perde velocidade. Mede pela posição (numa descida ele embala).
+  const where = () => other.evaluate(() => { const p = Object.values(window.__nfbmc!.players()).find((p) => p.name === "Ana")!; return [p.x, p.z]; });
+  const from = await where();
+  await expect.poll(async () => { const [x, z] = await where(); return Math.hypot(x - from[0], z - from[1]); }, { timeout: 10_000 }).toBeGreaterThan(3);
+  expect(atPause).toBeGreaterThan(1);
   expect(await other.evaluate(() => window.__nfbmc!.paused())).toBe(false);
   await coop.close();
 });
