@@ -254,14 +254,33 @@ export function stepCar(
       motion.vx += (Math.sin(oldHeading) - Math.sin(car.heading)) * car.speed * keep;
       motion.vz += (Math.cos(oldHeading) - Math.cos(car.heading)) * car.speed * keep;
     }
-    // Empurrão lateral e giro (batidas, drift): os pneus vão segurando.
-    car.heading += motion.spin * dt;
+    // Giro de batida: o carro roda, mas o movimento não roda junto (antes, a
+    // velocidade inteira acompanhava o bico e o carro saía disparado para onde
+    // apontasse). O que deixa de estar na direção do bico vira escorregada de lado.
+    if (motion.spin !== 0) {
+      const vx = Math.sin(car.heading) * car.speed + motion.vx;
+      const vz = Math.cos(car.heading) * car.speed + motion.vz;
+      car.heading += motion.spin * dt;
+      car.speed = vx * Math.sin(car.heading) + vz * Math.cos(car.heading);
+      motion.vx = vx - Math.sin(car.heading) * car.speed;
+      motion.vz = vz - Math.cos(car.heading) * car.speed;
+    }
     car.x += motion.vx * dt;
     car.z += motion.vz * dt;
-    const tireGrip = Math.exp(-(handbrake ? 1.2 : onGrass ? 2.5 : 4) * dt);
-    motion.vx *= tireGrip;
-    motion.vz *= tireGrip;
-    motion.spin *= Math.exp(-5 * dt);
+    if (handbrake) {
+      // Drift: a traseira solta segura pouco (a escorregada dura).
+      const grip = Math.exp(-1.2 * dt);
+      motion.vx *= grip;
+      motion.vz *= grip;
+    } else {
+      // Pneu escorregando de lado freia como pneu de verdade (~1 g no asfalto,
+      // menos na grama), em vez de parar de uma vez.
+      const sliding = Math.hypot(motion.vx, motion.vz);
+      const left = sliding > 0 ? (Math.max(0, sliding - (onGrass ? 6 : 10) * dt) * Math.exp(-1.5 * dt)) / sliding : 0;
+      motion.vx *= left;
+      motion.vz *= left;
+    }
+    motion.spin *= Math.exp(-4 * dt);
   }
   car.heading = Math.atan2(Math.sin(car.heading), Math.cos(car.heading));
 
