@@ -177,7 +177,11 @@ const CARS_LIST: CarSpec[] = [
   },
 ];
 
-/** Viaturas da Vigilância Sanitária: uma comum e a "tática" dos níveis altos. */
+/**
+ * Viaturas da Vigilância Sanitária: uma comum, a "tática" dos níveis altos e o
+ * Couve-vette do Sargento Cross-fit (modo história), mais rápido que a tática
+ * mas, por pouco, mais lento que o M3 Gorgonzola na reta.
+ */
 const COP_CARS: CarSpec[] = [
   {
     id: "viatura", name: "Viatura Opala", inspired: "Chevrolet Opala (viatura)", category: "muscle", body: "opala",
@@ -189,7 +193,16 @@ const COP_CARS: CarSpec[] = [
     food: "", color: "#f4f4f0", mass: 1550, torque: 700, peakRpm: 5000, idleRpm: 900, redline: 8000,
     gears: [2.94, 2.06, 1.52, 1.21, 1.0, 0.86], finalDrive: 3.54, wheelRadius: 0.35, dragArea: 0.62, brake: 11.5, turn: 2.45, understeer: 0.3,
   },
+  {
+    id: "viatura-crossfit", name: "Couve-vette Detox", inspired: "Chevrolet Corvette Z06 (viatura)", category: "super", body: "muscle",
+    food: "Suco verde no radiador, couve no para-choque e um halter no teto. Zero carboidrato, zero piedade.",
+    color: "#1f3d24", mass: 1420, torque: 640, peakRpm: 4800, idleRpm: 900, redline: 7100,
+    gears: [2.97, 2.07, 1.43, 1.0, 0.84, 0.71], finalDrive: 3.42, wheelRadius: 0.34, dragArea: 0.66, brake: 12, turn: 2.5, understeer: 0.25,
+  },
 ];
+
+/** Viatura do Sargento Cross-fit (modo história). */
+export const CROSSFIT_CAR = "viatura-crossfit";
 
 export const CARS: Record<string, CarSpec> = Object.fromEntries([...CARS_LIST, ...COP_CARS].map((c) => [c.id, c]));
 /** Carros que os jogadores podem escolher, do mais fraco ao mais forte. */

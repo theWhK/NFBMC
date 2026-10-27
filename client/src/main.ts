@@ -2,18 +2,30 @@ import "@fontsource/russo-one/latin-400.css";
 import "@fontsource/black-ops-one/latin-400.css";
 
 import {
+  CROSSFIT,
+  CROSSFIT_RADIO,
   EPILOGUE,
+  FINALE_BRIDGE,
+  FINALE_BUSTED,
+  FINALE_ESCAPE,
+  FINALE_INTRO,
+  HERO_CAR,
   PROLOGUE,
   carSpec,
+  crossfitJoinsAt,
   currentRival,
+  finalePending,
   isRaceId,
   type GoRaceMessage,
   type InputMessage,
   type Phase,
+  type CineShot,
+  type ComicPanel,
   type RaceId,
 } from "@nfbmc/shared";
 
 import { Sound } from "./audio.ts";
+import { makeBridge, playStory, showRadio, type Cast } from "./cinematic.ts";
 import { createFullMap, createMinimap, createTacho, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
 import { LOGO_SVG } from "./logo.ts";
@@ -21,7 +33,7 @@ import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import { createMenu, type MenuEntry } from "./menu.ts";
 import { joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
 import { RaceMode, type RaceFinish } from "./race-mode.ts";
-import { StoryTracker, loadStory, playComic, renderObjective, renderStoryScreen, showRivalIntro } from "./story.ts";
+import { StoryTracker, loadStory, renderObjective, renderStoryScreen, showRivalIntro } from "./story.ts";
 import { bindTouchControls, isPortrait, isTouchDevice, requestLandscape } from "./touch.ts";
 import { GameScene } from "./scene.ts";
 import { $, hideModeUi, showPopup, ui } from "./ui.ts";
@@ -207,6 +219,8 @@ function setMode(next: WorldMode | RaceMode | null) {
   $("touch").classList.toggle("manual", menu.manual());
   mode = next;
   pauseRequested = false;
+  // A ponte do Cais (com a coluna de luz) só aparece durante a fuga final.
+  showBridge(finaleRun && !!next);
   // O mapa não mostra o último quadro da sala anterior.
   lastMapView = null;
   mode?.onHorn(remoteHorn);
@@ -220,14 +234,74 @@ function setMode(next: WorldMode | RaceMode | null) {
 
 /** Nome, cor, carro e câmbio escolhidos no menu: vão junto ao entrar em qualquer sala. */
 function carOptions() {
-  // No modo história, o carro é o escolhido entre os liberados na carreira.
-  return { name: playerName, color: menu.color(), car: storyMode ? story.story.car : menu.car(), manual: menu.manual() };
+  // No modo história, o carro é o escolhido entre os liberados na carreira (na fuga final, o M3).
+  const car = finaleRun ? HERO_CAR : storyMode ? story.story.car : menu.car();
+  return { name: playerName, color: menu.color(), car, manual: menu.manual() };
 }
 
 // --- Modo história ---------------------------------------------------------
 
 const story = new StoryTracker(loadStory());
 let storyMode = false;
+/** Fuga final (depois do Bruno): Porto Gordo inteiro atrás de você, até a ponte do Cais. */
+let finaleRun = false;
+
+/** Quem aparece nas cinemáticas: o seu carro da carreira (ou o M3, no prólogo e no final). */
+function storyCast(hero = story.story.car, rival?: string): Cast {
+  return { hero, heroColor: hero === HERO_CAR ? carSpec(HERO_CAR).color : menu.color(), rival };
+}
+const heroCast = () => storyCast(HERO_CAR);
+
+/** Som das cinemáticas: sirene nas cenas com a Vigilância, música de perseguição na fuga. */
+const SIREN_SHOTS = new Set<CineShot>(["sirene", "cerco", "radio", "fuga", "beira"]);
+function cineSound(shot: CineShot | null) {
+  sound.updateSiren(shot && SIREN_SHOTS.has(shot) ? (shot === "radio" || shot === "beira" ? 45 : 15) : null);
+  if (shot === "fuga") sound.song("pursuit");
+  else if (shot === "ponte") sound.whoosh();
+  else if (shot === null && !mode) sound.song("lobby");
+}
+
+/** Toca um trecho do roteiro (cinemática 3D com WebGL, quadrinhos sem) e devolve a vitrine do menu. */
+async function playStoryScene(panels: ComicPanel[], cast = storyCast()) {
+  await playStory(panels, scene, cast, { onShot: cineSound });
+  if (!mode) scene?.setShowcase(menu.color(), story.story.car);
+}
+
+/** Recado do Cross-fit pelo rádio (perseguições do modo história). */
+function crossfitRadio(event: keyof typeof CROSSFIT_RADIO) {
+  const lines = CROSSFIT_RADIO[event];
+  showRadio(CROSSFIT, lines[Math.floor(Math.random() * lines.length)]);
+}
+
+/** A ponte inacabada do Cais na cidade, com a coluna de luz verde (fuga final). */
+let bridge: ReturnType<typeof makeBridge> | null = null;
+function showBridge(on: boolean) {
+  if (!scene || on === !!bridge) return;
+  if (on) {
+    bridge = makeBridge(true);
+    scene.addProp(bridge);
+  } else if (bridge) {
+    scene.removeProp(bridge);
+    bridge = null;
+  }
+}
+
+/** Fim da fuga final: chegou na ponte (salto, epílogo) ou foi autuado (dá para tentar de novo). */
+async function finaleOver(escaped: boolean) {
+  if (!finaleRun) return;
+  finaleRun = false;
+  // Deixa a faixa "A ponte!" / "Autuado!" aparecer antes de cortar para a cena.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await returnToMenu();
+  if (escaped) {
+    story.finishFinale();
+    await playStoryScene(FINALE_ESCAPE, heroCast());
+    await playStoryScene(EPILOGUE, heroCast());
+  } else {
+    await playStoryScene(FINALE_BUSTED, heroCast());
+  }
+  renderStoryScreen(story.story);
+}
 
 /** Desafio liberado: avisa com destaque. */
 function announceReady(ready: boolean) {
@@ -252,6 +326,14 @@ const storyHooks = () => storyMode ? {
   onEscape: (stars: number, bonus: number) => {
     announceReady(story.addBounty(bonus) || story.addEscape(stars));
     renderObjective(story.story);
+  },
+  onPursuit: (event: "start" | "crossfit" | "escaped" | "busted", finale: boolean) => {
+    // O Cross-fit comenta a perseguição pelo rádio.
+    if (!finale) crossfitRadio(event);
+    if (finale) void finaleOver(event === "escaped");
+  },
+  onFrame: (me: { x: number; z: number }) => {
+    if (finaleRun) renderObjective(story.story, Math.hypot(me.x - FINALE_BRIDGE.x, me.z - FINALE_BRIDGE.z));
   },
 } : {};
 
@@ -295,8 +377,16 @@ function duelFinished(result: RaceFinish) {
     $("duel-result").hidden = true;
     await returnToMenu();
     if (won) {
-      await playComic(rival.defeat);
-      if (rival.rank === 1) await playComic(EPILOGUE);
+      await playStoryScene(rival.defeat);
+      if (rival.rank === 1) {
+        // Venceu o Bruno: o M3 volta, o Cross-fit fecha a cidade e começa a fuga final.
+        await playStoryScene(FINALE_INTRO, heroCast());
+        renderStoryScreen(story.story);
+        enter("finale");
+        return;
+      }
+      // Entre um rival e outro: o Cross-fit no rádio, a Mia...
+      await playStoryScene(rival.interlude ?? []);
       renderStoryScreen(story.story);
     }
   };
@@ -307,6 +397,7 @@ async function returnToMenu() {
   if (switching) return;
   switching = true;
   const room = mode?.room as { leave: () => Promise<unknown> } | undefined;
+  finaleRun = false;
   setMode(null);
   storyMode = false;
   try {
@@ -317,6 +408,7 @@ async function returnToMenu() {
   switching = false;
   ui.join.hidden = false;
   ui.minimap.hidden = true;
+  ui.dash.hidden = true;
   $("story-objective").hidden = true;
   renderStoryScreen(story.story);
   menu.show();
@@ -330,7 +422,11 @@ function setLoading(text: string | null) {
 }
 
 async function enterWorld(spawn?: RaceId) {
-  const room = await joinWorld({ ...carOptions(), token, solo: soloWorld, spawn, story: storyMode });
+  const room = await joinWorld({
+    ...carOptions(), token, solo: soloWorld, spawn, story: storyMode,
+    // Modo história: o Cross-fit entra nas perseguições conforme a carreira (e na fuga final, desde o começo).
+    ...(storyMode && { crossfit: crossfitJoinsAt(story.story), finale: finaleRun }),
+  });
   room.onLeave(() => {
     if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
   });
@@ -338,7 +434,7 @@ async function enterWorld(spawn?: RaceId) {
     token = newToken;
     storage.set("nfbmc:token", newToken);
   }, storyHooks()));
-  if (storyMode) renderObjective(story.story);
+  if (storyMode) renderObjective(story.story, finaleRun ? Math.hypot(FINALE_BRIDGE.x, FINALE_BRIDGE.z) : undefined);
 }
 
 /** O mundo chamou para uma corrida: sai do mundo e entra na sala dela. */
@@ -628,8 +724,13 @@ frame();
 async function start(entry: MenuEntry) {
   // Saiu do menu: a vitrine sai de cena (no duelo, só depois da apresentação do rival).
   if (entry !== "challenge") scene?.setShowcase(null);
-  storyMode = entry === "story" || entry === "challenge";
-  if (entry === "challenge") {
+  storyMode = entry === "story" || entry === "challenge" || entry === "finale";
+  finaleRun = entry === "finale";
+  if (entry === "finale") {
+    // Fuga final: Porto Gordo só seu, nível máximo, Cross-fit e todas as viaturas atrás.
+    soloWorld = true;
+    await enterWorld();
+  } else if (entry === "challenge") {
     // Duelo: apresentação do rival, a provocação dele e a corrida 1x1.
     const rival = currentRival(story.story);
     if (!rival) return;
@@ -638,7 +739,11 @@ async function start(entry: MenuEntry) {
       onStart: () => scene?.setShowcase(carSpec(rival.car).color, rival.car),
       onEnd: () => scene?.setShowcase(null),
     });
-    await playComic(rival.taunt);
+    // A provocação: com 3D, o carro do rival esquentando os pneus e os dois lado a lado.
+    await playStoryScene(
+      rival.taunt.map((p) => ({ ...p, shot: p.shot ?? (p.speaker === "Você" ? "duelo" : "rival") })),
+      storyCast(story.story.car, rival.car),
+    );
     const room = await joinQuickRace({
       ...carOptions(), raceId: rival.race, rival: { name: rival.name, car: rival.car, skill: rival.skill },
     }, true);
@@ -698,7 +803,7 @@ const menu = createMenu({
   onScreen: (id) => {
     if (id !== "story") return;
     renderStoryScreen(story.story);
-    if (!story.story.seenPrologue) void playComic(PROLOGUE).then(() => story.markPrologueSeen());
+    if (!story.story.seenPrologue) void playStoryScene(PROLOGUE, heroCast()).then(() => story.markPrologueSeen());
   },
 });
 
@@ -727,8 +832,9 @@ if (introParam === "1" || (introParam !== "0" && !navigator.webdriver && introEn
 $("credits-intro").addEventListener("click", () => void runIntro());
 
 $("story-go").addEventListener("click", () => enter("story"));
-$("story-challenge").addEventListener("click", () => enter("challenge"));
-$("story-prologue").addEventListener("click", () => void playComic(PROLOGUE));
+// Depois do Bruno, o mesmo botão leva para a fuga final.
+$("story-challenge").addEventListener("click", () => enter(finalePending(story.story) ? "finale" : "challenge"));
+$("story-prologue").addEventListener("click", () => void playStoryScene(PROLOGUE, heroCast()));
 $("story-car").addEventListener("click", () => {
   // Alterna entre os carros liberados na carreira (e mostra na vitrine).
   const cars = story.story.unlocked;
@@ -769,7 +875,7 @@ declare global {
       police: () => {
         heat: number;
         chased: boolean;
-        cops: { x: number; z: number; target: string }[];
+        cops: { x: number; z: number; target: string; car: string }[];
         traffic: { x: number; z: number; speed: number; kind: string }[];
       } | null;
       send: (type: string, message: unknown) => void;

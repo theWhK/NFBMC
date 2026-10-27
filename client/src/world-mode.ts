@@ -1,6 +1,7 @@
 // Modo mundo aberto: dirigir por Porto Gordo, comer nas barraquinhas e
 // disparar corridas nos pontos de encontro.
 import {
+  CROSSFIT_CAR,
   carSpec,
   DIFFICULTY_LABELS,
   DISTRICTS,
@@ -24,9 +25,16 @@ import type { WorldRoom } from "./net.ts";
 import type { CarView } from "./scene.ts";
 import { escapeHtml, foodByCalories, kcal, setHtml, showPopup, ui } from "./ui.ts";
 
+/** Momentos de uma perseguição (o modo história põe o Cross-fit no rádio). */
+export type PursuitEvent = "start" | "crossfit" | "escaped" | "busted";
+
 export interface WorldHooks {
   onCalories?: (gained: number) => void;
   onEscape?: (stars: number, bonus: number) => void;
+  /** Perseguição começou, o Cross-fit entrou, escapou ou foi autuado (`finale`: era a fuga final). */
+  onPursuit?: (event: PursuitEvent, finale: boolean) => void;
+  /** A cada quadro, onde o seu carro está (a fuga final mostra a distância até a ponte). */
+  onFrame?: (me: { x: number; z: number }) => void;
 }
 
 export class WorldMode {
@@ -44,6 +52,9 @@ export class WorldMode {
   private hooks: WorldHooks;
   /** Co-op: quem está online (no mapa) e os desafios para um pega. */
   private coop: CoopPanel;
+  /** Perseguição e Cross-fit no quadro anterior (para avisar quando começam). */
+  private pursuedBefore = false;
+  private crossfitBefore = false;
 
   constructor(
     room: WorldRoom,
@@ -64,10 +75,14 @@ export class WorldMode {
     });
     room.onMessage("goRace", (message: GoRaceMessage) => onGoRace(message));
     room.onMessage("notice", (message: { text: string }) => showPopup(message.text));
-    room.onMessage("pursuit", (message: { result: "escaped" | "busted"; calories: number }) => {
+    room.onMessage("pursuit", (message: { result: "escaped" | "busted"; calories: number; finale?: boolean }) => {
       // O número que sobe/desce aqui já é o da Vigilância; não é comida.
       this.previous.calories = -1;
-      if (message.result === "escaped") {
+      this.hooks.onPursuit?.(message.result, !!message.finale);
+      if (message.result === "escaped" && message.finale) {
+        ctx.sound.escaped();
+        this.showBanner("escaped", "A ponte!", "Pisa fundo e não freia!");
+      } else if (message.result === "escaped") {
         // O prêmio é 300 kcal por estrela: daí sai o nível da fuga.
         this.hooks.onEscape?.(Math.round(message.calories / POLICE.escapeBonusPerStar), message.calories);
         ctx.sound.escaped();
@@ -149,8 +164,9 @@ export class WorldMode {
       });
     });
     room.state.cops?.forEach((c, id) => {
+      const crossfit = c.car === CROSSFIT_CAR;
       cars.set(`cop:${id}`, {
-        name: "🚨 Vigilância", color: "#f4f4f0", x: c.x, z: c.z, heading: c.heading,
+        name: crossfit ? "🏋️ Sgt. Cross-fit" : "🚨 Vigilância", color: crossfit ? "#9be22d" : "#f4f4f0", x: c.x, z: c.z, heading: c.heading,
         speed: c.speed, boost: c.boost, visible: true, cop: true, car: c.car,
       });
     });
@@ -161,6 +177,14 @@ export class WorldMode {
     if (!me) return;
 
     const myCops = [...(room.state.cops?.values() ?? [])].filter((c) => c.target === room.sessionId);
+    // Começou a perseguição / o Cross-fit entrou nela.
+    const pursued = myCops.length > 0;
+    const crossfitOut = myCops.some((c) => c.car === CROSSFIT_CAR);
+    if (pursued && !this.pursuedBefore) this.hooks.onPursuit?.("start", false);
+    if (crossfitOut && !this.crossfitBefore) this.hooks.onPursuit?.("crossfit", false);
+    this.pursuedBefore = pursued;
+    this.crossfitBefore = crossfitOut;
+    this.hooks.onFrame?.(me);
     const nearestCop = myCops.length ? Math.min(...myCops.map((c) => Math.hypot(c.x - me.x, c.z - me.z))) : null;
     ctx.sound.song(myCops.length ? "pursuit" : "lobby");
     // Pausado: motores e sirene calados (a música continua).
@@ -323,7 +347,7 @@ export class WorldMode {
     return {
       heat: me?.heat ?? 0,
       chased: me?.chased ?? false,
-      cops: [...(this.room.state.cops?.values() ?? [])].map((c) => ({ x: c.x, z: c.z, target: c.target })),
+      cops: [...(this.room.state.cops?.values() ?? [])].map((c) => ({ x: c.x, z: c.z, target: c.target, car: c.car })),
       traffic: [...(this.room.state.traffic?.values() ?? [])].map((n) => ({ x: n.x, z: n.z, speed: n.speed, kind: n.kind })),
     };
   }

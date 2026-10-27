@@ -62,6 +62,13 @@ interface CarEntry {
   receivedAt: number;
 }
 
+/**
+ * Diretor de cinemática (modo história, client/src/cinematic.ts): enquanto
+ * estiver ligado, é ele quem posiciona a câmera (posição, alvo e lente) a cada
+ * quadro. Recebe o tempo do quadro em segundos.
+ */
+export type CineDirector = (dt: number, camera: THREE.PerspectiveCamera, target: THREE.Vector3) => void;
+
 /** O que a cena sabe do carro seguido pela câmera, para os sons. */
 export interface FollowedInfo {
   skid: number;
@@ -205,6 +212,8 @@ export class GameScene {
   private time = 0;
   /** Jogo pausado (modo solo/história): o quadro congela, sem extrapolar nada. */
   paused = false;
+  /** Cinemática passando: a câmera é dela. */
+  private director: CineDirector | null = null;
   /** Resolução adaptativa: cai quando o FPS fica baixo (PC fraco ou sem placa de vídeo). */
   // No celular começa um pouco mais baixa: a tela é pequena e a bateria agradece.
   private pixelRatio = Math.min(window.devicePixelRatio, window.matchMedia?.("(pointer: coarse)").matches ? 1.5 : 2);
@@ -343,6 +352,26 @@ export class GameScene {
     model.group.rotation.y = spot.heading;
     this.scene.add(model.group);
     this.showcase = { model, key };
+  }
+
+  /** Liga (ou desliga, com null) o diretor de cinemática. */
+  setDirector(director: CineDirector | null) {
+    this.director = director;
+  }
+
+  /** Põe um objeto avulso na cena (carros de cinemática, a ponte), com o mesmo visual do resto. */
+  addProp(object: THREE.Object3D) {
+    this.dress(object);
+    this.scene.add(object);
+  }
+
+  removeProp(object: THREE.Object3D) {
+    this.scene.remove(object);
+  }
+
+  /** Fumaça de pneu ou poeira no chão (as cinemáticas usam). */
+  puff(x: number, z: number, heading: number, amount: number, dusty = false) {
+    this.effects.wheelTrail(x, z, heading, amount, dusty);
   }
 
   private clearFoods() {
@@ -484,7 +513,10 @@ export class GameScene {
 
     const followed = followId ? this.cars.get(followId) : undefined;
     const followedCar = followId ? cars.get(followId) : undefined;
-    if (followed && followedCar) {
+    if (this.director) {
+      this.director(dt, this.camera, this.cameraTarget);
+      this.camera.updateProjectionMatrix();
+    } else if (followed && followedCar) {
       const forwardX = Math.sin(followed.heading);
       const forwardZ = Math.cos(followed.heading);
       const view = CAMERAS[this.cameraMode];
