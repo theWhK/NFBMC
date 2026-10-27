@@ -17,6 +17,7 @@ import {
   isRaceId,
   nearestSample,
   pointOnTrack,
+  gradeAt,
   stepCar,
   pickColor,
   carHalfSize,
@@ -438,7 +439,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       let drive = this.drives.get(sessionId);
       if (!drive) this.drives.set(sessionId, (drive = player.bot ? createDrive(spec) : createPlayerDrive(spec, player.manual)));
       const motion = this.motions.get(sessionId);
-      stepCar(player, drive, spec, input, dt, onGrass, player.boost > 0, motion);
+      stepCar(player, drive, spec, input, dt, onGrass, player.boost > 0, motion, gradeAt(player.x, player.z, player.heading));
       const size = carHalfSize(player.car);
       collideWorld(player, size.halfLength, size.halfWidth, motion);
       player.rpm = Math.round(drive.rpm);

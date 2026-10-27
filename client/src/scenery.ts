@@ -16,6 +16,9 @@ import {
   RACE_IDS,
   ROADS,
   TREES,
+  districtAt,
+  heightAt,
+  slopeAt,
   isOnRoad,
   raceMarker,
   WORLD_BOUNDS,
@@ -229,27 +232,32 @@ function buildBuildings(scene: THREE.Scene) {
   const color = (kind: BuildingKind, tint: number) => new THREE.Color(PALETTES[kind][tint % PALETTES[kind].length]);
 
   for (const b of BUILDINGS) {
+    // No morro, o prédio afunda no lado de baixo até o lado de cima encostar no chão.
+    const ground = heightAt(b.x, b.z);
+    const [sx, sz] = slopeAt(b.x, b.z);
+    const sink = Math.hypot(sx, sz) * (Math.hypot(b.w, b.d) / 2) + 0.4;
+    const base = ground - sink;
     switch (b.kind) {
       case "tower":
       case "office":
-        windowed.push({ matrix: boxMatrix(b, b.height), color: color(b.kind, b.tint) });
+        windowed.push({ matrix: boxMatrix(b, b.height + sink, base), color: color(b.kind, b.tint) });
         break;
       case "shop": {
-        windowed.push({ matrix: boxMatrix(b, b.height), color: color(b.kind, b.tint) });
+        windowed.push({ matrix: boxMatrix(b, b.height + sink, base), color: color(b.kind, b.tint) });
         // Toldo listrado na frente da loja, virado para a rua.
         const fx = Math.sin(b.angle) * b.front;
         const fz = Math.cos(b.angle) * b.front;
         awnings.push({
-          matrix: boxMatrix({ x: b.x + fx * (b.d / 2 + 0.9), z: b.z + fz * (b.d / 2 + 0.9), w: b.w * 0.9, d: 1.8, angle: b.angle }, 0.25, 3.2),
+          matrix: boxMatrix({ x: b.x + fx * (b.d / 2 + 0.9), z: b.z + fz * (b.d / 2 + 0.9), w: b.w * 0.9, d: 1.8, angle: b.angle }, 0.25, ground + 3.2),
           color: new THREE.Color(AWNINGS[Math.floor(random() * AWNINGS.length)]),
         });
         break;
       }
       case "house":
-        plain.push({ matrix: boxMatrix(b, b.height), color: color(b.kind, b.tint) });
+        plain.push({ matrix: boxMatrix(b, b.height + sink, base), color: color(b.kind, b.tint) });
         roofs.push({
           matrix: new THREE.Matrix4().compose(
-            new THREE.Vector3(b.x, b.height, b.z),
+            new THREE.Vector3(b.x, ground + b.height, b.z),
             new THREE.Quaternion().setFromAxisAngle(Y, b.angle),
             new THREE.Vector3(b.w + 0.8, 2.6, b.d + 0.8),
           ),
@@ -257,13 +265,13 @@ function buildBuildings(scene: THREE.Scene) {
         });
         break;
       case "warehouse":
-        plain.push({ matrix: boxMatrix(b, b.height), color: color(b.kind, b.tint) });
+        plain.push({ matrix: boxMatrix(b, b.height + sink, base), color: color(b.kind, b.tint) });
         break;
       case "container": {
         // Pilha de contêineres: um bloco por andar, com uma frestinha entre eles.
         const floors = Math.round(b.height / 2.6);
         for (let f = 0; f < floors; f++) {
-          plain.push({ matrix: boxMatrix(b, 2.5, f * 2.6), color: color("container", b.tint + f) });
+          plain.push({ matrix: boxMatrix(b, 2.5, ground + f * 2.6), color: color("container", b.tint + f) });
         }
         break;
       }
@@ -318,7 +326,8 @@ function stripGeometry(points: [number, number][], half: number, y: number) {
     const len = Math.hypot(nx - px, nz - pz) || 1;
     const ox = ((nz - pz) / len) * half;
     const oz = (-(nx - px) / len) * half;
-    positions.push(x + ox, y, z + oz, x - ox, y, z - oz);
+    // Acompanha o relevo (cada borda na altura do chão embaixo dela).
+    positions.push(x + ox, heightAt(x + ox, z + oz) + y, z + oz, x - ox, heightAt(x - ox, z - oz) + y, z - oz);
     if (i > 0) {
       const a = (i - 1) * 2;
       indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
@@ -326,17 +335,66 @@ function stripGeometry(points: [number, number][], half: number, y: number) {
   });
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(positions.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   return geometry;
 }
 
 /** Disco no chão (para tapar a junção das ruas nos cruzamentos). */
 function discGeometry(x: number, z: number, radius: number, y: number) {
   const geometry = new THREE.CircleGeometry(radius, 24).rotateX(-Math.PI / 2);
-  geometry.translate(x, y, z);
-  return geometry.toNonIndexed();
+  geometry.translate(x, 0, z);
+  const flat = geometry.toNonIndexed();
+  const positions = flat.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < positions.count; i++) positions.setY(i, heightAt(positions.getX(i), positions.getZ(i)) + y);
+  flat.computeVertexNormals();
+  return flat;
+}
+
+/**
+ * Chão com relevo, em blocos (para a cena poder esconder os longe), tingido
+ * pela cor de cada bairro. Vai um pouco além dos limites do mapa, sob a neblina.
+ */
+function buildTerrain(scene: THREE.Scene) {
+  const material = new THREE.MeshLambertMaterial({ color: "#ffffff", map: groundTexture, vertexColors: true });
+  const step = 20;
+  const size = 500;
+  const margin = 700;
+  const colors = new Map(DISTRICTS.map((d) => [d.id, new THREE.Color(d.ground)]));
+  const outside = new THREE.Color("#6b7337");
+  for (let x0 = WORLD_BOUNDS.minX - margin; x0 < WORLD_BOUNDS.maxX + margin; x0 += size) {
+    for (let z0 = QUAY_Z; z0 < WORLD_BOUNDS.maxZ + margin; z0 += size) {
+      const n = size / step;
+      const positions: number[] = [];
+      const uvs: number[] = [];
+      const tints: number[] = [];
+      const indices: number[] = [];
+      for (let i = 0; i <= n; i++) {
+        for (let j = 0; j <= n; j++) {
+          const x = x0 + i * step;
+          const z = z0 + j * step;
+          positions.push(x, heightAt(x, z) - 0.25, z);
+          uvs.push(x, -z);
+          const inside = x >= WORLD_BOUNDS.minX && x <= WORLD_BOUNDS.maxX && z <= WORLD_BOUNDS.maxZ;
+          const c = inside ? colors.get(districtAt(x, z))! : outside;
+          tints.push(c.r, c.g, c.b);
+          if (i < n && j < n) {
+            const a = i * (n + 1) + j;
+            const b = a + n + 1;
+            indices.push(a, a + 1, b, b, a + 1, b + 1);
+          }
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      geometry.setAttribute("color", new THREE.Float32BufferAttribute(tints, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      addChunk(scene, new THREE.Mesh(geometry, material), [x0 + size / 2, z0 + size / 2], size * 0.71);
+    }
+  }
 }
 
 // --- Texturas "pintadas à mão" (desenhadas em canvas, sem arquivos) ----------
@@ -478,14 +536,8 @@ function buildClouds() {
 
 /** Chão dos bairros, ruas com calçada, faixa tracejada e o mar. */
 function buildGround(scene: THREE.Scene) {
-  // Chão de cada bairro, com a sua cor (grama, calçadão, concreto do porto...).
-  for (const district of DISTRICTS) {
-    const shape = new THREE.Shape(district.polygon.map(([x, z]) => new THREE.Vector2(x, -z)));
-    const geometry = new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2);
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color: district.ground, map: groundTexture }));
-    mesh.position.y = -0.05;
-    scene.add(mesh);
-  }
+  // Chão de cada bairro, com a sua cor e o relevo.
+  buildTerrain(scene);
 
   // Calçadas (um pouco mais largas que a rua) e asfalto, uma malha de cada por
   // bloco da cidade (cada rua vai para o bloco do meio dela).
@@ -538,8 +590,10 @@ function buildGround(scene: THREE.Scene) {
     road.points.forEach(([x, z], i) => {
       if (i % 2 || i < 5 || i > road.points.length - 6) return;
       const [nx, nz] = road.points[i + 1];
-      quat.setFromAxisAngle(Y, Math.atan2(nx - x, nz - z));
-      dashes.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0.12 + color * 0.001, z), quat, one));
+      // Gira na direção da rua e inclina junto com a ladeira.
+      const run = Math.hypot(nx - x, nz - z) || 1;
+      quat.setFromEuler(new THREE.Euler(-Math.atan2(heightAt(nx, nz) - heightAt(x, z), run), Math.atan2(nx - x, nz - z), 0, "YXZ"));
+      dashes.push(new THREE.Matrix4().compose(new THREE.Vector3(x, heightAt(x, z) + 0.14 + color * 0.001, z), quat, one));
     });
   }
   const dashGeometry = new THREE.PlaneGeometry(0.35, 3.5).rotateX(-Math.PI / 2);
@@ -604,7 +658,9 @@ function buildLamps(scene: THREE.Scene) {
       const [nx, nz] = road.points[i + 1];
       const len = Math.hypot(nx - x, nz - z) || 1;
       const offset = side * (road.width / 2 + 1.8);
-      spots.push(new THREE.Vector3(x + ((nz - z) / len) * offset, 0, z - ((nx - x) / len) * offset));
+      const lx = x + ((nz - z) / len) * offset;
+      const lz = z - ((nx - x) / len) * offset;
+      spots.push(new THREE.Vector3(lx, heightAt(lx, lz), lz));
     }
   }
   // Também em volta do autódromo.
@@ -630,9 +686,9 @@ function buildLamps(scene: THREE.Scene) {
     const poles = new THREE.InstancedMesh(poleGeometry, poleMaterial, tile.items.length);
     const glowPositions: number[] = [];
     tile.items.forEach((p, i) => {
-      matrix.compose(new THREE.Vector3(p.x, 4.5, p.z), quat, one);
+      matrix.compose(new THREE.Vector3(p.x, p.y + 4.5, p.z), quat, one);
       poles.setMatrixAt(i, matrix);
-      glowPositions.push(p.x, 9, p.z);
+      glowPositions.push(p.x, p.y + 9, p.z);
     });
     poles.computeBoundingSphere();
     const glowGeometry = new THREE.BufferGeometry();
@@ -735,13 +791,14 @@ function buildTrees(scene: THREE.Scene) {
     tile.items.forEach((tree, i) => {
       const s = tree.size;
       scale.setScalar(s);
-      matrix.compose(new THREE.Vector3(tree.x, 1.5 * s, tree.z), quat, scale);
+      const ground = heightAt(tree.x, tree.z) - 0.3;
+      matrix.compose(new THREE.Vector3(tree.x, ground + 1.5 * s, tree.z), quat, scale);
       stem.setMatrixAt(i, matrix);
       for (let k = 0; k < 3; k++) {
         const angle = (k / 3) * Math.PI * 2 + n;
         const pos = new THREE.Vector3(
           tree.x + Math.cos(angle) * 1.1 * s,
-          (3.4 + (k === 0 ? 0.6 : 0)) * s,
+          ground + (3.4 + (k === 0 ? 0.6 : 0)) * s,
           tree.z + Math.sin(angle) * 1.1 * s,
         );
         matrix.compose(pos, quat, scale);
@@ -774,7 +831,7 @@ function buildTrees(scene: THREE.Scene) {
 function buildFlags(scene: THREE.Scene) {
   const place = (x: number, z: number, height: number, width: number, facing: number) => {
     const flag = makeFlag(height, width);
-    flag.position.set(x, 0, z);
+    flag.position.set(x, heightAt(x, z) - 0.3, z);
     flag.rotation.y = facing;
     addChunk(scene, flag, [x, z], width + 5);
   };
@@ -814,7 +871,8 @@ export function buildScenery(scene: THREE.Scene) {
     new THREE.MeshLambertMaterial({ color: "#6b7337" }),
   );
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set((WORLD_BOUNDS.minX + WORLD_BOUNDS.maxX) / 2, -0.15, (WORLD_BOUNDS.minZ + WORLD_BOUNDS.maxZ) / 2);
+  // Bem embaixo do relevo (a baixada mais funda tem ~5 m): só aparece além dele, na neblina.
+  ground.position.set((WORLD_BOUNDS.minX + WORLD_BOUNDS.maxX) / 2, -8, (WORLD_BOUNDS.minZ + WORLD_BOUNDS.maxZ) / 2);
   scene.add(ground);
 
   const { sky, sun: sunSprite } = buildSky(scene);
