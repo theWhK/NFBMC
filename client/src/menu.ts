@@ -167,6 +167,7 @@ export function createMenu(options: MenuOptions) {
       showcase();
       refreshCars();
       sound.click();
+      sound.revPreview(id);
     });
     // Passar pelo carro já mostra a ficha e a vitrine com ele.
     button.addEventListener("mouseenter", () => {

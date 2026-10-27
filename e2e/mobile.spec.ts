@@ -30,6 +30,13 @@ test("celular deitado: controles de toque aparecem e o carro anda com eles", asy
   // Soltou o dedo: o botão volta ao normal e o carro para de acelerar.
   await expect(page.getByTestId("touch-gas")).not.toHaveClass(/down/);
 
+  // Botão de pausa na tela: abre a pausa e os controles de toque saem da frente.
+  await page.getByTestId("touch-pause").tap();
+  await expect(page.getByTestId("pause")).toBeVisible();
+  await expect(page.getByTestId("touch-gas")).toBeHidden();
+  await page.getByTestId("pause-resume").tap();
+  await expect(page.getByTestId("touch-gas")).toBeVisible();
+
   await context.close();
 });
 

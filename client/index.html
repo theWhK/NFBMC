@@ -208,19 +208,25 @@
 
     <div id="loading" data-testid="loading" hidden></div>
 
-    <!-- Menu de pausa (o jogo continua rodando por trás: é multiplayer). -->
+    <!-- Menu de pausa: no modo solo/história o jogo para de verdade; com a galera, continua. -->
     <div id="pause" class="pause" data-testid="pause" hidden>
-      <h2>Pausa</h2>
-      <p class="hint" id="pause-note" data-testid="pause-note">O jogo continua rodando para a galera enquanto este menu está aberto.</p>
-      <div class="mw-list sub">
-        <button type="button" id="pause-resume" data-testid="pause-resume">Continuar</button>
-        <button type="button" id="pause-map" data-testid="pause-map">Mapa da cidade</button>
-        <button type="button" id="pause-help" data-testid="pause-help">Controles</button>
-        <button type="button" id="pause-music">Música</button>
-        <button type="button" id="pause-sfx">Efeitos</button>
-        <button type="button" id="pause-quit" data-testid="pause-quit">Voltar ao menu principal</button>
+      <div class="pause-main">
+        <h2>Pausa</h2>
+        <p class="hint" id="pause-note" data-testid="pause-note">O jogo continua rodando para a galera enquanto este menu está aberto.</p>
+        <div class="mw-list sub">
+          <button type="button" id="pause-resume" data-testid="pause-resume">Continuar</button>
+          <button type="button" id="pause-map" data-testid="pause-map">Mapa da cidade</button>
+          <button type="button" id="pause-help" data-testid="pause-help">Controles</button>
+          <button type="button" id="pause-music">Música</button>
+          <button type="button" id="pause-sfx">Efeitos</button>
+          <button type="button" id="pause-quit" data-testid="pause-quit">Voltar ao menu principal</button>
+        </div>
       </div>
+      <aside class="pause-card" id="pause-card" data-testid="pause-card"></aside>
     </div>
+
+    <!-- Volta da pausa jogando sozinho: 3, 2, 1 antes de o jogo andar de novo. -->
+    <div id="resume-count" data-testid="resume-count" hidden></div>
 
     <!-- Lista de comandos (F1). -->
     <div id="help" class="panel center help" data-testid="help" hidden>
@@ -328,6 +334,10 @@
 
     <!-- Controles de toque (celular/tablet). -->
     <div id="touch" data-testid="touch-controls" hidden>
+      <div class="touch-top">
+        <button type="button" data-action="map" data-testid="touch-map" aria-label="Mapa">🗺️</button>
+        <button type="button" data-action="pause" data-testid="touch-pause" aria-label="Pausa">❚❚</button>
+      </div>
       <div class="touch-steer">
         <button type="button" data-key="TouchLeft" data-testid="touch-left" aria-label="Virar à esquerda">◀</button>
         <button type="button" data-key="TouchRight" data-testid="touch-right" aria-label="Virar à direita">▶</button>

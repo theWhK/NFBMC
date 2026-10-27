@@ -25,6 +25,7 @@ import {
   DEFAULT_CAR,
   carSpec,
   createDrive,
+  createPlayerDrive,
   isCarId,
   requestShift,
   CHALLENGE_SECONDS,
@@ -229,7 +230,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     player.color = pickColor(options?.color, usedColors, this.joinCount);
     player.car = isCarId(options?.car) ? options.car : DEFAULT_CAR;
     player.manual = options?.manual === true;
-    this.drives.set(client.sessionId, createDrive(carSpec(player.car), player.manual));
+    this.drives.set(client.sessionId, createPlayerDrive(carSpec(player.car), player.manual));
 
     if (isRaceId(options?.spawn)) {
       // Voltando de uma corrida: aparece no ponto de encontro dela, um pouco ao lado.
@@ -398,7 +399,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         : this.controls.get(sessionId) ?? { throttle: 0, steer: 0 };
       player.boost = Math.max(0, player.boost - dt);
       const spec = carSpec(player.car);
-      const drive = this.driveOf(sessionId, spec, player.manual);
+      const drive = this.driveOf(sessionId, spec, player.manual, true);
       const motion = this.motions.get(sessionId);
       stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), player.boost > 0, motion);
       const size = carHalfSize(player.car);
@@ -438,9 +439,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     }
   }
 
-  private driveOf(id: string, spec: ReturnType<typeof carSpec>, manual = false) {
+  private driveOf(id: string, spec: ReturnType<typeof carSpec>, manual = false, human = false) {
     let drive = this.drives.get(id);
-    if (!drive) this.drives.set(id, (drive = createDrive(spec, manual)));
+    if (!drive) this.drives.set(id, (drive = human ? createPlayerDrive(spec, manual) : createDrive(spec, manual)));
     return drive;
   }
 

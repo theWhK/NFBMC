@@ -43,7 +43,7 @@ export class WorldMode {
   private bots = 3;
   private calling = false;
   private sceneReady = false;
-  private previous = { calories: -1, boost: 0, speed: 0, bumpAt: 0 };
+  private previous = { calories: -1, boost: 0, speed: 0, bumpAt: 0, chased: false };
   private bannerTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bairro onde o carro estava no quadro anterior (para mostrar a placa ao trocar). */
   private district: string | null = null;
@@ -155,7 +155,7 @@ export class WorldMode {
     }
     const cars = new Map<string, CarView>();
     room.state.players?.forEach((p, id) => {
-      cars.set(id, { name: p.name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, visible: true });
+      cars.set(id, { name: p.name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible: true });
     });
     room.state.traffic?.forEach((n, id) => {
       cars.set(`npc:${id}`, {
@@ -172,7 +172,7 @@ export class WorldMode {
     });
     const me = room.state.players?.get(room.sessionId);
     const followed = ctx.scene
-      ? (ctx.scene.syncCars(cars), ctx.scene.syncFoods([...(room.state.stands ?? [])]), ctx.scene.render(cars, room.sessionId))
+      ? (ctx.scene.syncCars(cars), ctx.scene.syncFoods([...(room.state.stands ?? [])]), ctx.scene.render(cars, room.sessionId, room.sessionId))
       : null;
     if (!me) return;
 
@@ -185,11 +185,21 @@ export class WorldMode {
     this.pursuedBefore = pursued;
     this.crossfitBefore = crossfitOut;
     this.hooks.onFrame?.(me);
-    const nearestCop = myCops.length ? Math.min(...myCops.map((c) => Math.hypot(c.x - me.x, c.z - me.z))) : null;
+    // Viatura mais perto: a sirene vem dela (distância e de que lado está).
+    let nearestCop: number | null = null;
+    let copPan = 0;
+    for (const c of myCops) {
+      const distance = Math.hypot(c.x - me.x, c.z - me.z);
+      if (nearestCop !== null && distance >= nearestCop) continue;
+      nearestCop = distance;
+      copPan = distance > 0 ? ((c.x - me.x) * -Math.cos(me.heading) + (c.z - me.z) * Math.sin(me.heading)) / distance : 0;
+    }
+    if (myCops.length > 0 && !this.previous.chased) ctx.sound.pursuitStarted();
+    this.previous.chased = myCops.length > 0;
     ctx.sound.song(myCops.length ? "pursuit" : "lobby");
     // Pausado: motores e sirene calados (a música continua).
     const paused = this.paused();
-    ctx.sound.updateSiren(myCops.length && !paused ? nearestCop : null);
+    ctx.sound.updateSiren(myCops.length && !paused ? nearestCop : null, copPan);
     this.updatePursuitUi(me, myCops.length > 0);
     ctx.sound.updateMine(followed && !paused ? {
       speed: me.speed,
@@ -199,6 +209,8 @@ export class WorldMode {
       skid: followed.skid,
       offroad: followed.offroad,
       boost: me.boost > 0,
+      car: me.car,
+      gear: me.gear,
     } : null);
     if (paused) ctx.sound.updateOthers(new Map());
     else ctx.updateOtherEngines(cars, room.sessionId, me);

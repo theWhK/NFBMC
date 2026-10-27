@@ -24,7 +24,7 @@ import {
   type RaceId,
 } from "@nfbmc/shared";
 
-import { Sound } from "./audio.ts";
+import { Sound, type OtherCarSound } from "./audio.ts";
 import { makeBridge, playStory, showRadio, type Cast } from "./cinematic.ts";
 import { createFullMap, createMinimap, createTacho, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
@@ -36,7 +36,7 @@ import { RaceMode, type RaceFinish } from "./race-mode.ts";
 import { StoryTracker, loadStory, renderObjective, renderStoryScreen, showRivalIntro } from "./story.ts";
 import { bindTouchControls, isPortrait, isTouchDevice, requestLandscape } from "./touch.ts";
 import { GameScene } from "./scene.ts";
-import { $, hideModeUi, showPopup, ui } from "./ui.ts";
+import { $, escapeHtml, hideModeUi, kcal, showPopup, ui } from "./ui.ts";
 import { WorldMode } from "./world-mode.ts";
 
 ui.logo.innerHTML = LOGO_SVG;
@@ -149,6 +149,16 @@ function currentInput(): InputMessage {
   return { throttle: Math.sign(throttle), steer: Math.sign(steer), handbrake };
 }
 
+// O próprio carro vira na tela na hora em que a tecla é apertada (sem esperar o servidor).
+if (scene) scene.localInput = () => currentInput();
+// Mede a ida e volta até o servidor de tempos em tempos (para a previsão da curva).
+setInterval(() => {
+  const room = mode?.room as { ping?: (cb: (ms: number) => void) => void } | undefined;
+  room?.ping?.((ms) => {
+    if (scene) scene.latency = Math.min(0.25, ms / 1000 + 1 / 60);
+  });
+}, 2000);
+
 // --- Contexto dos modos ----------------------------------------------------
 
 const drawTacho = createTacho(ui.tacho);
@@ -168,7 +178,8 @@ const ctx: ModeContext = {
   drawTacho,
   drawMinimap,
   updateOtherEngines(cars, myId, me) {
-    const others = new Map<string, { speed: number; distance: number; pan: number }>();
+    const others = new Map<string, OtherCarSound>();
+    const mine = cars.get(myId);
     for (const [id, car] of cars) {
       if (id === myId || !car.visible) continue;
       const dx = car.x - me.x;
@@ -177,7 +188,16 @@ const ctx: ModeContext = {
       if (distance > 70) continue;
       // Direita de quem olha para o heading: (-cos, sin).
       const pan = distance > 0 ? (dx * -Math.cos(me.heading) + dz * Math.sin(me.heading)) / distance : 0;
-      others.set(id, { speed: car.speed, distance, pan });
+      // Velocidade de aproximação (para o Doppler): projeção das duas velocidades na linha entre os carros.
+      let closing = 0;
+      if (distance > 0.5) {
+        const ux = dx / distance;
+        const uz = dz / distance;
+        const theirs = car.speed * (Math.sin(car.heading) * ux + Math.cos(car.heading) * uz);
+        const ours = (mine?.speed ?? 0) * (Math.sin(me.heading) * ux + Math.cos(me.heading) * uz);
+        closing = ours - theirs;
+      }
+      others.set(id, { speed: car.speed, distance, pan, rpm: car.rpm, car: car.car, traffic: car.traffic, closing });
     }
     // Só os 6 motores mais perto (com trânsito, podiam ser dezenas de osciladores).
     const nearest = new Map([...others].sort(([, a], [, b]) => a.distance - b.distance).slice(0, 6));
@@ -188,7 +208,8 @@ const ctx: ModeContext = {
     const now = performance.now();
     const drop = Math.abs(previous.speed) - Math.abs(speed);
     if (drop > 3 && currentInput().throttle >= 0 && now - previous.bumpAt > 400) {
-      sound.bump();
+      // Quanto mais velocidade perdeu de uma vez, mais forte a pancada.
+      sound.bump(Math.min(1, 0.2 + (drop - 3) / 14));
       if (touch) navigator.vibrate?.(60);
       previous.bumpAt = now;
     }
@@ -530,6 +551,7 @@ function refreshPauseNotes() {
 }
 
 function openHelp() {
+  cancelResume();
   pause.hidden = true;
   fullMapEl.hidden = true;
   help.hidden = false;
@@ -539,10 +561,13 @@ function openHelp() {
 }
 
 /** Comandos do carro que não são acelerar/virar (teclado ou botões do celular). */
-function carAction(action: "horn" | "camera" | "reset") {
+function carAction(action: "horn" | "camera" | "reset" | "pause" | "map") {
   if (!mode) return;
-  if (action === "horn") {
-    sound.horn();
+  if (action === "pause") openPause();
+  else if (action === "map") openMap();
+  else if (action === "horn") {
+    const view = lastMapView;
+    sound.horn(1, 0, view?.cars.get(view.myId)?.car);
     mode.sendHorn();
   } else if (action === "camera") {
     const name = scene?.cycleCamera();
@@ -563,7 +588,7 @@ function remoteHorn(id: string) {
   const dz = car.z - me.z;
   const distance = Math.hypot(dx, dz);
   const pan = distance > 0 ? (dx * -Math.cos(me.heading) + dz * Math.sin(me.heading)) / distance : 0;
-  sound.horn(Math.max(0, 1 - distance / 120), pan);
+  sound.horn(Math.max(0, 1 - distance / 120), pan, car.car);
 }
 
 /** Ao abrir a pausa ou o mapa, solta tudo (o carro não fica acelerando sozinho). */
@@ -578,10 +603,38 @@ function refreshPauseLabels() {
   $("pause-sfx").textContent = `Efeitos: ${sound.prefs.sfx ? "ligados" : "desligados"}`;
 }
 
+/** Resumo ao lado da pausa: onde você está, com que carro e quanto já comeu. */
+function renderPauseCard() {
+  const me = lastMapView?.cars.get(lastMapView.myId);
+  const snapshot = mode?.snapshot()[mode.room.sessionId];
+  const where = storyMode ? "Modo história" : mode instanceof RaceMode ? (mode.pausable() ? "Corrida solo" : "Corrida") : mode?.pausable() ? "Modo solo" : "Co-op";
+  const car = snapshot ? carSpec(snapshot.car) : undefined;
+  const rows = [
+    `<p class="stamp small">${where}</p>`,
+    car ? `<p><small>Carro</small><strong>${escapeHtml(car.name)}</strong></p>` : "",
+    snapshot ? `<p><small>Calorias</small><strong>${kcal(snapshot.calories)} kcal</strong></p>` : "",
+    me ? `<p><small>Velocidade ao pausar</small><strong>${Math.round(Math.abs(me.speed) * 3.6)} km/h</strong></p>` : "",
+    `<p class="hint">${PAUSE_TIPS[Math.floor(Math.random() * PAUSE_TIPS.length)]}</p>`,
+  ];
+  pauseCard.innerHTML = rows.join("");
+}
+
+const pauseCard = $("pause-card");
+const PAUSE_TIPS = [
+  "Dica: freie antes da curva e acelere na saída. Freio de mão (Espaço) faz o carro deslizar.",
+  "Dica: comida dá turbo. Mas comer na rua esquenta a Vigilância Sanitária.",
+  "Dica: empacou? R volta para a rua.",
+  "Dica: C troca a câmera. A de capô ajuda a mirar a curva.",
+  "Dica: no mapa (M) dá para ver quem está online e desafiar para um pega.",
+];
+
 function openPause() {
   if (!mode) return;
+  cancelResume();
   fullMapEl.hidden = true;
+  help.hidden = true;
   pause.hidden = false;
+  renderPauseCard();
   refreshPauseLabels();
   refreshPauseNotes();
   releaseControls();
@@ -600,6 +653,7 @@ function focusMapOnMe() {
 
 function openMap() {
   if (!mode) return;
+  cancelResume();
   pause.hidden = true;
   fullMapEl.hidden = false;
   focusMapOnMe();
@@ -609,25 +663,65 @@ function openMap() {
 }
 
 function closeOverlays() {
+  cancelResume();
   pause.hidden = true;
   fullMapEl.hidden = true;
   help.hidden = true;
   pauseGame(false);
 }
 
+/**
+ * Fechar a pausa (ou o mapa) jogando sozinho: 3, 2, 1 com o jogo ainda parado,
+ * para dar tempo de pôr o dedo no acelerador. Com a galera, fecha na hora.
+ */
+const resumeCount = $("resume-count");
+let resumeTimer: ReturnType<typeof setTimeout> | undefined;
+function resumeGame() {
+  if (!mode?.pausable() || !pauseRequested) return closeOverlays();
+  pause.hidden = true;
+  fullMapEl.hidden = true;
+  help.hidden = true;
+  (document.activeElement as HTMLElement | null)?.blur?.();
+  let n = 3;
+  const tick = () => {
+    if (n === 0) {
+      resumeCount.hidden = true;
+      resumeTimer = undefined;
+      pauseGame(false);
+      return;
+    }
+    resumeCount.textContent = String(n);
+    resumeCount.hidden = false;
+    // Reinicia a animação a cada número.
+    resumeCount.classList.remove("pop");
+    void resumeCount.offsetWidth;
+    resumeCount.classList.add("pop");
+    sound.click();
+    n--;
+    resumeTimer = setTimeout(tick, 550);
+  };
+  tick();
+}
+
+function cancelResume() {
+  if (resumeTimer !== undefined) clearTimeout(resumeTimer);
+  resumeTimer = undefined;
+  resumeCount.hidden = true;
+}
+
 $("to-menu").addEventListener("click", openPause);
 $("open-map").addEventListener("click", openMap);
-$("pause-resume").addEventListener("click", closeOverlays);
+$("pause-resume").addEventListener("click", resumeGame);
 $("pause-map").addEventListener("click", openMap);
 $("pause-help").addEventListener("click", openHelp);
-$("help-close").addEventListener("click", closeOverlays);
+$("help-close").addEventListener("click", resumeGame);
 for (const button of document.querySelectorAll<HTMLButtonElement>("#touch [data-action]")) {
   button.addEventListener("pointerdown", (e) => {
     e.preventDefault();
-    carAction(button.dataset.action as "horn" | "camera" | "reset");
+    carAction(button.dataset.action as Parameters<typeof carAction>[0]);
   });
 }
-$("fullmap-close").addEventListener("click", closeOverlays);
+$("fullmap-close").addEventListener("click", resumeGame);
 $("pause-music").addEventListener("click", () => {
   sound.toggle("music");
   refreshAudioButtons();
@@ -648,21 +742,21 @@ window.addEventListener("keydown", (e) => {
   // Pausa: Esc ou P (Esc também fecha mapa e ajuda).
   if (mode && (e.code === "Escape" || (e.code === "KeyP" && help.hidden))) {
     e.preventDefault();
-    if (overlayOpen()) closeOverlays();
+    if (overlayOpen()) resumeGame();
     else openPause();
     return;
   }
   // Mapa: M ou Tab.
   if (mode && (e.code === "KeyM" || e.code === "Tab") && pause.hidden && help.hidden) {
     e.preventDefault();
-    if (!fullMapEl.hidden) closeOverlays();
+    if (!fullMapEl.hidden) resumeGame();
     else openMap();
     return;
   }
   // Lista de comandos: F1.
   if (mode && e.code === "F1") {
     e.preventDefault();
-    if (!help.hidden) closeOverlays();
+    if (!help.hidden) resumeGame();
     else openHelp();
     return;
   }
@@ -711,6 +805,9 @@ window.addEventListener("blur", () => {
 
 function frame() {
   if (scene) scene.paused = !!mode?.paused();
+  // Com a pausa, o mapa ou a ajuda abertos, o HUD do jogo (e os botões de toque) sai da frente.
+  document.body.classList.toggle("overlay-open", !!mode && overlayOpen());
+  document.body.classList.toggle("playing", !!mode);
   if (mode) mode.frame();
   else scene?.render(new Map(), undefined);
   if (!fullMapEl.hidden && mapNeedsFocus) focusMapOnMe();
