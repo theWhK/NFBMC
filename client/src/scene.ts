@@ -31,6 +31,8 @@ export interface CarView {
   heading: number;
   speed: number;
   boost: number;
+  /** Giro do motor (só os jogadores e bots mandam; o som estima o resto). */
+  rpm?: number;
   visible: boolean;
   /** Carro da garagem (id em CARS). */
   car?: string;
