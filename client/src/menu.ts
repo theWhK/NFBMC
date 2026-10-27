@@ -20,7 +20,7 @@ import { fetchListaGorda, fetchOnline, fetchProfile } from "./net.ts";
 import type { GameScene } from "./scene.ts";
 import { escapeHtml, kcal, setHtml, ui } from "./ui.ts";
 
-export type MenuEntry = "world" | "world-solo" | "quick" | "solo" | "story" | "challenge";
+export type MenuEntry = "world" | "world-solo" | "quick" | "solo" | "story" | "challenge" | "finale";
 
 const COLOR_KEY = "nfbmc:color";
 const CAR_KEY = "nfbmc:car";

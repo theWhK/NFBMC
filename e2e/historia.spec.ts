@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 test("modo história: prólogo, Lista Gorda, objetivo na cidade e duelo contra o #10", async ({ browser }) => {
   const context = await browser.newContext();
@@ -47,6 +47,77 @@ test("modo história: prólogo, Lista Gorda, objetivo na cidade e duelo contra o
   const rival = players.find((p) => p.bot)!;
   expect(rival.name).toBe("Izzy Iogurte");
   expect(rival.car).toBe("gol");
+
+  await context.close();
+});
+
+/** Abre o modo história com o progresso salvo dado (atalho pelo localStorage). */
+async function storyWith(page: Page, progress: Record<string, unknown>) {
+  await page.goto("/");
+  await page.evaluate((p) => {
+    localStorage.setItem("nfbmc:story", JSON.stringify({
+      stage: 0, wins: 0, escapes: 0, bounty: 0, unlocked: ["uno", "fusca"], car: "uno", seenPrologue: true, finaleDone: false, ...p,
+    }));
+  }, progress);
+  await page.reload();
+  await page.getByTestId("name-input").fill("Will");
+  await page.getByTestId("story-menu").click();
+}
+
+const copCars = (page: Page) => page.evaluate(() => window.__nfbmc!.police()!.cops.map((c) => c.car));
+
+test("modo história: o Sargento Cross-fit entra na perseguição e fala pelo rádio", async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  // Depois do #8 (JV Pastel), o Cross-fit sai atrás de quem chega a 5 estrelas.
+  await storyWith(page, { stage: 3 });
+  await expect(page.getByTestId("story-target")).toContainText("Vic Virado");
+  await page.getByTestId("story-go").click();
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
+
+  await page.evaluate(() => window.__nfbmc!.send("debugHeat", { heat: 5 }));
+  await expect.poll(() => copCars(page)).toContain("viatura-crossfit");
+  await expect(page.getByTestId("radio-call")).toContainText("Cross-fit");
+
+  await context.close();
+});
+
+test("modo história: fuga final do Cross-fit até a ponte, autuação, nova tentativa e epílogo", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  // Bruno derrotado: o M3 voltou e falta a fuga final.
+  await storyWith(page, { stage: 10, unlocked: ["uno", "fusca", "m3", "a3bruno"] });
+  await expect(page.getByTestId("story-target")).toContainText("Cross-fit");
+  await expect(page.getByTestId("story-challenge")).toBeEnabled();
+  await expect(page.getByTestId("story-challenge")).toContainText("ponte");
+  await page.getByTestId("story-challenge").click();
+
+  // Nível máximo desde o começo, no M3, com o Couve-vette do Cross-fit atrás.
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
+  expect((await page.evaluate(() => Object.values(window.__nfbmc!.players())[0])).car).toBe("m3");
+  await expect(page.getByTestId("wanted")).toHaveAttribute("data-stars", "5");
+  await expect.poll(() => copCars(page)).toContain("viatura-crossfit");
+  await expect(page.getByTestId("story-objective")).toContainText("ponte");
+
+  // Parado, a Vigilância autua: o Cross-fit provoca e dá para tentar de novo.
+  await expect(page.getByTestId("comic")).toContainText("Mais uma série", { timeout: 60_000 });
+  await page.getByTestId("comic-skip").click();
+  await expect(page.getByTestId("story-challenge")).toContainText("ponte");
+  await page.getByTestId("story-challenge").click();
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
+
+  // Chegando na ponte inacabada do Cais (atalho de teste): o salto e o epílogo.
+  await expect.poll(async () => (await copCars(page)).length).toBeGreaterThan(0);
+  await page.evaluate(() => window.__nfbmc!.send("debugMove", { x: -450, z: -484 }));
+  await expect(page.getByTestId("banner")).toContainText("ponte");
+  await expect(page.getByTestId("comic")).toContainText("ponte inacabada", { timeout: 10_000 });
+  await page.getByTestId("comic-skip").click();
+  await expect(page.getByTestId("comic")).toContainText("fiança");
+  await page.getByTestId("comic-skip").click();
+  await expect(page.getByTestId("comic")).toBeHidden();
+  await expect(page.getByTestId("story-target")).toContainText("Número 1");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nfbmc:story")!).finaleDone)).toBe(true);
 
   await context.close();
 });

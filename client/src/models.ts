@@ -1,7 +1,7 @@
 // Modelos 3D feitos só com formas simples do Three.js (sem arquivos externos).
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { carSpec, type FoodKind, type TrafficKind } from "@nfbmc/shared";
+import { CROSSFIT_CAR, carSpec, type FoodKind, type TrafficKind } from "@nfbmc/shared";
 
 import { buildBody } from "./car-models.ts";
 
@@ -176,6 +176,20 @@ const copLivery: Parameters<typeof buildBody>[2] = (add, design) => {
 };
 
 /**
+ * Couve-vette do Sargento Cross-fit: verde-couve escuro, faixa verde-limão
+ * (suco detox), "DETOX" no capô e um halter amarrado no teto.
+ */
+const crossfitLivery: Parameters<typeof buildBody>[2] = (add, design) => {
+  add.box(design.width + 0.14, 0.18, design.length - 0.3, "#9be22d", 0, 0.62, 0);
+  add.box(0.36, 0.05, design.length * 0.42, "#9be22d", 0, 1.02, design.length * 0.22);
+  // Halter: a barra e as anilhas.
+  add.cylinder(0.04, 1.5, "#c9cdd2", 0, 1.5, -0.75, "x");
+  for (const x of [-0.62, 0.62]) add.cylinder(0.2, 0.1, "#1b1b1b", x, 1.5, -0.75, "x");
+  // Folhas de couve no para-choque.
+  for (const x of [-0.5, 0, 0.5]) add.sphere(0.16, "#3f8f2a", x, 0.55, design.length / 2 + 0.02, [1.2, 0.7, 0.5]);
+};
+
+/**
  * Roda: pneu com banda e flanco, aro de cinco raios com cubo e a pinça de freio
  * vermelha atrás. `side` (+1/-1) diz para que lado fica a face de fora.
  * O conjunto gira em torno do eixo X (a pinça fica parada, presa ao carro, no
@@ -230,7 +244,9 @@ export function makeCar(color: string, name: string, options: CarOptions = {}): 
     wheelSpots = [[-1.1, 1.3], [1.1, 1.3], [-1.1, -1.3], [1.1, -1.3]].map(([x, z]) => ({ x, z, radius: 0.45 }));
   } else {
     const spec = carSpec(options.car ?? (cop ? "viatura" : undefined));
-    const built = buildBody(spec.body, cop ? "#f4f4f0" : color, cop ? copLivery : undefined);
+    const crossfit = cop && spec.id === CROSSFIT_CAR;
+    const paint = crossfit ? spec.color : cop ? "#f4f4f0" : color;
+    const built = buildBody(spec.body, paint, crossfit ? crossfitLivery : cop ? copLivery : undefined);
     shell.add(built.shell);
     wheelSpots = built.wheels;
     length = built.length;
