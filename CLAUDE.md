@@ -34,6 +34,7 @@ deploy/   systemd e instruções de deploy da prod (feito pelo Will, não pelo a
 - Em produção, o servidor também entrega o build do cliente (`client/dist`), então tudo sai pela porta 2567.
 - O jogo é 3D com **Three.js** (decidido com o Will). Os modelos são feitos com formas simples do próprio Three.js, sem arquivos externos. Não troque a engine nem adicione outra biblioteca grande sem combinar.
 - Ambientação: paródia do Need for Speed Most Wanted (fim de tarde alaranjado, cidade, "Lista Gorda", Vigilância Sanitária no lugar da polícia). Logo em `client/src/logo.ts` (SVG feito à mão, sem copiar marca de ninguém).
+- **Bandeira do Orgulho Gordo** (`client/src/flag.ts`): listras de hambúrguer (pão, alface, queijo, tomate, carne, pão), piada do @barlattiraphael (crédito nos Créditos). Redesenhada no código, sem a imagem original; tremula (`waveFlags`) nos pontos de encontro, em volta das estátuas de hambúrguer e no pórtico de largada, e aparece num outdoor e no resultado da corrida.
 - Som e música são **sintetizados no código** com Web Audio (`client/src/audio.ts` e `client/src/music.ts`), sem arquivos de áudio nem música de terceiros. Fontes: Russo One e Black Ops One (OFL), via `@fontsource`.
 - A cena reduz a resolução sozinha quando o FPS cai.
 - Movimento dos carros no cliente: extrapolação (`GameScene.render`). Entre as atualizações do servidor (30 por segundo) o carro anda com a velocidade e a direção recebidas e o erro é corrigido aos poucos; não volte a só amortecer até a última posição recebida, que faz a câmera tremer.

@@ -4,6 +4,7 @@
 // o mar, o lago do parque e árvores de brócolis. A planta (ruas, prédios,
 // árvores) vem do shared/world.ts; aqui só se desenha.
 import * as THREE from "three";
+import { makeFlag, FLAG_STRIPES } from "./flag.ts";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
   BUILDINGS,
@@ -12,8 +13,11 @@ import {
   NAV,
   QUAY_Z,
   RACES,
+  RACE_IDS,
   ROADS,
   TREES,
+  isOnRoad,
+  raceMarker,
   WORLD_BOUNDS,
   pointOnTrack,
   seeded,
@@ -646,6 +650,8 @@ const BILLBOARDS: { title: string; subtitle: string; bg: string; fg: string }[] 
   { title: "ACADEMIA", subtitle: "segunda-feira eu começo", bg: "#2a9d8f", fg: "#ffffff" },
   { title: "LISTA GORDA", subtitle: "você está nela?", bg: "#16110d", fg: "#ffd23f" },
   { title: "VIGILÂNCIA SANITÁRIA", subtitle: "estamos de olho 👀", bg: "#f1f1f1", fg: "#c1121f" },
+  // Fundo listrado com a Bandeira do Orgulho Gordo.
+  { title: "ORGULHO GORDO", subtitle: "pão · alface · queijo · tomate · carne · pão", bg: "stripes", fg: "#ffffff" },
 ];
 
 function billboardTexture(ad: (typeof BILLBOARDS)[number]) {
@@ -657,8 +663,19 @@ function billboardTexture(ad: (typeof BILLBOARDS)[number]) {
   texture.anisotropy = 4;
   const draw = () => {
     const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = ad.bg;
-    ctx.fillRect(0, 0, 512, 256);
+    if (ad.bg === "stripes") {
+      FLAG_STRIPES.forEach((color, i) => {
+        ctx.fillStyle = color;
+        ctx.fillRect(0, Math.round((i * 256) / FLAG_STRIPES.length), 512, Math.ceil(256 / FLAG_STRIPES.length));
+      });
+    } else {
+      ctx.fillStyle = ad.bg;
+      ctx.fillRect(0, 0, 512, 256);
+    }
+    if (ad.bg === "stripes") {
+      ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+      ctx.shadowBlur = 8;
+    }
     ctx.strokeStyle = ad.fg;
     ctx.lineWidth = 10;
     ctx.strokeRect(12, 12, 488, 232);
@@ -749,6 +766,41 @@ function buildTrees(scene: THREE.Scene) {
   }
 }
 
+/**
+ * Mastros com a Bandeira do Orgulho Gordo: um em cada ponto de encontro de
+ * corrida (na calçada, ao lado da coluna de luz) e uma roda em volta das
+ * estátuas de hambúrguer.
+ */
+function buildFlags(scene: THREE.Scene) {
+  const place = (x: number, z: number, height: number, width: number, facing: number) => {
+    const flag = makeFlag(height, width);
+    flag.position.set(x, 0, z);
+    flag.rotation.y = facing;
+    addChunk(scene, flag, [x, z], width + 5);
+  };
+  for (const id of RACE_IDS) {
+    const m = raceMarker(id);
+    // Anda para o lado da rua até sair do asfalto.
+    const nx = Math.cos(m.heading);
+    const nz = -Math.sin(m.heading);
+    for (let d = 8; d < 30; d += 1) {
+      const x = m.x + nx * d;
+      const z = m.z + nz * d;
+      if (isOnRoad(x, z)) continue;
+      place(x + nx * 2, z + nz * 2, 11, 5.4, m.heading + Math.PI / 2);
+      break;
+    }
+  }
+  for (const [x, z, size] of [[400, 40, 16], [400, 425, 14]] as const) {
+    for (let k = 0; k < 4; k++) {
+      const angle = (k / 4) * Math.PI * 2 + 0.4;
+      const r = size * 1.1;
+      if (isOnRoad(x + Math.cos(angle) * r, z + Math.sin(angle) * r)) continue;
+      place(x + Math.cos(angle) * r, z + Math.sin(angle) * r, 16, 7.5, -angle);
+    }
+  }
+}
+
 export function buildScenery(scene: THREE.Scene) {
   scene.background = new THREE.Color(FOG_COLOR);
   scene.fog = new THREE.Fog(FOG_COLOR, 160, 620);
@@ -775,6 +827,7 @@ export function buildScenery(scene: THREE.Scene) {
   buildLamps(scene);
   buildBillboards(scene);
   buildTrees(scene);
+  buildFlags(scene);
   scene.add(buildTrackMesh(RACES.autodromo.track, { asphalt: true }));
   return { sky, sun: sunSprite, light: sun, clouds };
 }

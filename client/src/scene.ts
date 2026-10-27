@@ -17,6 +17,7 @@ import {
 } from "@nfbmc/shared";
 
 import { Effects } from "./effects.ts";
+import { forgetFlags, waveFlags } from "./flag.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
 import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
 import { InkPass, toonify, type Quality } from "./toon.ts";
@@ -313,7 +314,10 @@ export class GameScene {
    * marcam o traçado por cima das ruas; o autódromo já está sempre desenhado.
    */
   setRace(raceId: RaceId | null) {
-    if (this.raceOverlay) this.scene.remove(this.raceOverlay);
+    if (this.raceOverlay) {
+      this.scene.remove(this.raceOverlay);
+      forgetFlags(this.raceOverlay);
+    }
     this.raceOverlay = null;
     if (raceId && raceId !== "autodromo") {
       this.raceOverlay = buildTrackMesh(RACES[raceId].track, { asphalt: false, bannerColor: "#ff7a00" });
@@ -500,6 +504,7 @@ export class GameScene {
       }
     }
     this.effects.update(dt);
+    waveFlags(this.time);
 
     this.foods.forEach((food, i) => {
       food.rotation.y = this.time * 2 + i;

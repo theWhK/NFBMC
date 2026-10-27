@@ -2992,3 +2992,26 @@ body.touch:has(#marker-panel:not([hidden])) #dash {
   padding: 6px 8px;
   font: 1rem var(--hud);
 }
+
+/* Bandeira do Orgulho Gordo (client/src/flag.ts tem as mesmas cores). */
+.burger-flag {
+  height: 18px;
+  margin: -4px -4px 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    #e98d33 0 16.66%, #84b818 16.66% 33.33%, #fdd65e 33.33% 50%,
+    #f84040 50% 66.66%, #6e3500 66.66% 83.33%, #e98d33 83.33% 100%
+  );
+}
+
+.burger-flag.small {
+  display: inline-block;
+  width: 30px;
+  height: 20px;
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+
+.credit-flag {
+  font-size: 0.9rem;
+}

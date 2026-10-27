@@ -1,6 +1,8 @@
 // Desenho de um traçado: asfalto (opcional), zebras, linha de chegada e pórtico.
 // O autódromo usa tudo; as corridas de rua só marcam as zebras por cima da rua.
 import * as THREE from "three";
+
+import { makeFlag } from "./flag.ts";
 import type { Track } from "@nfbmc/shared";
 
 /** Faixa ao longo da pista, entre `inner` e `outer` metros do centro (negativo = lado direito). */
@@ -84,6 +86,13 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
   gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(half + 2).translateY(3.5));
   gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(-half - 2).translateY(3.5));
   gate.add(new THREE.Mesh(new THREE.BoxGeometry(track.width + 4.6, 1.6, 0.4), banner).translateY(7));
+  // Bandeiras do Orgulho Gordo em cima das colunas, apontando para fora da pista.
+  for (const side of [1, -1]) {
+    const flag = makeFlag(4, 3.6);
+    flag.position.set(side * (half + 2), 7.8, 0);
+    flag.rotation.y = side > 0 ? 0 : Math.PI;
+    gate.add(flag);
+  }
   gate.rotation.y = heading;
   gate.position.set(start.x, 0, start.z);
   group.add(gate);
