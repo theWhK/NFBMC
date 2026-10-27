@@ -25,6 +25,7 @@ import {
   PLAYER_CARS,
   carSpec,
   createDrive,
+  createPlayerDrive,
   isCarId,
   requestShift,
   type DriveState,
@@ -211,7 +212,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     player.color = pickColor(options?.color, usedColors);
     player.car = isCarId(options?.car) ? options.car : DEFAULT_CAR;
     player.manual = options?.manual === true;
-    this.drives.set(client.sessionId, createDrive(carSpec(player.car), player.manual));
+    this.drives.set(client.sessionId, createPlayerDrive(carSpec(player.car), player.manual));
 
     this.placeOnGrid(player, this.state.players.size);
     this.state.players.set(client.sessionId, player);
@@ -315,7 +316,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     let slot = 0;
     grid.forEach(([sessionId, player]) => {
       this.placeOnGrid(player, slot++);
-      this.drives.set(sessionId, createDrive(carSpec(player.car), player.manual));
+      this.drives.set(sessionId, player.bot ? createDrive(carSpec(player.car)) : createPlayerDrive(carSpec(player.car), player.manual));
       this.motions.reset(sessionId);
       player.racing = true;
       player.lap = 0;
@@ -435,7 +436,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       player.boost = Math.max(0, player.boost - dt);
       const spec = carSpec(player.car);
       let drive = this.drives.get(sessionId);
-      if (!drive) this.drives.set(sessionId, (drive = createDrive(spec, player.manual)));
+      if (!drive) this.drives.set(sessionId, (drive = player.bot ? createDrive(spec) : createPlayerDrive(spec, player.manual)));
       const motion = this.motions.get(sessionId);
       stepCar(player, drive, spec, input, dt, onGrass, player.boost > 0, motion);
       const size = carHalfSize(player.car);

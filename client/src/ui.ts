@@ -101,6 +101,8 @@ export function hideModeUi() {
     ui.lobby, ui.hud, ui.countdown, ui.message, ui.results,
     ui.worldHud, ui.leaderboard, ui.markerPanel, ui.speedlines,
     ui.wanted, ui.pursuit, ui.banner, ui.district,
+    // O painel (velocímetro e turbo) também: senão ficava aparecendo no menu.
+    ui.dash,
   ]) el.hidden = true;
   ui.vignette.classList.remove("chase");
 }
