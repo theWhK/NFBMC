@@ -13,7 +13,7 @@ import {
   type RaceId,
 } from "@nfbmc/shared";
 
-import { Sound } from "./audio.ts";
+import { Sound, type OtherCarSound } from "./audio.ts";
 import { createFullMap, createMinimap, createTacho, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
 import { LOGO_SVG } from "./logo.ts";
@@ -156,7 +156,8 @@ const ctx: ModeContext = {
   drawTacho,
   drawMinimap,
   updateOtherEngines(cars, myId, me) {
-    const others = new Map<string, { speed: number; distance: number; pan: number }>();
+    const others = new Map<string, OtherCarSound>();
+    const mine = cars.get(myId);
     for (const [id, car] of cars) {
       if (id === myId || !car.visible) continue;
       const dx = car.x - me.x;
@@ -165,7 +166,16 @@ const ctx: ModeContext = {
       if (distance > 70) continue;
       // Direita de quem olha para o heading: (-cos, sin).
       const pan = distance > 0 ? (dx * -Math.cos(me.heading) + dz * Math.sin(me.heading)) / distance : 0;
-      others.set(id, { speed: car.speed, distance, pan });
+      // Velocidade de aproximação (para o Doppler): projeção das duas velocidades na linha entre os carros.
+      let closing = 0;
+      if (distance > 0.5) {
+        const ux = dx / distance;
+        const uz = dz / distance;
+        const theirs = car.speed * (Math.sin(car.heading) * ux + Math.cos(car.heading) * uz);
+        const ours = (mine?.speed ?? 0) * (Math.sin(me.heading) * ux + Math.cos(me.heading) * uz);
+        closing = ours - theirs;
+      }
+      others.set(id, { speed: car.speed, distance, pan, rpm: car.rpm, car: car.car, traffic: car.traffic, closing });
     }
     // Só os 6 motores mais perto (com trânsito, podiam ser dezenas de osciladores).
     const nearest = new Map([...others].sort(([, a], [, b]) => a.distance - b.distance).slice(0, 6));
@@ -176,7 +186,8 @@ const ctx: ModeContext = {
     const now = performance.now();
     const drop = Math.abs(previous.speed) - Math.abs(speed);
     if (drop > 3 && currentInput().throttle >= 0 && now - previous.bumpAt > 400) {
-      sound.bump();
+      // Quanto mais velocidade perdeu de uma vez, mais forte a pancada.
+      sound.bump(Math.min(1, 0.2 + (drop - 3) / 14));
       if (touch) navigator.vibrate?.(60);
       previous.bumpAt = now;
     }
@@ -446,7 +457,8 @@ function openHelp() {
 function carAction(action: "horn" | "camera" | "reset") {
   if (!mode) return;
   if (action === "horn") {
-    sound.horn();
+    const view = lastMapView;
+    sound.horn(1, 0, view?.cars.get(view.myId)?.car);
     mode.sendHorn();
   } else if (action === "camera") {
     const name = scene?.cycleCamera();
@@ -467,7 +479,7 @@ function remoteHorn(id: string) {
   const dz = car.z - me.z;
   const distance = Math.hypot(dx, dz);
   const pan = distance > 0 ? (dx * -Math.cos(me.heading) + dz * Math.sin(me.heading)) / distance : 0;
-  sound.horn(Math.max(0, 1 - distance / 120), pan);
+  sound.horn(Math.max(0, 1 - distance / 120), pan, car.car);
 }
 
 /** Ao abrir a pausa ou o mapa, solta tudo (o carro não fica acelerando sozinho). */

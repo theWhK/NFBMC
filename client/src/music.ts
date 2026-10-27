@@ -2,6 +2,8 @@
 // Cada música é uma função chamada a cada semicolcheia (16 passos por compasso)
 // que decide o que tocar naquele instante.
 
+import { impulseResponse } from "./sfx.ts";
+
 export type SongName = "lobby" | "race" | "pursuit" | "trailer";
 
 const midiToFreq = (note: number) => 440 * 2 ** ((note - 69) / 12);
@@ -16,25 +18,87 @@ function distortionCurve(amount: number) {
   return curve;
 }
 
+/**
+ * Os instrumentos da banda. Cada um tem um timbre montado (não é só uma onda
+ * crua): bumbo com estalo e queda de afinação, caixa com corpo e esteira,
+ * guitarra dobrada em estéreo passando por "amplificador" e "caixa", baixo com
+ * sub, solo com vibrato e eco, e uma sala (reverberação gerada no código).
+ */
 class Instruments {
-  private distortion: WaveShaperNode;
-  private guitarBus: GainNode;
+  private guitars: GainNode[] = [];
   private ctx: AudioContext;
   private out: AudioNode;
   private noise: AudioBuffer;
+  private room: GainNode;
+  private echo: GainNode;
 
   constructor(ctx: AudioContext, out: AudioNode, noise: AudioBuffer) {
     this.ctx = ctx;
     this.out = out;
     this.noise = noise;
-    this.distortion = ctx.createWaveShaper();
-    this.distortion.curve = distortionCurve(40);
-    const tone = ctx.createBiquadFilter();
-    tone.type = "lowpass";
-    tone.frequency.value = 2600;
-    this.guitarBus = ctx.createGain();
-    this.guitarBus.gain.value = 0.22;
-    this.distortion.connect(tone).connect(this.guitarBus).connect(out);
+
+    // Sala: reverberação curta e escura para a banda soar "num lugar".
+    const reverb = ctx.createConvolver();
+    reverb.buffer = impulseResponse(ctx, 1.6, 3.2, 0.45);
+    this.room = ctx.createGain();
+    const roomOut = ctx.createGain();
+    roomOut.gain.value = 0.8;
+    this.room.connect(reverb).connect(roomOut).connect(out);
+
+    // Eco do solo (pingue-pongue esquerda/direita).
+    this.echo = ctx.createGain();
+    const left = ctx.createDelay(1);
+    const right = ctx.createDelay(1);
+    left.delayTime.value = 0.3;
+    right.delayTime.value = 0.3;
+    const feedback = ctx.createGain();
+    feedback.gain.value = 0.35;
+    const damp = ctx.createBiquadFilter();
+    damp.type = "lowpass";
+    damp.frequency.value = 2500;
+    const panL = ctx.createStereoPanner();
+    panL.pan.value = -0.7;
+    const panR = ctx.createStereoPanner();
+    panR.pan.value = 0.7;
+    this.echo.connect(left);
+    left.connect(panL).connect(out);
+    left.connect(right);
+    right.connect(panR).connect(out);
+    right.connect(damp).connect(feedback).connect(left);
+
+    // Guitarra: duas tomadas (esquerda e direita), cada uma com distorção em
+    // dois estágios e a "caixa" do amplificador (corta grave e agudo, cava o médio).
+    for (const pan of [-0.65, 0.65]) {
+      const input = ctx.createGain();
+      const pre = ctx.createBiquadFilter();
+      pre.type = "highpass";
+      pre.frequency.value = 120;
+      const drive1 = ctx.createWaveShaper();
+      drive1.curve = distortionCurve(12);
+      const drive2 = ctx.createWaveShaper();
+      drive2.curve = distortionCurve(30);
+      const mid = ctx.createBiquadFilter();
+      mid.type = "peaking";
+      mid.frequency.value = 750;
+      mid.Q.value = 1;
+      mid.gain.value = -6;
+      const cab = ctx.createBiquadFilter();
+      cab.type = "lowpass";
+      cab.frequency.value = 3400;
+      cab.Q.value = 0.9;
+      const cab2 = ctx.createBiquadFilter();
+      cab2.type = "lowpass";
+      cab2.frequency.value = 5000;
+      const level = ctx.createGain();
+      level.gain.value = 0.16;
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = pan;
+      input.connect(pre).connect(drive1).connect(drive2).connect(mid).connect(cab).connect(cab2).connect(level).connect(panner).connect(out);
+      const send = ctx.createGain();
+      send.gain.value = 0.15;
+      panner.connect(send).connect(this.room);
+      this.guitars.push(input);
+    }
   }
 
   private envelope(t: number, volume: number, attack: number, duration: number) {
@@ -55,70 +119,135 @@ class Instruments {
     return osc;
   }
 
-  private noiseHit(t: number, duration: number, type: BiquadFilterType, freq: number, volume: number) {
+  private noiseHit(t: number, duration: number, type: BiquadFilterType, freq: number, volume: number, dest: AudioNode = this.out, q = 1) {
     const source = this.ctx.createBufferSource();
     source.buffer = this.noise;
     const filter = this.ctx.createBiquadFilter();
     filter.type = type;
     filter.frequency.value = freq;
-    source.connect(filter).connect(this.envelope(t, volume, 0.002, duration)).connect(this.out);
+    filter.Q.value = q;
+    const env = this.envelope(t, volume, 0.002, duration);
+    source.connect(filter).connect(env).connect(dest);
     source.start(t, Math.random());
     source.stop(t + duration + 0.05);
+    return env;
   }
 
+  private send(node: AudioNode, amount: number, dest: AudioNode = this.room) {
+    const gain = this.ctx.createGain();
+    gain.gain.value = amount;
+    node.connect(gain).connect(dest);
+  }
+
+  /** Bumbo: senoide caindo de 160 para 45 Hz, mais o estalo da baqueta. */
   kick(t: number, volume = 1) {
-    const gain = this.envelope(t, volume, 0.002, 0.35);
+    const gain = this.envelope(t, volume, 0.002, 0.4);
     gain.connect(this.out);
-    const osc = this.osc("sine", 150, t, 0.35, gain);
-    osc.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    const osc = this.osc("sine", 160, t, 0.4, gain);
+    osc.frequency.exponentialRampToValueAtTime(45, t + 0.11);
+    this.noiseHit(t, 0.012, "highpass", 3000, volume * 0.25);
   }
 
+  /** Caixa: corpo afinado, esteira (ruído) e um pouco de sala. */
   snare(t: number, volume = 0.6) {
-    this.noiseHit(t, 0.18, "highpass", 1400, volume);
-    const gain = this.envelope(t, volume * 0.5, 0.002, 0.1);
+    const wire = this.noiseHit(t, 0.2, "bandpass", 2200, volume, this.out, 0.6);
+    this.send(wire, 0.35);
+    this.noiseHit(t, 0.08, "highpass", 5000, volume * 0.4);
+    const gain = this.envelope(t, volume * 0.6, 0.002, 0.12);
     gain.connect(this.out);
-    this.osc("triangle", 190, t, 0.1, gain);
+    const body = this.osc("triangle", 200, t, 0.12, gain);
+    body.frequency.exponentialRampToValueAtTime(165, t + 0.1);
   }
 
+  /** Chimbal: ruído bem agudo, um pouco para a direita. */
   hat(t: number, open = false, volume = 0.18) {
-    this.noiseHit(t, open ? 0.22 : 0.045, "highpass", 7500, volume);
+    const source = this.ctx.createBufferSource();
+    source.buffer = this.noise;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 7000;
+    const peak = this.ctx.createBiquadFilter();
+    peak.type = "peaking";
+    peak.frequency.value = 10000;
+    peak.gain.value = 6;
+    const env = this.envelope(t, volume, 0.001, open ? 0.25 : 0.045);
+    const pan = this.ctx.createStereoPanner();
+    pan.pan.value = 0.3;
+    source.connect(hp).connect(peak).connect(env).connect(pan).connect(this.out);
+    source.start(t, Math.random());
+    source.stop(t + 0.3);
   }
 
+  /** Baixo: dente de serra com o filtro fechando, mais um sub (senoide uma oitava abaixo). */
   bass(t: number, note: number, duration: number, volume = 0.45) {
     const filter = this.ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(900, t);
-    filter.frequency.exponentialRampToValueAtTime(180, t + duration);
+    filter.Q.value = 3;
+    filter.frequency.setValueAtTime(1200, t);
+    filter.frequency.exponentialRampToValueAtTime(160, t + duration);
     const gain = this.envelope(t, volume, 0.005, duration);
     filter.connect(gain).connect(this.out);
     this.osc("sawtooth", midiToFreq(note), t, duration, filter);
+    const sub = this.envelope(t, volume * 0.6, 0.005, duration);
+    sub.connect(this.out);
+    this.osc("sine", midiToFreq(note) / 2, t, duration, sub);
   }
 
-  /** Power chord distorcido: tônica, quinta e oitava. */
+  /** Power chord distorcido (tônica, quinta e oitava), tocado nas duas guitarras. */
   power(t: number, root: number, duration: number) {
-    const gain = this.envelope(t, 1, 0.005, duration);
-    gain.connect(this.distortion);
-    for (const interval of [0, 7, 12]) {
-      this.osc("sawtooth", midiToFreq(root + interval) * (1 + (Math.random() - 0.5) * 0.004), t, duration, gain);
-    }
+    this.guitars.forEach((guitar, side) => {
+      const gain = this.envelope(t, 1, 0.004, duration);
+      gain.connect(guitar);
+      for (const interval of [0, 7, 12]) {
+        // Cada lado levemente desafinado e atrasado: soa como duas gravações.
+        const osc = this.osc("sawtooth", midiToFreq(root + interval) * (1 + (side ? 0.003 : -0.003)), t + side * 0.008, duration, gain);
+        osc.detune.value = (Math.random() - 0.5) * 6;
+      }
+    });
   }
 
+  /** Solo: duas ondas quadradas desafinadas, vibrato, sala e eco. */
   lead(t: number, note: number, duration: number, volume = 0.09) {
     const filter = this.ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.value = 3200;
-    const gain = this.envelope(t, volume, 0.01, duration);
+    const gain = this.envelope(t, volume * 0.8, 0.01, duration);
     filter.connect(gain).connect(this.out);
-    this.osc("square", midiToFreq(note), t, duration, filter);
+    this.send(gain, 0.3);
+    this.send(gain, 0.35, this.echo);
+    const vibrato = this.ctx.createOscillator();
+    vibrato.frequency.value = 5.8;
+    const depth = this.ctx.createGain();
+    depth.gain.setValueAtTime(0, t);
+    depth.gain.linearRampToValueAtTime(midiToFreq(note) * 0.008, t + Math.min(0.3, duration));
+    vibrato.connect(depth);
+    vibrato.start(t);
+    vibrato.stop(t + duration + 0.05);
+    for (const detune of [-7, 7]) {
+      const osc = this.osc("square", midiToFreq(note), t, duration, filter);
+      osc.detune.value = detune;
+      depth.connect(osc.frequency);
+    }
   }
 
+  /** Teclado de fundo: serras desafinadas, filtro fechado, abertas em estéreo e com bastante sala. */
   pad(t: number, notes: number[], duration: number, volume = 0.05) {
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(700, t);
+    filter.frequency.linearRampToValueAtTime(1800, t + duration * 0.5);
+    filter.frequency.linearRampToValueAtTime(900, t + duration);
     const gain = this.envelope(t, volume, duration * 0.3, duration);
-    gain.connect(this.out);
-    for (const note of notes) {
-      this.osc("triangle", midiToFreq(note), t, duration, gain);
-      this.osc("sawtooth", midiToFreq(note) * 1.003, t, duration, gain).detune.value = 8;
-    }
+    filter.connect(gain).connect(this.out);
+    this.send(gain, 0.6);
+    notes.forEach((note, i) => {
+      const pan = this.ctx.createStereoPanner();
+      pan.pan.value = ((i % 3) - 1) * 0.6;
+      pan.connect(filter);
+      this.osc("triangle", midiToFreq(note), t, duration, pan);
+      this.osc("sawtooth", midiToFreq(note), t, duration, pan).detune.value = 9;
+      this.osc("sawtooth", midiToFreq(note), t, duration, pan).detune.value = -9;
+    });
   }
 }
 
