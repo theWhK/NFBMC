@@ -136,8 +136,9 @@ const PALETTES: Record<BuildingKind, string[]> = {
 const AWNINGS = ["#c1121f", "#2a9d8f", "#f4a261", "#1d3557"];
 const ROOFS = ["#8d3b2a", "#6b3a2a", "#4a4f57", "#7a4b2a"];
 
-const instancedBoxes = (material: THREE.Material, list: { matrix: THREE.Matrix4; color: THREE.Color }[]) => {
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), material, Math.max(1, list.length));
+const unitBox = new THREE.BoxGeometry(1, 1, 1);
+const instancedBoxes = (material: THREE.Material, list: { matrix: THREE.Matrix4; color: THREE.Color }[], geometry: THREE.BufferGeometry = unitBox) => {
+  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length));
   list.forEach(({ matrix, color }, i) => {
     mesh.setMatrixAt(i, matrix);
     mesh.setColorAt(i, color);
@@ -145,6 +146,52 @@ const instancedBoxes = (material: THREE.Material, list: { matrix: THREE.Matrix4;
   mesh.count = list.length;
   return mesh;
 };
+
+/**
+ * Porto Gordo ficou grande: prédios, árvores e postes são divididos em blocos
+ * de TILE metros, e a cena só desenha os blocos perto da câmera (o resto está
+ * escondido na neblina de qualquer jeito). `CHUNKS` guarda cada bloco com o
+ * centro dele em `userData.center`.
+ */
+const TILE = 250;
+export const CHUNKS: THREE.Object3D[] = [];
+
+function byTile<T>(items: T[], position: (item: T) => [number, number]) {
+  const tiles = new Map<string, { center: [number, number]; items: T[] }>();
+  for (const item of items) {
+    const [x, z] = position(item);
+    const tx = Math.floor(x / TILE);
+    const tz = Math.floor(z / TILE);
+    const key = `${tx},${tz}`;
+    let tile = tiles.get(key);
+    if (!tile) tiles.set(key, (tile = { center: [(tx + 0.5) * TILE, (tz + 0.5) * TILE], items: [] }));
+    tile.items.push(item);
+  }
+  return [...tiles.values()];
+}
+
+/**
+ * Põe na cena um objeto que pertence a um bloco (a cena esconde quando está
+ * longe). `radius`: até onde o conteúdo vai, a partir do centro (padrão: o
+ * canto do bloco, com folga para um galpão grande).
+ */
+export function addChunk(scene: THREE.Scene, object: THREE.Object3D, center: [number, number], radius = TILE * 0.71 + 40) {
+  object.userData.center = center;
+  object.userData.radius = radius;
+  CHUNKS.push(object);
+  scene.add(object);
+}
+
+const matrixXZ = (m: THREE.Matrix4): [number, number] => [m.elements[12], m.elements[14]];
+
+/** Caixas instanciadas, uma malha por bloco. */
+function addTiledBoxes(scene: THREE.Scene, material: THREE.Material, list: { matrix: THREE.Matrix4; color: THREE.Color }[], geometry?: THREE.BufferGeometry) {
+  for (const tile of byTile(list, (item) => matrixXZ(item.matrix))) {
+    const mesh = instancedBoxes(material, tile.items, geometry);
+    mesh.computeBoundingSphere();
+    addChunk(scene, mesh, tile.center);
+  }
+}
 
 /** Matriz de uma caixa girada do mapa (base no chão). */
 function boxMatrix(b: { x: number; z: number; w: number; d: number; angle: number }, height: number, y = 0, inset = 0) {
@@ -220,15 +267,10 @@ function buildBuildings(scene: THREE.Scene) {
   }
 
   const lambert = new THREE.MeshLambertMaterial({ color: "#ffffff" });
-  scene.add(instancedBoxes(buildingMaterial("#ffffff"), windowed));
-  scene.add(instancedBoxes(lambert, plain));
-  scene.add(instancedBoxes(lambert, awnings));
-  const roofMesh = new THREE.InstancedMesh(roofGeometry(), lambert, roofs.length);
-  roofs.forEach(({ matrix, color: c }, i) => {
-    roofMesh.setMatrixAt(i, matrix);
-    roofMesh.setColorAt(i, c);
-  });
-  scene.add(roofMesh);
+  addTiledBoxes(scene, buildingMaterial("#ffffff"), windowed);
+  addTiledBoxes(scene, lambert, plain);
+  addTiledBoxes(scene, lambert, awnings);
+  addTiledBoxes(scene, lambert, roofs, roofGeometry());
 }
 
 /** Silhueta de cidade além do muro do mapa (menos para o lado do mar). */
@@ -236,11 +278,16 @@ function buildSkyline(scene: THREE.Scene) {
   const random = seeded(99);
   const matrices: THREE.Matrix4[] = [];
   const quat = new THREE.Quaternion();
-  for (let i = 0; i < 160; i++) {
-    const angle = (i / 160) * Math.PI * 2 + random() * 0.03;
-    const radius = 820 + random() * 200;
-    const x = Math.cos(angle) * radius;
-    const z = Math.sin(angle) * radius;
+  // Em volta dos limites do mapa (um retângulo um pouco maior), menos do lado do mar.
+  const cx = (WORLD_BOUNDS.minX + WORLD_BOUNDS.maxX) / 2;
+  const cz = (WORLD_BOUNDS.minZ + WORLD_BOUNDS.maxZ) / 2;
+  const hx = (WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX) / 2 + 250;
+  const hz = (WORLD_BOUNDS.maxZ - WORLD_BOUNDS.minZ) / 2 + 250;
+  for (let i = 0; i < 360; i++) {
+    const angle = (i / 360) * Math.PI * 2 + random() * 0.01;
+    const reach = Math.min(hx / Math.abs(Math.cos(angle) || 1e-6), hz / Math.abs(Math.sin(angle) || 1e-6)) + random() * 200;
+    const x = cx + Math.cos(angle) * reach;
+    const z = cz + Math.sin(angle) * reach;
     if (z < QUAY_Z - 50) continue; // ali é mar
     const height = 40 + random() ** 2 * 180;
     const width = 30 + random() * 40;
@@ -436,26 +483,46 @@ function buildGround(scene: THREE.Scene) {
     scene.add(mesh);
   }
 
-  // Calçadas (um pouco mais largas que a rua) e asfalto, cada um numa malha só.
+  // Calçadas (um pouco mais largas que a rua) e asfalto, uma malha de cada por
+  // bloco da cidade (cada rua vai para o bloco do meio dela).
   // As camadas ficam separadas na altura e com polygonOffset: com pouca precisão
   // de profundidade o chão "brigava" com o asfalto e a rua sumia.
-  const sidewalkParts: THREE.BufferGeometry[] = [];
-  const asphaltParts: THREE.BufferGeometry[] = [];
   const nodeRadius = new Map<string, number>();
   for (const road of ROADS) {
-    sidewalkParts.push(stripGeometry(road.points, road.width / 2 + 3, 0.02).toNonIndexed());
-    asphaltParts.push(stripGeometry(road.points, road.width / 2, 0.05).toNonIndexed());
     for (const id of [road.a, road.b]) nodeRadius.set(id, Math.max(nodeRadius.get(id) ?? 0, road.width / 2));
+  }
+  type Piece = { x: number; z: number; points: [number, number][]; sidewalk: THREE.BufferGeometry; asphalt: THREE.BufferGeometry };
+  const pieces: Piece[] = [];
+  for (const road of ROADS) {
+    const [x, z] = road.points[Math.floor(road.points.length / 2)];
+    pieces.push({
+      x, z, points: road.points,
+      sidewalk: stripGeometry(road.points, road.width / 2 + 3, 0.02).toNonIndexed(),
+      asphalt: stripGeometry(road.points, road.width / 2, 0.05).toNonIndexed(),
+    });
   }
   for (const node of NAV) {
     const radius = nodeRadius.get(node.id);
     if (!radius) continue;
-    sidewalkParts.push(discGeometry(node.x, node.z, radius + 3, 0.02));
-    asphaltParts.push(discGeometry(node.x, node.z, radius, 0.05));
+    pieces.push({
+      x: node.x, z: node.z, points: [[node.x, node.z]],
+      sidewalk: discGeometry(node.x, node.z, radius + 3, 0.02),
+      asphalt: discGeometry(node.x, node.z, radius, 0.05),
+    });
   }
   const offset = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
-  scene.add(new THREE.Mesh(mergeGeometries(sidewalkParts), new THREE.MeshLambertMaterial({ color: "#ffffff", map: sidewalkTexture() })));
-  scene.add(new THREE.Mesh(mergeGeometries(asphaltParts), new THREE.MeshLambertMaterial({ color: "#ffffff", map: asphaltTexture(), ...offset })));
+  const sidewalkMaterial = new THREE.MeshLambertMaterial({ color: "#ffffff", map: sidewalkTexture() });
+  const asphaltMaterial = new THREE.MeshLambertMaterial({ color: "#ffffff", map: asphaltTexture(), ...offset });
+  for (const tile of byTile(pieces, (p) => [p.x, p.z])) {
+    const [cx, cz] = tile.center;
+    const reach = Math.max(...tile.items.flatMap((p) => p.points.map(([x, z]) => Math.hypot(x - cx, z - cz)))) + 20;
+    const group = new THREE.Group();
+    group.add(
+      new THREE.Mesh(mergeGeometries(tile.items.map((p) => p.sidewalk)), sidewalkMaterial),
+      new THREE.Mesh(mergeGeometries(tile.items.map((p) => p.asphalt)), asphaltMaterial),
+    );
+    addChunk(scene, group, tile.center, reach);
+  }
 
   // Faixa tracejada no meio das avenidas e ruas (vielas não têm), longe dos cruzamentos.
   const dashes: THREE.Matrix4[] = [];
@@ -478,10 +545,10 @@ function buildGround(scene: THREE.Scene) {
 
   // O mar, ao sul do cais, e o muro do cais.
   const sea = new THREE.Mesh(
-    new THREE.PlaneGeometry(4000, 1600).rotateX(-Math.PI / 2),
+    new THREE.PlaneGeometry(WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 6000, 3000).rotateX(-Math.PI / 2),
     new THREE.MeshLambertMaterial({ color: "#2b6a8f", emissive: "#3a5a7a", emissiveIntensity: 0.35 }),
   );
-  sea.position.set(0, -0.6, QUAY_Z - 800);
+  sea.position.set(0, -0.6, QUAY_Z - 1500);
   scene.add(sea);
   const quay = new THREE.Mesh(new THREE.BoxGeometry(WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 40, 1.6, 2), new THREE.MeshLambertMaterial({ color: "#6b6258" }));
   quay.position.set(0, 0.2, QUAY_Z - 1);
@@ -543,33 +610,33 @@ function buildLamps(scene: THREE.Scene) {
     spots.push(new THREE.Vector3(p.x, 0, p.z));
   }
 
-  const poles = new THREE.InstancedMesh(
-    new THREE.CylinderGeometry(0.15, 0.22, 9, 6),
-    new THREE.MeshLambertMaterial({ color: "#2c2a2e" }),
-    spots.length,
-  );
+  const poleGeometry = new THREE.CylinderGeometry(0.15, 0.22, 9, 6);
+  const poleMaterial = new THREE.MeshLambertMaterial({ color: "#2c2a2e" });
+  const glowMaterial = new THREE.PointsMaterial({
+    size: 7,
+    map: glowTexture("rgba(255,214,140,1)"),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+  });
   const matrix = new THREE.Matrix4();
   const quat = new THREE.Quaternion();
   const one = new THREE.Vector3(1, 1, 1);
-  const glowPositions: number[] = [];
-  spots.forEach((p, i) => {
-    matrix.compose(new THREE.Vector3(p.x, 4.5, p.z), quat, one);
-    poles.setMatrixAt(i, matrix);
-    glowPositions.push(p.x, 9, p.z);
-  });
-  const glowGeometry = new THREE.BufferGeometry();
-  glowGeometry.setAttribute("position", new THREE.Float32BufferAttribute(glowPositions, 3));
-  const glows = new THREE.Points(
-    glowGeometry,
-    new THREE.PointsMaterial({
-      size: 7,
-      map: glowTexture("rgba(255,214,140,1)"),
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-    }),
-  );
-  scene.add(poles, glows);
+  for (const tile of byTile(spots, (p) => [p.x, p.z])) {
+    const poles = new THREE.InstancedMesh(poleGeometry, poleMaterial, tile.items.length);
+    const glowPositions: number[] = [];
+    tile.items.forEach((p, i) => {
+      matrix.compose(new THREE.Vector3(p.x, 4.5, p.z), quat, one);
+      poles.setMatrixAt(i, matrix);
+      glowPositions.push(p.x, 9, p.z);
+    });
+    poles.computeBoundingSphere();
+    const glowGeometry = new THREE.BufferGeometry();
+    glowGeometry.setAttribute("position", new THREE.Float32BufferAttribute(glowPositions, 3));
+    const lamps = new THREE.Group();
+    lamps.add(poles, new THREE.Points(glowGeometry, glowMaterial));
+    addChunk(scene, lamps, tile.center);
+  }
 }
 
 const BILLBOARDS: { title: string; subtitle: string; bg: string; fg: string }[] = [
@@ -637,36 +704,40 @@ function buildBillboards(scene: THREE.Scene) {
 
 /** Árvores de brócolis, porque toda dieta precisa de um vegetal (de enfeite). */
 function buildTrees(scene: THREE.Scene) {
-  const stem = new THREE.InstancedMesh(
-    new THREE.CylinderGeometry(0.5, 0.8, 3, 8),
-    new THREE.MeshLambertMaterial({ color: "#9bc25b" }),
-    TREES.length,
-  );
-  const crown = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(2.4, 1),
-    new THREE.MeshLambertMaterial({ color: "#3d7d2c", flatShading: true }),
-    TREES.length * 3,
-  );
+  const stemGeometry = new THREE.CylinderGeometry(0.5, 0.8, 3, 8);
+  const stemMaterial = new THREE.MeshLambertMaterial({ color: "#9bc25b" });
+  const crownGeometry = new THREE.IcosahedronGeometry(2.4, 1);
+  const crownMaterial = new THREE.MeshLambertMaterial({ color: "#3d7d2c", flatShading: true });
   const matrix = new THREE.Matrix4();
   const scale = new THREE.Vector3();
   const quat = new THREE.Quaternion();
-  TREES.forEach((tree, i) => {
-    const s = tree.size;
-    scale.setScalar(s);
-    matrix.compose(new THREE.Vector3(tree.x, 1.5 * s, tree.z), quat, scale);
-    stem.setMatrixAt(i, matrix);
-    for (let k = 0; k < 3; k++) {
-      const angle = (k / 3) * Math.PI * 2 + i;
-      const pos = new THREE.Vector3(
-        tree.x + Math.cos(angle) * 1.1 * s,
-        (3.4 + (k === 0 ? 0.6 : 0)) * s,
-        tree.z + Math.sin(angle) * 1.1 * s,
-      );
-      matrix.compose(pos, quat, scale);
-      crown.setMatrixAt(i * 3 + k, matrix);
-    }
-  });
-  scene.add(stem, crown);
+  let n = 0;
+  for (const tile of byTile(TREES, (t) => [t.x, t.z])) {
+    const stem = new THREE.InstancedMesh(stemGeometry, stemMaterial, tile.items.length);
+    const crown = new THREE.InstancedMesh(crownGeometry, crownMaterial, tile.items.length * 3);
+    tile.items.forEach((tree, i) => {
+      const s = tree.size;
+      scale.setScalar(s);
+      matrix.compose(new THREE.Vector3(tree.x, 1.5 * s, tree.z), quat, scale);
+      stem.setMatrixAt(i, matrix);
+      for (let k = 0; k < 3; k++) {
+        const angle = (k / 3) * Math.PI * 2 + n;
+        const pos = new THREE.Vector3(
+          tree.x + Math.cos(angle) * 1.1 * s,
+          (3.4 + (k === 0 ? 0.6 : 0)) * s,
+          tree.z + Math.sin(angle) * 1.1 * s,
+        );
+        matrix.compose(pos, quat, scale);
+        crown.setMatrixAt(i * 3 + k, matrix);
+      }
+      n++;
+    });
+    stem.computeBoundingSphere();
+    crown.computeBoundingSphere();
+    const group = new THREE.Group();
+    group.add(stem, crown);
+    addChunk(scene, group, tile.center);
+  }
 
   // Hambúrgueres gigantes de estátua: na beira do lago e no meio do autódromo.
   for (const [x, z, size] of [[400, 40, 16], [400, 425, 14]] as const) {
@@ -687,11 +758,11 @@ export function buildScenery(scene: THREE.Scene) {
   scene.add(sun, sun.target);
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(3000, 3000),
+    new THREE.PlaneGeometry(9000, 9000),
     new THREE.MeshLambertMaterial({ color: "#6b7337" }),
   );
   ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.15;
+  ground.position.set((WORLD_BOUNDS.minX + WORLD_BOUNDS.maxX) / 2, -0.15, (WORLD_BOUNDS.minZ + WORLD_BOUNDS.maxZ) / 2);
   scene.add(ground);
 
   const { sky, sun: sunSprite } = buildSky(scene);

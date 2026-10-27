@@ -32,7 +32,7 @@
         <button type="button" data-screen="story" data-testid="story-menu" data-hint="Recupere o seu M3 Gorgonzola: suba a Lista Gorda do #10 ao #1 e derrote o Bruno.">Modo história</button>
         <button type="button" id="world" data-testid="world-button" data-hint="Porto Gordo com a galera: veja no mapa (M) quem está online e desafie para um pega, coma tudo e corra nos pontos de encontro.">Co-op <span class="online-badge" id="online-badge" data-testid="online-badge" hidden></span></button>
         <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="A cidade inteira só para você (e para a Vigilância Sanitária).">Modo solo</button>
-        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida no autódromo, sem passar pela cidade.">Corrida rápida</button>
+        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida direto na largada, sem passar pela cidade: escolha a pista.">Corrida rápida</button>
         <button type="button" data-screen="lista" data-testid="lista-menu" data-hint="Os rivais mais calóricos de Porto Gordo e o placar de todos os tempos.">Lista Gorda</button>
         <button type="button" data-screen="garage" data-testid="garage-menu" data-hint="Escolha a cor do seu carrinho de lanche.">Garagem</button>
         <button type="button" data-screen="options" data-testid="options-menu" data-hint="Som, música e seu apelido de piloto.">Opções</button>
@@ -56,7 +56,10 @@
 
       <section class="mw-screen" data-screen-id="quick" hidden>
         <h2>Corrida rápida</h2>
-        <p class="hint">No Autódromo do Colesterol, 3 voltas.</p>
+        <label class="quick-track">Pista
+          <select id="quick-track" data-testid="quick-track"></select>
+        </label>
+        <p class="hint" id="quick-info"></p>
         <div class="mw-list sub">
           <button type="button" id="quick" data-testid="join-button">Com a galera</button>
           <button type="button" id="solo" data-testid="solo-button">Sozinho contra bots</button>

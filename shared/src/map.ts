@@ -2,7 +2,9 @@
 // O resto da cidade (prédios, casas, árvores, comida) é gerado a partir disto
 // em world.ts. Coordenadas em metros no plano XZ.
 
-export type DistrictId = "centro" | "porto" | "vila" | "jardim" | "parque" | "autodromo";
+export type DistrictId =
+  | "centro" | "porto" | "vila" | "jardim" | "parque" | "autodromo"
+  | "praia" | "morro" | "industrial" | "picanha" | "liberdade" | "aeroporto" | "serra" | "roca";
 
 export interface District {
   id: DistrictId;
@@ -50,6 +52,55 @@ export const DISTRICTS: District[] = [
     polygon: [[228, 205], [600, 205], [600, 600], [228, 600]],
     ground: "#6f8a3a",
   },
+  // --- Porto Gordo cresceu: os bairros em volta da cidade velha ---
+  {
+    id: "praia",
+    name: "Praia da Batata Frita",
+    polygon: [[-1750, -500], [-600, -500], [-600, -330], [-1750, -300]],
+    ground: "#d8c38c",
+  },
+  {
+    id: "morro",
+    name: "Morro do Torresmo",
+    polygon: [[-1750, -300], [-600, -330], [-600, 600], [-1750, 600]],
+    ground: "#8a6f50",
+  },
+  {
+    id: "industrial",
+    name: "Distrito da Gordura Trans",
+    polygon: [[600, -500], [1750, -500], [1750, 600], [600, 600]],
+    ground: "#6f6a60",
+  },
+  {
+    id: "picanha",
+    name: "Alto da Picanha",
+    polygon: [[-1750, 600], [-600, 600], [-600, 1600], [-1750, 1600]],
+    ground: "#5d8c3c",
+  },
+  {
+    id: "liberdade",
+    name: "Liberdade do Yakisoba",
+    polygon: [[-600, 600], [600, 600], [600, 1600], [-600, 1600]],
+    ground: "#867c70",
+  },
+  {
+    id: "aeroporto",
+    name: "Aeroporto do Pastel",
+    polygon: [[600, 600], [1750, 600], [1750, 1600], [600, 1600]],
+    ground: "#7b8452",
+  },
+  {
+    id: "serra",
+    name: "Serra do Açúcar",
+    polygon: [[-1750, 1600], [600, 1600], [600, 2650], [-1750, 2650]],
+    ground: "#4f6d36",
+  },
+  {
+    id: "roca",
+    name: "Roça do Milho",
+    polygon: [[600, 1600], [1750, 1600], [1750, 2650], [600, 2650]],
+    ground: "#a39b4c",
+  },
 ];
 
 /** Cruzamentos e pontas de rua. */
@@ -78,10 +129,44 @@ export const NODES: Record<string, [number, number]> = {
   T0: [338, 326],
   // Avenida Oeste (ponta norte)
   A9: [-310, 575],
+
+  // --- Bairros novos ---
+  // Avenida Beira-Mar (continuação da Avenida do Porto para oeste) e a do porto para leste
+  BA0: [-900, -410], BA1: [-1250, -400],
+  PE0: [980, -410], PE1: [1240, -410],
+  // Morro do Torresmo: três ladeiras (norte–sul) cortadas por três ruas
+  MA: [-760, -250], MB: [-790, 0], MC: [-780, 235], MD: [-770, 480],
+  ME: [-1020, -200], MF: [-1040, 30], MG: [-1030, 235], MH: [-1020, 470],
+  MI: [-1280, -150], MJ: [-1300, 60], MK: [-1290, 235], ML: [-1280, 480],
+  // Rodovia do Rodízio: o anel em volta de tudo
+  HW1: [-1560, 235], HW2: [-1560, 900], HW3: [-1550, 1600],
+  HN0: [-1300, 2450], HN1: [-450, 2480], HN2: [450, 2480], HN3: [1300, 2450],
+  HE3: [1550, 1600], HE2: [1560, 900], HE1: [1560, 250],
+  // Distrito da Gordura Trans: quadras grandes de galpões
+  I00: [720, -250], I10: [980, -250], I20: [1240, -250],
+  I01: [720, 0], I11: [980, 0], I21: [1240, 0],
+  I02: [720, 250], I12: [980, 250], I22: [1240, 250],
+  I03: [720, 500], I13: [980, 500], I23: [1240, 500],
+  // Alto da Picanha: mansões em ruas sinuosas
+  AP0: [-800, 700], AP1: [-1100, 760], AP2: [-1380, 720],
+  AP3: [-850, 1000], AP4: [-1150, 1050], AP5: [-1400, 1100],
+  AP6: [-800, 1350], AP7: [-1100, 1400], AP8: [-1380, 1450],
+  // Liberdade do Yakisoba: o centro novo, em grade (Y<coluna><linha>)
+  Y00: [-480, 700], Y10: [-240, 700], Y20: [0, 700], Y30: [240, 700], Y40: [480, 700],
+  Y01: [-480, 900], Y11: [-240, 900], Y21: [0, 900], Y31: [240, 900], Y41: [480, 900],
+  Y02: [-480, 1100], Y12: [-240, 1100], Y22: [0, 1100], Y32: [240, 1100], Y42: [480, 1100],
+  Y03: [-480, 1300], Y13: [-240, 1300], Y23: [0, 1300], Y33: [240, 1300], Y43: [480, 1300],
+  Y04: [-480, 1500], Y14: [-240, 1500], Y24: [0, 1500], Y34: [240, 1500], Y44: [480, 1500],
+  // Aeroporto do Pastel: rua em volta e a pista no meio
+  AE0: [700, 700], AE1: [1400, 700], AE4: [1410, 1120], AE2: [1420, 1550], AE3: [720, 1550], AE5: [710, 1120],
+  // Serra do Açúcar
+  SA: [0, 1720], SB: [-350, 1870], SC: [-720, 2060], SD: [-450, 2290], SE: [320, 1900], SF: [150, 2250], SG: [-1020, 1760],
+  // Roça do Milho
+  RO0: [760, 1760], RO1: [1120, 1820], RO2: [1150, 2170], RO3: [720, 2160],
 };
 
 /** Tipos de rua: largura em metros. */
-export const ROAD_WIDTH = { avenida: 22, rua: 15, viela: 12 } as const;
+export const ROAD_WIDTH = { rodovia: 26, avenida: 22, rua: 15, viela: 12, pista: 40 } as const;
 export type RoadKind = keyof typeof ROAD_WIDTH;
 
 export interface EdgeSpec {
@@ -118,10 +203,10 @@ export const EDGES: EdgeSpec[] = [
   { a: "X2", b: "P4", kind: "rua" },
 
   // Vila do Pastel: ruas curvas
-  { a: "V0", b: "V1", kind: "viela", curve: [-380, -365] },
-  { a: "V1", b: "V2", kind: "viela", curve: [-545, -290] },
-  { a: "V2", b: "V3", kind: "viela", curve: [-520, -50] },
-  { a: "V3", b: "W0", kind: "viela", curve: [-360, -35] },
+  { a: "V0", b: "V1", kind: "rua", curve: [-380, -365] },
+  { a: "V1", b: "V2", kind: "rua", curve: [-545, -290] },
+  { a: "V2", b: "V3", kind: "rua", curve: [-520, -50] },
+  { a: "V3", b: "W0", kind: "rua", curve: [-360, -35] },
   { a: "S0", b: "V4", kind: "viela", curve: [-360, -215] },
   { a: "V4", b: "V2", kind: "viela", curve: [-480, -130] },
   { a: "V4", b: "V3", kind: "viela" },
@@ -153,6 +238,136 @@ export const EDGES: EdgeSpec[] = [
 
   // Entrada do autódromo
   { a: "D3", b: "T0", kind: "rua", curve: [300, 240] },
+
+  // --- Bairros novos ---
+
+  // Avenida Beira-Mar e a Avenida do Porto até o Distrito
+  ...chain(["P0", "BA0", "BA1"], "avenida"),
+  ...chain(["P5", "PE0", "PE1"], "avenida"),
+
+  // Rodovia do Rodízio: o anel (as curvas de canto são largas, dá para passar voando)
+  { a: "BA1", b: "HW1", kind: "rodovia", curve: [-1560, -400] },
+  ...chain(["HW1", "HW2", "HW3"], "rodovia"),
+  { a: "HW3", b: "HN0", kind: "rodovia", curve: [-1560, 2450] },
+  { a: "HN0", b: "HN1", kind: "rodovia", curve: [-880, 2560] },
+  { a: "HN1", b: "HN2", kind: "rodovia" },
+  { a: "HN2", b: "HN3", kind: "rodovia", curve: [880, 2560] },
+  { a: "HN3", b: "HE3", kind: "rodovia", curve: [1560, 2450] },
+  ...chain(["HE3", "HE2", "HE1"], "rodovia"),
+  { a: "HE1", b: "PE1", kind: "rodovia", curve: [1560, -410] },
+
+  // Morro do Torresmo
+  { a: "V2", b: "MA", kind: "rua", curve: [-650, -230] },
+  { a: "MA", b: "BA0", kind: "rua", curve: [-860, -300] },
+  { a: "MI", b: "BA1", kind: "rua", curve: [-1240, -280] },
+  ...chain(["N0", "MC", "MG", "MK", "HW1"], "avenida"),
+  { a: "MA", b: "MB", kind: "rua", curve: [-730, -120] },
+  { a: "MB", b: "MC", kind: "rua", curve: [-840, 120] },
+  { a: "MC", b: "MD", kind: "rua", curve: [-730, 360] },
+  { a: "ME", b: "MF", kind: "viela", curve: [-980, -80] },
+  { a: "MF", b: "MG", kind: "viela", curve: [-1090, 130] },
+  { a: "MG", b: "MH", kind: "viela", curve: [-980, 350] },
+  { a: "MI", b: "MJ", kind: "rua", curve: [-1240, -50] },
+  { a: "MJ", b: "MK", kind: "rua", curve: [-1340, 150] },
+  { a: "MK", b: "ML", kind: "rua", curve: [-1240, 360] },
+  { a: "MA", b: "ME", kind: "rua", curve: [-890, -250] },
+  { a: "ME", b: "MI", kind: "rua", curve: [-1150, -150] },
+  { a: "MB", b: "MF", kind: "viela", curve: [-910, 40] },
+  { a: "MF", b: "MJ", kind: "viela", curve: [-1170, 10] },
+  { a: "MD", b: "MH", kind: "rua", curve: [-900, 500] },
+  { a: "MH", b: "ML", kind: "rua", curve: [-1150, 450] },
+  { a: "MD", b: "K0", kind: "rua" },
+
+  // Distrito da Gordura Trans
+  ...chain(["I00", "I10", "I20"], "rua"),
+  ...chain(["I01", "I11", "I21"], "avenida"),
+  ...chain(["I02", "I12", "I22"], "rua"),
+  ...chain(["I03", "I13", "I23"], "rua"),
+  ...chain(["I00", "I01", "I02", "I03"], "rua"),
+  ...chain(["I10", "I11", "I12", "I13"], "avenida"),
+  ...chain(["I20", "I21", "I22", "I23"], "rua"),
+  { a: "P5", b: "I00", kind: "rua" },
+  { a: "I10", b: "PE0", kind: "avenida" },
+  { a: "I20", b: "PE1", kind: "rua" },
+  { a: "Q2", b: "I01", kind: "avenida", curve: [640, -40] },
+  { a: "Q3", b: "I02", kind: "rua", curve: [600, 210] },
+  { a: "I21", b: "HE1", kind: "avenida", curve: [1420, 60] },
+  { a: "I22", b: "HE1", kind: "rua" },
+
+  // Liberdade do Yakisoba: grade, com a Avenida Central e a Avenida do Yakisoba no meio
+  ...chain(["Y00", "Y10", "Y20", "Y30", "Y40"], "rua"),
+  ...chain(["Y01", "Y11", "Y21", "Y31", "Y41"], "rua"),
+  ...chain(["Y02", "Y12", "Y22", "Y32", "Y42"], "avenida"),
+  ...chain(["Y03", "Y13", "Y23", "Y33", "Y43"], "rua"),
+  ...chain(["Y04", "Y14", "Y24", "Y34", "Y44"], "rua"),
+  ...chain(["Y00", "Y01", "Y02", "Y03", "Y04"], "rua"),
+  ...chain(["Y10", "Y11", "Y12", "Y13", "Y14"], "rua"),
+  ...chain(["C4", "Y20", "Y21", "Y22", "Y23", "Y24"], "avenida"),
+  ...chain(["Y30", "Y31", "Y32", "Y33", "Y34"], "rua"),
+  ...chain(["Y40", "Y41", "Y42", "Y43", "Y44"], "rua"),
+  // Avenida do Shopping, em diagonal (passa pelo cruzamento do meio)
+  { a: "Y11", b: "Y22", kind: "avenida" },
+  { a: "Y22", b: "Y33", kind: "avenida" },
+  { a: "A9", b: "Y10", kind: "avenida", curve: [-280, 650] },
+  { a: "R5", b: "Y30", kind: "avenida", curve: [230, 620] },
+  { a: "K0", b: "Y00", kind: "rua", curve: [-540, 620] },
+
+  // Alto da Picanha
+  { a: "MD", b: "AP0", kind: "rua", curve: [-760, 600] },
+  { a: "ML", b: "AP2", kind: "rua", curve: [-1300, 610] },
+  { a: "AP0", b: "AP1", kind: "rua", curve: [-950, 680] },
+  { a: "AP1", b: "AP2", kind: "rua", curve: [-1240, 800] },
+  { a: "AP3", b: "AP4", kind: "rua", curve: [-1000, 960] },
+  { a: "AP4", b: "AP5", kind: "rua", curve: [-1280, 1110] },
+  { a: "AP6", b: "AP7", kind: "rua", curve: [-950, 1300] },
+  { a: "AP7", b: "AP8", kind: "rua", curve: [-1240, 1470] },
+  { a: "AP0", b: "AP3", kind: "rua", curve: [-760, 860] },
+  { a: "AP3", b: "AP6", kind: "rua", curve: [-900, 1180] },
+  { a: "AP1", b: "AP4", kind: "viela", curve: [-1060, 900] },
+  { a: "AP4", b: "AP7", kind: "viela", curve: [-1180, 1230] },
+  { a: "AP2", b: "AP5", kind: "rua", curve: [-1440, 900] },
+  { a: "AP5", b: "AP8", kind: "rua", curve: [-1350, 1280] },
+  { a: "AP0", b: "Y00", kind: "avenida" },
+  { a: "AP3", b: "Y02", kind: "rua", curve: [-650, 1080] },
+  { a: "AP6", b: "Y03", kind: "rua", curve: [-640, 1300] },
+  { a: "AP5", b: "HW2", kind: "rua", curve: [-1500, 1000] },
+  { a: "AP8", b: "HW3", kind: "rua", curve: [-1480, 1560] },
+
+  // Aeroporto do Pastel
+  ...chain(["AE0", "AE1", "AE4", "AE2", "AE3", "AE5", "AE0"], "avenida"),
+  { a: "AE5", b: "AE4", kind: "pista" },
+  { a: "Y40", b: "AE0", kind: "rua" },
+  { a: "Y42", b: "AE5", kind: "avenida" },
+  { a: "Y44", b: "AE3", kind: "rua" },
+  { a: "AE0", b: "I03", kind: "avenida", curve: [700, 600] },
+  { a: "AE1", b: "HE2", kind: "rua", curve: [1500, 760] },
+  { a: "AE2", b: "HE3", kind: "rua" },
+
+  // Serra do Açúcar: estradas sinuosas no meio do mato
+  { a: "Y24", b: "SA", kind: "avenida" },
+  { a: "SA", b: "SB", kind: "rua", curve: [-120, 1900] },
+  { a: "SB", b: "SC", kind: "rua", curve: [-560, 1880] },
+  { a: "SC", b: "SD", kind: "rua", curve: [-720, 2280] },
+  { a: "SD", b: "HN1", kind: "rua", curve: [-330, 2400] },
+  { a: "SA", b: "SE", kind: "rua", curve: [220, 1740] },
+  { a: "SE", b: "SF", kind: "rua", curve: [380, 2120] },
+  { a: "SF", b: "HN2", kind: "rua", curve: [260, 2420] },
+  { a: "SD", b: "SF", kind: "rua", curve: [-150, 2140] },
+  { a: "Y04", b: "SB", kind: "rua", curve: [-470, 1700] },
+  { a: "AP7", b: "SG", kind: "rua", curve: [-1150, 1600] },
+  { a: "SG", b: "SC", kind: "rua", curve: [-820, 1820] },
+  { a: "SG", b: "HW3", kind: "rua", curve: [-1300, 1700] },
+
+  // Roça do Milho
+  { a: "AE3", b: "RO0", kind: "rua" },
+  { a: "SE", b: "RO0", kind: "rua", curve: [560, 1880] },
+  { a: "RO0", b: "RO1", kind: "rua", curve: [940, 1740] },
+  { a: "RO1", b: "HE3", kind: "rua", curve: [1350, 1760] },
+  { a: "RO1", b: "RO2", kind: "rua", curve: [1220, 2000] },
+  { a: "RO2", b: "RO3", kind: "rua", curve: [930, 2240] },
+  { a: "RO3", b: "RO0", kind: "rua", curve: [660, 1960] },
+  { a: "RO2", b: "HN3", kind: "rua", curve: [1220, 2380] },
+  { a: "RO3", b: "HN2", kind: "rua", curve: [600, 2380] },
 ];
 
 /** Lago do Parque da Barriga (não dá para dirigir dentro). */

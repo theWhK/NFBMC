@@ -739,7 +739,7 @@ async function start(entry: MenuEntry) {
     const spawn = new URLSearchParams(location.search).get("spawn");
     await enterWorld(isRaceId(spawn) ? spawn : undefined);
   } else {
-    const room = await joinQuickRace(carOptions(), entry === "solo");
+    const room = await joinQuickRace({ ...carOptions(), raceId: menu.quickTrack() }, entry === "solo");
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });

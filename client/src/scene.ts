@@ -18,7 +18,7 @@ import {
 
 import { Effects } from "./effects.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
-import { SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
+import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
 import { InkPass, toonify, type Quality } from "./toon.ts";
 import { buildTrackMesh } from "./track-mesh.ts";
 
@@ -406,6 +406,20 @@ export class GameScene {
     });
   }
 
+  /**
+   * Esconde os blocos da cidade (prédios, árvores, postes) que estão além da
+   * neblina: com o mapa grande, desenhar tudo pesava demais no celular.
+   */
+  private cullChunks() {
+    const fog = this.scene.fog as THREE.Fog | null;
+    const far = fog?.far ?? 620;
+    const { x, z } = this.camera.position;
+    for (const chunk of CHUNKS) {
+      const [cx, cz] = chunk.userData.center as [number, number];
+      chunk.visible = Math.hypot(cx - x, cz - z) - (chunk.userData.radius as number) < far;
+    }
+  }
+
   /** Desenha um quadro. `followId` é o carro que a câmera persegue. */
   render(cars: Map<string, CarView>, followId: string | undefined, myId?: string): FollowedInfo | null {
     const rawDt = this.clock.getDelta();
@@ -549,6 +563,7 @@ export class GameScene {
       this.camera.updateProjectionMatrix();
     }
     this.camera.lookAt(this.cameraTarget);
+    this.cullChunks();
     // Céu e sol acompanham a câmera, para nunca chegar perto da borda do céu.
     this.sky.position.copy(this.camera.position);
     // As nuvens acompanham a câmera no chão (ficam sempre no horizonte) e andam devagar.

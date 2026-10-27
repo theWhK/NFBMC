@@ -2974,3 +2974,21 @@ body.touch #dash {
 body.touch:has(#marker-panel:not([hidden])) #dash {
   visibility: hidden;
 }
+
+/* Corrida rápida: escolha da pista. */
+.quick-track {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 4px;
+  font: 0.85rem var(--hud);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mustard);
+}
+
+.quick-track select {
+  flex: 1;
+  padding: 6px 8px;
+  font: 1rem var(--hud);
+}

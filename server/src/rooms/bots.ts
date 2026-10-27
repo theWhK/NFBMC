@@ -22,7 +22,7 @@ export const BOT_NAMES: string[] = RIVALS.map((r) => r.name);
  * Por dificuldade: quanto da velocidade máxima o bot usa e quanto ele vai atrás
  * de comida (comida dá turbo e calorias, então gula também é habilidade).
  */
-const SKILL: Record<Difficulty, number> = { facil: 0.82, medio: 0.9, dificil: 0.97 };
+const SKILL: Record<Difficulty, number> = { facil: 0.78, medio: 0.87, dificil: 0.95 };
 const GREED: Record<Difficulty, [number, number]> = { facil: [0.1, 0.3], medio: [0.35, 0.6], dificil: [0.65, 0.9] };
 
 export interface FoodSpot {

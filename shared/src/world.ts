@@ -18,7 +18,7 @@ import { buildTrack, nearestSample, splinePath, type Track } from "./track.ts";
 export { DISTRICTS, LAKE, QUAY_Z, type DistrictId } from "./map.ts";
 
 /** Limites do mapa: muro invisível nas bordas e o cais ao sul. */
-export const WORLD_BOUNDS = { minX: -590, maxX: 590, minZ: QUAY_Z, maxZ: 590 } as const;
+export const WORLD_BOUNDS = { minX: -1740, maxX: 1740, minZ: QUAY_Z, maxZ: 2640 } as const;
 
 /** Gerador pseudoaleatório com semente. */
 export function seeded(seed: number) {
@@ -217,6 +217,8 @@ interface LotStyle {
   /** Segunda fileira (miolo do quarteirão). */
   rows: number;
   tints: number;
+  /** Centro do bairro (prédios mais altos perto dele); padrão: o centro velho. */
+  center?: Point;
 }
 
 const between = (random: () => number, [min, max]: [number, number]) => min + random() * (max - min);
@@ -259,6 +261,82 @@ const STYLES: Partial<Record<DistrictId, LotStyle>> = {
     height: (_k, r) => 4.5 + r() * 2.5,
     gap: [7, 13],
     setback: 9,
+    rows: 1,
+    tints: 6,
+  },
+  // Quiosques de batata frita na beira-mar, bem espaçados.
+  praia: {
+    kind: () => "shop",
+    width: [7, 10],
+    depth: [5, 7],
+    height: (_k, r) => 3.5 + r(),
+    gap: [18, 40],
+    setback: 6,
+    rows: 1,
+    tints: 4,
+  },
+  // Morro: casinhas coladas umas nas outras, de vários andares.
+  morro: {
+    kind: (r) => (r() < 0.08 ? "shop" : "house"),
+    width: [6, 9],
+    depth: [6, 8],
+    height: (_k, r) => 3.5 + Math.floor(r() * 3) * 2.8,
+    gap: [1, 3],
+    setback: 3,
+    rows: 2,
+    tints: 6,
+  },
+  industrial: {
+    kind: () => "warehouse",
+    width: [36, 60],
+    depth: [24, 38],
+    height: (_k, r) => 9 + r() * 8,
+    gap: [8, 18],
+    setback: 8,
+    rows: 2,
+    tints: 4,
+  },
+  // Mansões com jardim na frente.
+  picanha: {
+    kind: () => "house",
+    width: [16, 24],
+    depth: [14, 20],
+    height: (_k, r) => 6.5 + r() * 3,
+    gap: [18, 34],
+    setback: 14,
+    rows: 1,
+    tints: 6,
+  },
+  liberdade: {
+    kind: (r, dist) => (dist < 260 && r() < 0.7 ? "tower" : r() < 0.35 ? "shop" : "office"),
+    width: [16, 30],
+    depth: [16, 28],
+    height: (kind, r, dist) => (kind === "tower" ? 40 + r() ** 1.3 * 110 * Math.max(0.2, 1 - dist / 600) : kind === "shop" ? 7 + r() * 4 : 16 + r() * 34),
+    gap: [3, 8],
+    setback: 5,
+    rows: 2,
+    tints: 4,
+    center: [0, 1100],
+  },
+  // Hangares longe da pista.
+  aeroporto: {
+    kind: () => "warehouse",
+    width: [44, 64],
+    depth: [30, 40],
+    height: (_k, r) => 13 + r() * 5,
+    gap: [40, 90],
+    setback: 18,
+    rows: 1,
+    tints: 4,
+  },
+  // Sítios: casa e celeiro, bem longe um do outro.
+  roca: {
+    kind: (r) => (r() < 0.4 ? "warehouse" : "house"),
+    width: [10, 16],
+    depth: [9, 13],
+    height: (kind, r) => (kind === "warehouse" ? 7 + r() * 3 : 4.5 + r() * 2),
+    gap: [70, 150],
+    setback: 16,
     rows: 1,
     tints: 6,
   },
@@ -323,12 +401,13 @@ function generateCity() {
           const nz = -tx * side;
           const probeX = px + nx * (road.width / 2 + 12);
           const probeZ = pz + nz * (road.width / 2 + 12);
-          const style = STYLES[districtAt(probeX, probeZ)];
+          const style = road.kind === "pista" ? undefined : STYLES[districtAt(probeX, probeZ)];
           if (!style || row >= style.rows) {
             s += 12;
             continue;
           }
-          const distFromCenter = Math.hypot(px + 40, pz + 40);
+          const [cx, cz] = style.center ?? [-40, -40];
+          const distFromCenter = Math.hypot(px - cx, pz - cz);
           const kind = style.kind(random, distFromCenter);
           const w = between(random, style.width);
           const d = between(random, style.depth);
@@ -372,20 +451,37 @@ function generateCity() {
     if (free(b, 3)) add(b);
   }
 
-  // Árvores: muitas no parque, algumas nas praças e calçadas do jardim e da vila.
-  const treeTries: [DistrictId, number][] = [["parque", 1400], ["autodromo", 500], ["jardim", 500], ["vila", 250]];
+  // Árvores: muitas no parque e na serra, algumas nas praças e calçadas dos bairros.
+  // Uma grade só delas evita comparar cada árvore nova com todas as outras.
+  const treeCells = new Map<string, Tree[]>();
+  const treeTries: [DistrictId, number][] = [
+    ["parque", 1400], ["autodromo", 500], ["jardim", 500], ["vila", 250],
+    ["serra", 6000], ["picanha", 1800], ["roca", 1500], ["morro", 500], ["praia", 300], ["aeroporto", 500], ["liberdade", 300],
+  ];
   for (const [district, tries] of treeTries) {
+    const box = DISTRICTS.find((d) => d.id === district)!.polygon;
+    const minX = Math.max(WORLD_BOUNDS.minX, Math.min(...box.map((p) => p[0])));
+    const maxX = Math.min(WORLD_BOUNDS.maxX, Math.max(...box.map((p) => p[0])));
+    const minZ = Math.max(WORLD_BOUNDS.minZ, Math.min(...box.map((p) => p[1])));
+    const maxZ = Math.min(WORLD_BOUNDS.maxZ, Math.max(...box.map((p) => p[1])));
     for (let k = 0; k < tries; k++) {
-      const x = -580 + random() * 1160;
-      const z = QUAY_Z + 10 + random() * 1080;
+      const x = minX + random() * (maxX - minX);
+      const z = minZ + random() * (maxZ - minZ);
       if (districtAt(x, z) !== district || !insideWorld(x, z, 6)) continue;
       if (roadClearance(x, z) < 4 || autodromoClearance(x, z) < 8 || insideLake(x, z, 4)) continue;
       if (nearby(x, z).some((o) => Math.hypot(o.x - x, o.z - z) < Math.max(o.w, o.d) / 2 + 3)) continue;
-      if (trees.some((t) => Math.abs(t.x - x) < 5 && Math.abs(t.z - z) < 5)) continue;
-      trees.push({ x, z, size: 0.8 + random() * 0.9 });
+      if ((treeCells.get(cellKey(x, z)) ?? []).some((t) => Math.abs(t.x - x) < 5 && Math.abs(t.z - z) < 5)) continue;
+      const tree = { x, z, size: 0.8 + random() * 0.9 };
+      trees.push(tree);
+      // Guarda nas células vizinhas também (a checagem de 5 m pode cruzar a borda da célula).
+      for (const [dx, dz] of [[0, 0], [5, 0], [-5, 0], [0, 5], [0, -5]]) {
+        const key = cellKey(x + dx, z + dz);
+        const list = treeCells.get(key);
+        if (!list) treeCells.set(key, [tree]);
+        else if (!list.includes(tree)) list.push(tree);
+      }
     }
   }
-
   return { buildings, trees, buildingGrid };
 }
 
@@ -656,7 +752,9 @@ export function findRoute(from: number, to: number): number[] {
 
 // --- Corridas ----------------------------------------------------------------
 
-export type RaceId = "autodromo" | "centro" | "porto" | "pastel" | "parque";
+export type RaceId =
+  | "autodromo" | "centro" | "porto" | "pastel" | "parque"
+  | "praia" | "picanha" | "yakisoba" | "aeroporto" | "serra" | "gordura" | "roca" | "morro" | "rodizio";
 
 export interface RaceInfo {
   id: RaceId;
@@ -695,14 +793,29 @@ export const RACES: Record<RaceId, RaceInfo> = {
   autodromo: { id: "autodromo", name: "Autódromo do Colesterol", laps: 3, track: AUTODROMO_TRACK },
   centro: { id: "centro", name: "Circuito do Centro", laps: 2, track: routeTrack(["C2", "D2", "M4", "M6", "M3", "C1", "D1"], 16) },
   porto: { id: "porto", name: "Volta do Porto", laps: 2, track: routeTrack(["P2", "P3", "R1", "M3", "C1", "D1", "S0", "V0", "P1"], 18) },
-  pastel: { id: "pastel", name: "Rota do Pastel", laps: 2, track: routeTrack(["W0", "V3", "V2", "V1", "V0", "S0"], 11) },
-  parque: { id: "parque", name: "Volta do Lago", laps: 2, track: routeTrack(["Q0", "Q1", "Q2", "Q3", "Q4", "R2"], 13) },
+  pastel: { id: "pastel", name: "Rota do Pastel", laps: 2, track: routeTrack(["W0", "V3", "V2", "V1", "V0", "S0"], 15) },
+  parque: { id: "parque", name: "Volta do Lago", laps: 2, track: routeTrack(["Q0", "Q1", "Q2", "Q3", "Q4", "R2"], 15) },
+  // Bairros novos: corridas mais largas e com curvas abertas.
+  praia: { id: "praia", name: "Volta da Praia", laps: 2, track: routeTrack(["BA0", "BA1", "HW1", "MK", "MG", "MC", "MB", "MA"], 20) },
+  morro: { id: "morro", name: "Ladeira do Torresmo", laps: 2, track: routeTrack(["MA", "ME", "MI", "MJ", "MK", "MG", "MC", "MB"], 15) },
+  picanha: { id: "picanha", name: "Alto da Picanha", laps: 2, track: routeTrack(["AP0", "AP1", "AP2", "AP5", "AP4", "AP7", "AP6", "AP3"], 15) },
+  yakisoba: { id: "yakisoba", name: "Circuito do Yakisoba", laps: 2, track: routeTrack(["Y10", "Y20", "Y30", "Y31", "Y32", "Y33", "Y23", "Y22", "Y11"], 18) },
+  aeroporto: { id: "aeroporto", name: "Pista do Aeroporto", laps: 2, track: routeTrack(["AE0", "AE1", "AE4", "AE5"], 24) },
+  serra: { id: "serra", name: "Subida da Serra", laps: 2, track: routeTrack(["SA", "SB", "SC", "SD", "SF", "SE"], 15) },
+  gordura: { id: "gordura", name: "Circuito da Gordura Trans", laps: 2, track: routeTrack(["I00", "I10", "I20", "I21", "I22", "I12", "I02", "I01"], 18) },
+  roca: { id: "roca", name: "Estrada da Roça", laps: 2, track: routeTrack(["RO0", "RO1", "RO2", "RO3"], 15) },
+  // O anel inteiro da rodovia (e a beira-mar): uma volta só, de ~12 km.
+  rodizio: {
+    id: "rodizio", name: "Rodovia do Rodízio", laps: 1,
+    // Larga na subida do lado oeste (longe do ponto de encontro da Volta do Porto).
+    track: routeTrack(["HW1", "HW2", "HW3", "HN0", "HN1", "HN2", "HN3", "HE3", "HE2", "HE1", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "P0", "BA0", "BA1"], 24),
+  },
 };
 
 export const RACE_IDS = Object.keys(RACES) as RaceId[];
 
 /** Nome da corrida com a preposição certa: "no Circuito do Centro", "na Volta do Lago". */
-export const atRace = (id: RaceId) => `${/^(Volta|Rota)\b/.test(RACES[id].name) ? "na" : "no"} ${RACES[id].name}`;
+export const atRace = (id: RaceId) => `${/^(Volta|Rota|Ladeira|Subida|Pista|Estrada|Rodovia)\b/.test(RACES[id].name) ? "na" : "no"} ${RACES[id].name}`;
 
 export const isRaceId = (value: unknown): value is RaceId =>
   typeof value === "string" && value in RACES;
@@ -749,7 +862,11 @@ export const STANDS: StandSpot[] = (() => {
     const [nx, nz] = points[k + 1];
     const len = Math.hypot(nx - x, nz - z) || 1;
     const side = (random() < 0.5 ? -1 : 1) * ROADS[link.road].width * 0.22;
-    spots.push({ x: x + ((nz - z) / len) * side, z: z - ((nx - x) / len) * side, kind: kinds[Math.floor(random() * 3)] });
+    const spot: StandSpot = { x: x + ((nz - z) / len) * side, z: z - ((nx - x) / len) * side, kind: kinds[Math.floor(random() * 3)] };
+    // Longe dos pontos de encontro: quem volta de uma corrida nasce ali, e o
+    // turbo da comida mandava o carro sozinho para a parede.
+    if (RACE_IDS.some((id) => Math.hypot(raceMarker(id).x - spot.x, raceMarker(id).z - spot.z) < 45)) continue;
+    spots.push(spot);
   }
   return spots;
 })();

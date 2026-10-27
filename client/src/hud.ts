@@ -129,6 +129,14 @@ export interface MinimapView {
 }
 
 /** Minimapa redondo: ruas, traçado, pontos de encontro e carros. */
+/** Retângulo de cada rua, para o minimapa pular as que estão fora da vista. */
+const ROAD_BOXES = ROADS.map((road) => {
+  const xs = road.points.map((p) => p[0]);
+  const zs = road.points.map((p) => p[1]);
+  const pad = road.width;
+  return { minX: Math.min(...xs) - pad, maxX: Math.max(...xs) + pad, minZ: Math.min(...zs) - pad, maxZ: Math.max(...zs) + pad };
+});
+
 export function createMinimap(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext("2d")!;
   const size = canvas.width;
@@ -172,7 +180,10 @@ export function createMinimap(canvas: HTMLCanvasElement) {
     ctx.strokeStyle = "#6b6156";
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    for (const road of ROADS) {
+    for (const [i, road] of ROADS.entries()) {
+      // Só as ruas que aparecem no círculo (a cidade grande tem centenas).
+      const box = ROAD_BOXES[i];
+      if (box.maxX < view.x - view.radius || box.minX > view.x + view.radius || box.maxZ < view.z - view.radius || box.minZ > view.z + view.radius) continue;
       ctx.lineWidth = Math.max(1.5, road.width * scale);
       ctx.beginPath();
       for (const [x, z] of road.points) ctx.lineTo(...toMap(x, z));
@@ -270,7 +281,11 @@ export function createFullMap(canvas: HTMLCanvasElement) {
   const pointers = new Map<number, { x: number; y: number }>();
   let pinchStart = 0;
   let zoomStart = 1;
-  const setZoom = (value: number) => (zoom = Math.max(1, Math.min(8, value)));
+  const setZoom = (value: number) => {
+    zoom = Math.max(1, Math.min(14, value));
+    // Afastado ao máximo, a cidade inteira volta para o meio da tela.
+    if (zoom === 1) center = { x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2 };
+  };
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     setZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
@@ -382,6 +397,8 @@ export function createFullMap(canvas: HTMLCanvasElement) {
         ctx.stroke();
         ctx.font = "13px sans-serif";
         ctx.fillText("🏁", mx, my + 1);
+        // Com a cidade inteira na tela os nomes se embolam: só aparecem com zoom.
+        if (zoom < 2.5) continue;
         ctx.font = "13px 'Russo One', sans-serif";
         ctx.lineWidth = 3;
         ctx.strokeText(RACES[id].name, mx, my - 20);
@@ -434,7 +451,7 @@ export function createFullMap(canvas: HTMLCanvasElement) {
     focus: (x: number, z: number) => {
       resize();
       center = { x, z };
-      zoom = 2;
+      zoom = 3.5;
     },
   };
 }

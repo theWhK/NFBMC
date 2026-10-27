@@ -6,11 +6,15 @@ import {
   DEFAULT_CAR,
   PLAYER_CARS,
   PLAYER_COLORS,
+  RACES,
+  RACE_IDS,
   RIVALS_LADDER,
   carSpec,
   isCarId,
+  isRaceId,
   topSpeed,
   zeroToHundred,
+  type RaceId,
 } from "@nfbmc/shared";
 
 import type { Sound } from "./audio.ts";
@@ -125,6 +129,21 @@ export function createMenu(options: MenuOptions) {
   });
   document.getElementById("world")!.addEventListener("click", () => options.onEnter("world"));
   ui.worldSolo.addEventListener("click", () => options.onEnter("world-solo"));
+  // Corrida rápida: qualquer pista da cidade (a escolha fica guardada).
+  const trackSelect = document.getElementById("quick-track") as HTMLSelectElement;
+  const trackInfo = document.getElementById("quick-info")!;
+  trackSelect.innerHTML = RACE_IDS.map((id) => `<option value="${id}">${RACES[id].name}</option>`).join("");
+  const savedTrack = storage.get("nfbmc:quick-track");
+  trackSelect.value = isRaceId(savedTrack) ? savedTrack : "autodromo";
+  const describeTrack = () => {
+    const race = RACES[trackSelect.value as RaceId];
+    trackInfo.textContent = `${race.laps} ${race.laps === 1 ? "volta" : "voltas"} · ${(race.track.length / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km por volta`;
+  };
+  describeTrack();
+  trackSelect.addEventListener("change", () => {
+    storage.set("nfbmc:quick-track", trackSelect.value);
+    describeTrack();
+  });
   ui.quick.addEventListener("click", () => options.onEnter("quick"));
   ui.solo.addEventListener("click", () => options.onEnter("solo"));
 
@@ -316,6 +335,8 @@ export function createMenu(options: MenuOptions) {
     color: () => color,
     car: () => car,
     manual: () => manual,
+    /** Pista escolhida na corrida rápida. */
+    quickTrack: () => trackSelect.value as RaceId,
     /** Volta a mostrar a vitrine (ex.: ao sair do jogo) e atualiza quem está online. */
     show: () => {
       showcase();
