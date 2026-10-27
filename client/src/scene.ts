@@ -6,7 +6,10 @@ import {
   RACES,
   pointOnTrack,
   RACE_IDS,
+  carSpec,
   isOnRoad,
+  rampSteer,
+  yawRate,
   raceMarker,
   type FoodKind,
   type RaceId,
@@ -60,6 +63,8 @@ interface CarEntry {
   serverZ: number;
   serverHeading: number;
   receivedAt: number;
+  /** Volante previsto do próprio carro (o mesmo `rampSteer` do servidor). */
+  steer: number;
 }
 
 /** O que a cena sabe do carro seguido pela câmera, para os sons. */
@@ -203,6 +208,10 @@ export class GameScene {
   private cameraTarget = new THREE.Vector3();
   private clock = new THREE.Clock();
   private time = 0;
+  /** O que o jogador está apertando (para prever a curva do próprio carro). */
+  localInput: (() => { steer: number; handbrake?: boolean }) | null = null;
+  /** Ida e volta até o servidor (s), medida pelo main. */
+  latency = 0.05;
   /** Jogo pausado (modo solo/história): o quadro congela, sem extrapolar nada. */
   paused = false;
   /** Resolução adaptativa: cai quando o FPS fica baixo (PC fraco ou sem placa de vídeo). */
@@ -372,7 +381,7 @@ export class GameScene {
         model.group.rotation.order = "YXZ";
         entry = {
           model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false,
-          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time,
+          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0,
         };
         this.scene.add(model.group);
         this.cars.set(id, entry);
@@ -398,7 +407,7 @@ export class GameScene {
   }
 
   /** Desenha um quadro. `followId` é o carro que a câmera persegue. */
-  render(cars: Map<string, CarView>, followId: string | undefined): FollowedInfo | null {
+  render(cars: Map<string, CarView>, followId: string | undefined, myId?: string): FollowedInfo | null {
     const rawDt = this.clock.getDelta();
     const dt = this.paused ? 0 : Math.min(rawDt, 0.1);
     this.time += dt;
@@ -426,13 +435,27 @@ export class GameScene {
       // corrigido aos poucos. Antes, o carro "corria atrás" de cada atualização
       // nova e a câmera tremia 30 vezes por segundo.
       const age = Math.min(this.time - entry.receivedAt, 0.15);
-      const predictedX = entry.serverX + Math.sin(entry.serverHeading) * car.speed * age;
-      const predictedZ = entry.serverZ + Math.cos(entry.serverHeading) * car.speed * age;
+      // O próprio carro: o servidor só mostra o efeito do volante depois de ida e
+      // volta pela rede. Para a curva responder na hora, a cena já gira o carro
+      // com o volante que está sendo apertado agora, pelo tempo que falta chegar.
+      let yaw = 0;
+      let lead = age;
+      if (id === myId && this.localInput && car.car) {
+        const input = this.localInput();
+        entry.steer = rampSteer(entry.steer, input.steer, dt);
+        yaw = yawRate(carSpec(car.car), car.speed, entry.steer, entry.offroad, !!input.handbrake && Math.abs(car.speed) > 3);
+        lead = Math.min(age + this.latency, 0.3);
+      }
+      const predictedHeading = entry.serverHeading - yaw * lead;
+      const midHeading = entry.serverHeading - (yaw * lead) / 2;
+      const predictedX = entry.serverX + Math.sin(midHeading) * car.speed * lead;
+      const predictedZ = entry.serverZ + Math.cos(midHeading) * car.speed * lead;
+      entry.heading -= yaw * dt;
       entry.x += Math.sin(entry.heading) * car.speed * dt;
       entry.z += Math.cos(entry.heading) * car.speed * dt;
       entry.x = damp(entry.x, predictedX, 8, dt);
       entry.z = damp(entry.z, predictedZ, 8, dt);
-      entry.heading = dampAngle(entry.heading, entry.serverHeading, 14, dt);
+      entry.heading = dampAngle(entry.heading, predictedHeading, 14, dt);
 
       // Força lateral = velocidade de giro × velocidade. Acima de um limite o pneu canta.
       const turnRate = dt > 0 ? Math.atan2(Math.sin(entry.heading - previousHeading), Math.cos(entry.heading - previousHeading)) / dt : 0;

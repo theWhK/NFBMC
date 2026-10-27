@@ -104,7 +104,7 @@ export class RaceMode {
       followId = [...(room.state.players?.entries() ?? [])].find(([, p]) => p.racing && p.place === 1)?.[0];
     }
     const followed = ctx.scene
-      ? (ctx.scene.syncCars(cars), ctx.scene.syncFoods([...(room.state.foods ?? [])]), ctx.scene.render(cars, followId))
+      ? (ctx.scene.syncCars(cars), ctx.scene.syncFoods([...(room.state.foods ?? [])]), ctx.scene.render(cars, followId, room.sessionId))
       : null;
     if (!me) return;
 

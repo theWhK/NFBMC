@@ -156,7 +156,7 @@ export class WorldMode {
     });
     const me = room.state.players?.get(room.sessionId);
     const followed = ctx.scene
-      ? (ctx.scene.syncCars(cars), ctx.scene.syncFoods([...(room.state.stands ?? [])]), ctx.scene.render(cars, room.sessionId))
+      ? (ctx.scene.syncCars(cars), ctx.scene.syncFoods([...(room.state.stands ?? [])]), ctx.scene.render(cars, room.sessionId, room.sessionId))
       : null;
     if (!me) return;
 

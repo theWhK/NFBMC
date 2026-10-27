@@ -2736,3 +2736,241 @@ kbd {
   font-family: var(--hud);
   color: var(--mustard);
 }
+
+/* --- Pausa (versão 2): painel à esquerda, resumo à direita, HUD fora da frente --- */
+
+.pause {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4vw;
+  background: linear-gradient(90deg, rgba(10, 8, 6, 0.96) 0%, rgba(10, 8, 6, 0.82) 50%, rgba(10, 8, 6, 0.6) 100%);
+  backdrop-filter: blur(3px);
+}
+
+.pause-card {
+  width: min(300px, 32vw);
+  padding: 16px 20px;
+  background: rgba(22, 17, 13, 0.85);
+  border-left: 4px solid var(--mustard);
+  transform: skewX(-4deg);
+}
+
+.pause-card p {
+  margin: 0 0 10px;
+}
+
+.pause-card small {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--mustard);
+}
+
+.pause-card strong {
+  font: 1.3rem var(--hud);
+}
+
+.pause-card .hint {
+  margin: 14px 0 0;
+  font-size: 0.8rem;
+}
+
+/* Pausa, mapa ou ajuda abertos: o HUD e os botões de toque somem. */
+body.overlay-open #touch,
+body.overlay-open #dash,
+body.overlay-open #minimap,
+body.overlay-open #hud,
+body.overlay-open #world-hud,
+body.overlay-open #leaderboard,
+body.overlay-open #marker-panel,
+body.overlay-open #speedlines,
+body.overlay-open #topbar {
+  visibility: hidden;
+}
+
+#resume-count {
+  position: fixed;
+  inset: 0;
+  z-index: 34;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font: 9rem var(--hud);
+  color: var(--mustard);
+  text-shadow: 0 6px 0 #000, 0 0 30px rgba(0, 0, 0, 0.7);
+  background: rgba(10, 8, 6, 0.35);
+}
+
+#resume-count[hidden] {
+  display: none;
+}
+
+#resume-count.pop {
+  animation: resume-pop 0.5s ease-out;
+}
+
+@keyframes resume-pop {
+  from {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* --- Celular: botões maiores e HUD sem brigar com os polegares --------------- */
+
+/* No jogo, a barra de status sai; pausa e mapa viram botões de toque no topo. */
+body.touch.playing #topbar {
+  display: none;
+}
+
+.touch-top {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: calc(max(12px, env(safe-area-inset-right)) + 200px);
+  display: flex;
+  gap: 8px;
+}
+
+#touch .touch-top button {
+  width: 52px;
+  height: 44px;
+  font-size: 1.2rem;
+}
+
+/* Volante: dois alvos grandes, encostados (dá para deslizar o polegar de um para o outro). */
+.touch-steer {
+  gap: 6px;
+}
+
+#touch .touch-steer button {
+  width: 112px;
+  height: 104px;
+}
+
+/* Pedais: freio grande (agora ele segura de verdade), freio de mão em cima dele. */
+.touch-pedals {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  gap: 8px 10px;
+  align-items: end;
+}
+
+#touch .handbrake {
+  grid-column: 1;
+  grid-row: 1;
+  width: 104px;
+  height: 46px;
+}
+
+#touch .brake {
+  grid-column: 1;
+  grid-row: 2;
+  width: 104px;
+  height: 90px;
+  font-size: 1rem;
+}
+
+#touch .gas {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 124px;
+  height: 144px;
+  font-size: 1rem;
+}
+
+/* Buzina, câmera e "voltar para a rua" ficam em cima do volante, pequenos. */
+.touch-extra {
+  bottom: calc(max(14px, env(safe-area-inset-bottom)) + 114px);
+}
+
+/* Velocímetro: menor e encostado embaixo, para não cobrir o carro. */
+body.touch #dash {
+  transform: translateX(-50%) scale(0.42);
+}
+
+@media (max-height: 520px) {
+  body.touch #minimap {
+    top: max(8px, env(safe-area-inset-top));
+  }
+
+  .touch-top {
+    right: calc(max(12px, env(safe-area-inset-right)) + 130px);
+  }
+
+  body.touch #hud,
+  body.touch #world-hud {
+    top: max(8px, env(safe-area-inset-top));
+  }
+
+  #resume-count {
+    font-size: 6rem;
+  }
+
+  .pause {
+    padding: 0 5vw;
+  }
+
+  .pause h2 {
+    font-size: 1.6rem;
+    margin: 0;
+  }
+
+  .pause .hint {
+    margin: 4px 0;
+  }
+
+  .pause .mw-list.sub button {
+    padding: 7px 16px;
+    font-size: 1rem;
+  }
+
+  .pause-card {
+    padding: 10px 14px;
+  }
+
+  .pause-card p {
+    margin-bottom: 6px;
+  }
+
+  .pause-card strong {
+    font-size: 1rem;
+  }
+}
+
+/* Celular baixinho (ex.: iPhone SE deitado): tudo um pouco menor. */
+@media (max-height: 380px) {
+  #touch .touch-steer button {
+    width: 96px;
+    height: 88px;
+  }
+
+  #touch .brake {
+    height: 76px;
+  }
+
+  #touch .gas {
+    height: 124px;
+    width: 110px;
+  }
+
+  .touch-extra {
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 98px);
+  }
+
+  .pause-card .hint {
+    display: none;
+  }
+}
+
+/* No ponto de encontro (celular), o painel da corrida ocupa o meio de baixo: o velocímetro sai. */
+body.touch:has(#marker-panel:not([hidden])) #dash {
+  visibility: hidden;
+}

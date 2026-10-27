@@ -24,9 +24,15 @@ test("pausa e mapa: no modo solo Esc e o mapa pausam o jogo de verdade, Tab abre
   const later = await me();
   expect([later.x, later.z, later.speed]).toEqual([atPause.x, atPause.z, atPause.speed]);
 
-  // Continuar: o jogo volta e, sem acelerador, o carro vai perdendo velocidade.
+  // Resumo ao lado da pausa.
+  await expect(page.getByTestId("pause-card")).toContainText("Modo solo");
+
+  // Continuar: 3, 2, 1 (ainda parado) e o jogo volta; sem acelerador, o carro vai perdendo velocidade.
   await page.getByTestId("pause-resume").click();
+  await expect(page.getByTestId("resume-count")).toBeVisible();
+  expect(await paused()).toBe(true);
   await expect.poll(paused).toBe(false);
+  await expect(page.getByTestId("resume-count")).toBeHidden();
   await expect.poll(async () => (await me()).speed, { timeout: 10_000 }).toBeLessThan(atPause.speed / 2);
 
   // O mapa também pausa (e avisa na legenda).
@@ -61,6 +67,8 @@ test("pausa e mapa: no modo solo Esc e o mapa pausam o jogo de verdade, Tab abre
   await page.getByTestId("to-menu").click();
   await page.getByTestId("pause-quit").click();
   await expect(page.getByTestId("world-button")).toBeVisible();
+  // O velocímetro não fica para trás no menu.
+  await expect(page.locator("#dash")).toBeHidden();
   await context.close();
 });
 

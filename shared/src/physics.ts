@@ -53,6 +53,10 @@ export interface DriveState {
   manual: boolean;
   /** Bateu no limitador de giro neste tick (o som "picota"). */
   limiter: boolean;
+  /** Volante "de verdade" (-1 a 1), que persegue o pedido (só humanos: teclado é tudo ou nada). */
+  steer: number;
+  /** Suaviza o volante (jogadores); a IA já manda um volante proporcional. */
+  smoothSteer: boolean;
 }
 
 export const CAR = {
@@ -77,11 +81,54 @@ const REVERSE_RATIO = 3.4;
 /** Quanto o acelerador sobe e desce por segundo (0 → 100% em ~0,25 s). */
 const PEDAL_UP = 4;
 const PEDAL_DOWN = 8;
+/**
+ * Volante progressivo: de 0 ao fim em ~0,17 s, e volta ao centro (ou troca de
+ * lado) mais rápido. Com tecla, o carro não "dá um tranco" para o lado.
+ */
+const STEER_UP = 6;
+const STEER_BACK = 11;
+/**
+ * Aderência lateral máxima (m/s²): em alta, o giro do carro fica limitado por
+ * ela (antes, a 150 km/h o carro virava com 6 g e ficava arisco demais).
+ * É arcade: ~3 g, bem mais que um carro de rua.
+ */
+const LATERAL_GRIP = 32;
+/** Com o freio de mão, a traseira solta e o carro gira bem mais. */
+const HANDBRAKE_GRIP = 55;
+/** Freio de jogo: mais forte que o de verdade, para dar para frear perto da esquina. */
+const BRAKE_GAIN = 1.5;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 export function createDrive(spec: CarSpec, manual = false): DriveState {
-  return { gear: 1, rpm: spec.idleRpm, pedal: 0, shiftTimer: 0, reverseHold: 0, manual, limiter: false };
+  return { gear: 1, rpm: spec.idleRpm, pedal: 0, shiftTimer: 0, reverseHold: 0, manual, limiter: false, steer: 0, smoothSteer: false };
+}
+
+/** Trem de força de um jogador (humano): volante suavizado. */
+export function createPlayerDrive(spec: CarSpec, manual = false): DriveState {
+  return { ...createDrive(spec, manual), smoothSteer: true };
+}
+
+/** Aproxima o volante do pedido, como no `stepCar` (o cliente usa para prever o próprio carro). */
+export function rampSteer(current: number, wanted: number, dt: number) {
+  const back = wanted === 0 || Math.sign(wanted) !== Math.sign(current);
+  return current + clamp(wanted - current, -(back ? STEER_BACK : STEER_UP) * dt, (back ? STEER_BACK : STEER_UP) * dt);
+}
+
+/** Desaceleração do freio (m/s²) com o pedal no fundo. */
+export const brakeDecel = (spec: CarSpec) => spec.brake * BRAKE_GAIN;
+
+/**
+ * Velocidade de giro do carro (rad/s, positivo = para a esquerda) para um
+ * volante `steer`. Parado não vira; na ré o volante inverte; em alta perde
+ * esterço (cada carro tem o seu) e nunca passa da aderência lateral.
+ */
+export function yawRate(spec: CarSpec, speed: number, steer: number, onGrass: boolean, handbrake: boolean) {
+  const v = Math.abs(speed);
+  const grip = clamp(speed / 6, -1, 1);
+  const highSpeed = 1 / (1 + (v / 50) ** 2 * spec.understeer * 2);
+  const limit = ((handbrake ? HANDBRAKE_GRIP : LATERAL_GRIP) * (onGrass ? 0.75 : 1)) / Math.max(v, 1);
+  return steer * Math.min(spec.turn * highSpeed * (handbrake ? 1.3 : 1), limit) * grip;
 }
 
 /** Torque do motor (N·m) num giro: sobe até o pico e cai um pouco até a faixa vermelha. */
@@ -178,7 +225,7 @@ export function stepCar(
   if (engineForce === 0 && boostForce === 0 && Math.sign(next) !== Math.sign(v) && v !== 0) next = 0;
   // Freio: sempre contra o movimento, até parar.
   if (braking > 0) {
-    const drop = spec.brake * braking * dt;
+    const drop = brakeDecel(spec) * braking * dt;
     next = Math.abs(next) <= drop ? 0 : next - Math.sign(next) * drop;
   }
   car.speed = next;
@@ -190,11 +237,14 @@ export function stepCar(
     car.speed = Math.abs(car.speed) <= drop ? 0 : car.speed - Math.sign(car.speed) * drop;
   }
 
-  // Direção: parado não vira; na ré o volante inverte; em alta perde esterço (saindo de frente).
-  const grip = clamp(car.speed / 8, -1, 1);
-  const highSpeed = 1 / (1 + (Math.abs(car.speed) / 50) ** 2 * spec.understeer * 2);
+  // Direção (volante progressivo para os jogadores).
+  drive.steer = drive.smoothSteer ? rampSteer(drive.steer, input.steer, dt) : input.steer;
+  const yaw = yawRate(spec, car.speed, drive.steer, onGrass, handbrake);
   const oldHeading = car.heading;
-  car.heading -= input.steer * spec.turn * grip * highSpeed * (onGrass ? 0.8 : 1) * (handbrake ? 1.3 : 1) * dt;
+  car.heading -= yaw * dt;
+  // Curva forte "arrasta" os pneus: o carro perde um pouco de velocidade (ajuda a entrar na curva).
+  const scrub = Math.abs(yaw * car.speed) * 0.035 * dt;
+  car.speed = Math.abs(car.speed) <= scrub ? 0 : car.speed - Math.sign(car.speed) * scrub;
 
   if (motion) {
     // Drift: com a traseira travada, parte da velocidade continua na direção
@@ -253,12 +303,15 @@ export function zeroToHundred(spec: CarSpec) {
  * pelo esterço do carro (que diminui em alta). Usada pela IA para frear antes.
  */
 export function cornerSpeed(spec: CarSpec, radius: number) {
-  let v = spec.turn * radius;
-  for (let i = 0; i < 4; i++) {
-    const highSpeed = 1 / (1 + (v / 50) ** 2 * spec.understeer * 2);
-    v = spec.turn * highSpeed * radius;
+  // Procura a maior velocidade em que o giro ainda fecha a curva (v = giro × raio).
+  let lo = 0;
+  let hi = 120;
+  for (let i = 0; i < 24; i++) {
+    const v = (lo + hi) / 2;
+    if (yawRate(spec, v, 1, false, false) * radius >= v) lo = v;
+    else hi = v;
   }
-  return v;
+  return lo;
 }
 
 const topSpeedCache = new Map<string, number>();
