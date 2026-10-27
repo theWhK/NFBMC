@@ -21,10 +21,13 @@ export interface Impact {
   speed: number;
 }
 
-/** Coeficiente de restituição: 0 = cola, 1 = bola de bilhar. */
-const RESTITUTION = 0.25;
+/** Coeficiente de restituição: 0 = cola, 1 = bola de bilhar. Carro amassa: quase não quica. */
+const RESTITUTION = 0.08;
 /** Atrito no ponto de contato (raspar de lado tira velocidade dos dois). */
-const FRICTION = 0.3;
+const FRICTION = 0.4;
+/** Quanto do torque da batida vira giro (o resto os pneus seguram) e o giro máximo (rad/s, ~140°/s). */
+const SPIN_SHARE = 0.3;
+const MAX_SPIN = 2.5;
 
 type Vec = [number, number];
 
@@ -133,7 +136,7 @@ export function collideCars(bodies: CarBody[]): Impact[] {
         const torque = (arm[0] * impulse[1] - arm[1] * impulse[0]) * sign;
         const inertia = (body.mass * ((body.halfLength * 2) ** 2 + (body.halfWidth * 2) ** 2)) / 12;
         // No plano XZ com o ângulo do jogo (0 = +Z, cresce para +X), o giro tem o sinal invertido.
-        body.motion.spin -= (torque / inertia) * 0.6;
+        body.motion.spin = Math.max(-MAX_SPIN, Math.min(MAX_SPIN, body.motion.spin - (torque / inertia) * SPIN_SHARE));
       }
       impacts.push({ a: i, b: j, speed: -approach });
     }

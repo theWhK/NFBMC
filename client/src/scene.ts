@@ -178,12 +178,52 @@ function chooseQuality(renderer: THREE.WebGLRenderer): Quality {
 }
 
 /** Câmeras de perseguição: distância atrás (negativa = na frente do centro, no capô), alturas e se o carro aparece. */
-const CAMERAS = [
+/**
+ * Câmeras (tecla C). `back` negativo = presa ao carro; `seat` = deslocada para
+ * o lado do motorista (esquerda), dentro do carro, com o painel e o volante.
+ */
+const CAMERAS: { name: string; back: number; height: number; ahead: number; lookHeight: number; showCar: boolean; seat?: number }[] = [
   { name: "Perseguição", back: 11, height: 5.5, ahead: 6, lookHeight: 1.5, showCar: true },
+  { name: "Perto", back: 7, height: 3.2, ahead: 6, lookHeight: 1.3, showCar: true },
   { name: "Longe", back: 17, height: 8, ahead: 8, lookHeight: 1.5, showCar: true },
   { name: "Baixa", back: 7, height: 2.3, ahead: 10, lookHeight: 1.2, showCar: true },
   { name: "Capô", back: -0.7, height: 1.2, ahead: 25, lookHeight: 1.0, showCar: false },
+  { name: "Primeira pessoa", back: 0.1, height: 1.2, ahead: 20, lookHeight: 0.9, showCar: false, seat: 0.36 },
 ];
+
+/** Painel, volante e colunas do para-brisa, para a câmera em primeira pessoa. */
+function makeCockpit() {
+  const group = new THREE.Group();
+  const dark = new THREE.MeshLambertMaterial({ color: "#2a2522" });
+  const black = new THREE.MeshLambertMaterial({ color: "#141110" });
+  // No grupo do carro, +Z é a frente e +X é a esquerda (lado do motorista).
+  const dash = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.16, 0.5), dark);
+  dash.position.set(0, 0.72, 0.95);
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.04, 1.1), dark);
+  hood.position.set(0, 0.8, 1.75);
+  const pillars = [1, -1].map((side) => {
+    const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.62, 0.08), black);
+    pillar.position.set(side * 0.8, 1.22, 1.0);
+    pillar.rotation.x = -0.55;
+    pillar.rotation.z = side * 0.12;
+    return pillar;
+  });
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.12), black);
+  roof.position.set(0, 1.52, 0.8);
+  const wheel = new THREE.Group();
+  wheel.add(new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 6, 20), black));
+  const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.03, 0.02), black);
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 6), black);
+  column.rotation.x = Math.PI / 2;
+  column.position.z = 0.15;
+  wheel.add(spoke, column);
+  wheel.position.set(0.36, 0.82, 0.62);
+  // Inclinado para o motorista.
+  wheel.rotation.x = -0.5;
+  group.add(dash, hood, ...pillars, roof, wheel);
+  group.visible = false;
+  return { group, wheel };
+}
 
 /** Navegador desenhando o 3D na CPU (sem placa de vídeo): começa em resolução baixa. */
 function isSoftwareRenderer(renderer: THREE.WebGLRenderer) {
@@ -217,6 +257,7 @@ export class GameScene {
   private cameraTarget = new THREE.Vector3();
   private clock = new THREE.Clock();
   private time = 0;
+  private cockpit = makeCockpit();
   /** O que o jogador está apertando (para prever a curva do próprio carro). */
   localInput: (() => { steer: number; handbrake?: boolean }) | null = null;
   /** Ida e volta até o servidor (s), medida pelo main. */
@@ -252,6 +293,8 @@ export class GameScene {
     // Visual de quadrinho: cel-shading sempre; contorno de tinta e sombras conforme a qualidade.
     this.quality = chooseQuality(this.renderer);
     toonify(this.scene);
+    this.scene.add(this.cockpit.group);
+    this.dress(this.cockpit.group);
     if (this.quality !== "baixo") this.ink = new InkPass(this.renderer);
     if (this.quality === "alto") this.enableShadows();
 
@@ -545,12 +588,25 @@ export class GameScene {
       const forwardX = Math.sin(followed.heading);
       const forwardZ = Math.cos(followed.heading);
       const view = CAMERAS[this.cameraMode];
-      const desired = new THREE.Vector3(followed.x - forwardX * view.back, view.height, followed.z - forwardZ * view.back);
-      // No capô a câmera vai presa ao carro; nas outras, ela vem atrás com um pouco de atraso.
-      if (view.back < 0) this.camera.position.copy(desired);
+      // Lado do motorista (esquerda de quem dirige): (cos, -sin).
+      const seat = view.seat ?? 0;
+      const sideX = Math.cos(followed.heading) * seat;
+      const sideZ = -Math.sin(followed.heading) * seat;
+      const desired = new THREE.Vector3(followed.x - forwardX * view.back + sideX, view.height, followed.z - forwardZ * view.back + sideZ);
+      // No capô e no banco a câmera vai presa ao carro; nas outras, ela vem atrás com um pouco de atraso.
+      if (view.back < 0 || view.seat) this.camera.position.copy(desired);
       else this.camera.position.lerp(desired, 1 - Math.exp(-6 * dt));
-      this.cameraTarget.set(followed.x + forwardX * view.ahead, view.lookHeight, followed.z + forwardZ * view.ahead);
+      this.cameraTarget.set(followed.x + forwardX * view.ahead + sideX, view.lookHeight, followed.z + forwardZ * view.ahead + sideZ);
       followed.model.group.visible = view.showCar && followedCar.visible;
+      // Primeira pessoa: painel e volante (que gira com o volante de verdade).
+      this.cockpit.group.visible = !!view.seat && followedCar.visible;
+      if (view.seat) {
+        this.cockpit.group.position.copy(followed.model.group.position);
+        this.cockpit.group.rotation.copy(followed.model.group.rotation);
+        this.cockpit.wheel.rotation.z = followed.steer * 1.6;
+      }
+      // Lá dentro o painel fica a meio metro da lente: o plano de corte chega mais perto.
+      this.camera.near = view.seat ? 0.08 : 0.8;
       // Com turbo a lente abre e a câmera treme, para dar sensação de velocidade.
       const boosting = followedCar.boost > 0;
       const fov = boosting ? 84 : 70 + Math.min(8, Math.abs(followedCar.speed) / 6);
