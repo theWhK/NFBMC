@@ -137,6 +137,16 @@ function currentInput(): InputMessage {
   return { throttle: Math.sign(throttle), steer: Math.sign(steer), handbrake };
 }
 
+// O próprio carro vira na tela na hora em que a tecla é apertada (sem esperar o servidor).
+if (scene) scene.localInput = () => currentInput();
+// Mede a ida e volta até o servidor de tempos em tempos (para a previsão da curva).
+setInterval(() => {
+  const room = mode?.room as { ping?: (cb: (ms: number) => void) => void } | undefined;
+  room?.ping?.((ms) => {
+    if (scene) scene.latency = Math.min(0.25, ms / 1000 + 1 / 60);
+  });
+}, 2000);
+
 // --- Contexto dos modos ----------------------------------------------------
 
 const drawTacho = createTacho(ui.tacho);
