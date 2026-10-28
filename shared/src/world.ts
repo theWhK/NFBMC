@@ -966,13 +966,49 @@ export function findRoute(from: number, to: number): number[] {
 
 export type RaceId =
   | "autodromo" | "centro" | "porto" | "pastel" | "parque"
-  | "praia" | "picanha" | "yakisoba" | "aeroporto" | "serra" | "gordura" | "roca" | "morro" | "rodoanel" | "serpentina";
+  | "praia" | "picanha" | "yakisoba" | "aeroporto" | "serra" | "gordura" | "roca" | "morro" | "rodoanel" | "serpentina"
+  | "radar-porto" | "radar-yakisoba" | "radar-rodoanel";
 
 export interface RaceInfo {
   id: RaceId;
   name: string;
   laps: number;
   track: Track;
+  /** Circuito (vence quem chega primeiro) ou radar (speedtrap: vence quem soma mais velocidade nos radares). */
+  kind?: "circuito" | "radar";
+  /** Radares: distância (m) de cada um desde a largada, numa volta. */
+  radars?: number[];
+}
+
+/**
+ * Onde ficam os radares de um speedtrap: a pista é dividida em `count` trechos
+ * e, em cada um, o radar vai no ponto mais reto (onde dá para passar voando).
+ */
+function radarSpots(track: Track, count: number) {
+  const samples = track.samples;
+  const n = samples.length;
+  const span = 6;
+  const straightness = (i: number) => {
+    const a = samples[(i - span + n) % n];
+    const b = samples[(i + span) % n];
+    return a.tx * b.tx + a.tz * b.tz;
+  };
+  const spots: number[] = [];
+  // Não põe radar logo na largada nem colado na chegada.
+  const first = Math.floor(n * 0.08);
+  const usable = n - first * 2;
+  for (let k = 0; k < count; k++) {
+    // Só no miolo de cada trecho, para dois radares não ficarem colados na divisa.
+    const from = first + Math.floor((usable * (k + 0.2)) / count);
+    const to = first + Math.floor((usable * (k + 0.8)) / count);
+    let best = from;
+    for (let i = from; i < to; i++) {
+      // Mais reto e olhando também o trecho de frente (para chegar embalado).
+      if (straightness(i) + straightness(i - 20) > straightness(best) + straightness(best - 20)) best = i;
+    }
+    spots.push(samples[best].dist);
+  }
+  return spots;
 }
 
 /** Traçado de corrida seguindo as ruas pela sequência de cruzamentos (fechando o circuito). */
@@ -1006,7 +1042,8 @@ function routeTrack(ids: string[], width: number): Track {
   return buildTrack(smooth, width);
 }
 
-export const RACES: Record<RaceId, RaceInfo> = {
+// As corridas de radar entram logo abaixo (speedtrap), por isso o "as".
+export const RACES = {
   autodromo: { id: "autodromo", name: "Autódromo do Colesterol", laps: 3, track: AUTODROMO_TRACK },
   centro: { id: "centro", name: "Circuito do Centro", laps: 2, track: routeTrack(["C2", "D2", "M4", "M6", "M3", "C1", "D1"], 16) },
   porto: { id: "porto", name: "Volta do Porto", laps: 2, track: routeTrack(["P2", "P3", "R1", "M3", "C1", "D1", "S0", "V0", "P1"], 18) },
@@ -1028,7 +1065,17 @@ export const RACES: Record<RaceId, RaceInfo> = {
     // Larga na subida do lado oeste (longe do ponto de encontro da Volta do Porto).
     track: routeTrack(["HW1", "HW2", "HW3", "HN0", "HN1", "HN2", "HN3", "HE3", "HE2", "HE1", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "P0", "BA0", "BA1"], 24),
   },
-};
+} as Record<RaceId, RaceInfo>;
+
+// Speedtraps: as mesmas ruas de algumas corridas, no sentido contrário (o ponto de
+// encontro fica do outro lado da largada), com radares nos trechos mais retos.
+function speedtrap(id: RaceId, name: string, ids: string[], width: number, laps: number, radars: number) {
+  const track = routeTrack([...ids].reverse(), width);
+  RACES[id] = { id, name, laps, track, kind: "radar", radars: radarSpots(track, radars) };
+}
+speedtrap("radar-porto", "Radar do Porto", ["P2", "P3", "R1", "M3", "C1", "D1", "S0", "V0", "P1"], 18, 1, 4);
+speedtrap("radar-yakisoba", "Radar da Liberdade", ["Y10", "Y20", "Y30", "Y31", "Y32", "Y33", "Y23", "Y22", "Y11"], 18, 1, 4);
+speedtrap("radar-rodoanel", "Radar do Rodoanel", ["HW1", "HW2", "HW3", "HN0", "HN1", "HN2", "HN3", "HE3", "HE2", "HE1", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "P0", "BA0", "BA1"], 24, 1, 6);
 
 export const RACE_IDS = Object.keys(RACES) as RaceId[];
 

@@ -3294,3 +3294,116 @@ body.touch:has(#marker-panel:not([hidden])) #dash {
     padding: 4px 16px;
   }
 }
+
+/* --- Fim de corrida e speedtrap ---------------------------------------------- */
+
+.finish-cam {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.finish-cam .bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 11vh;
+  background: #000;
+  animation: finish-bars 0.4s ease-out;
+}
+
+.finish-cam .bar.top {
+  top: 0;
+}
+
+.finish-cam .bar.bottom {
+  bottom: 0;
+}
+
+@keyframes finish-bars {
+  from {
+    height: 0;
+  }
+}
+
+.finish-text {
+  position: absolute;
+  left: 6vw;
+  bottom: calc(11vh + 24px);
+  font-family: var(--hud);
+  text-shadow: 0 3px 0 #000, 0 0 18px rgba(0, 0, 0, 0.7);
+  transform: skewX(-8deg);
+  animation: finish-text 0.5s 0.2s ease-out both;
+}
+
+.finish-text strong {
+  display: block;
+  font-size: 4.5rem;
+  line-height: 1;
+  color: var(--mustard);
+}
+
+.finish-text span {
+  font-size: 1.5rem;
+  color: #fff;
+}
+
+@keyframes finish-text {
+  from {
+    opacity: 0;
+    transform: skewX(-8deg) translateX(-40px);
+  }
+}
+
+#trap-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 3.2rem var(--hud);
+  color: #fff;
+  text-shadow: 0 3px 0 #000;
+  animation: trap-flash 1s ease-out forwards;
+}
+
+#trap-flash[hidden] {
+  display: none;
+}
+
+@keyframes trap-flash {
+  0% {
+    background: rgba(255, 255, 255, 0.85);
+  }
+  20% {
+    background: rgba(255, 255, 255, 0);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+#results.radar-off .trap-col {
+  display: none;
+}
+
+@media (max-height: 520px) {
+  .finish-text strong {
+    font-size: 2.8rem;
+  }
+
+  .finish-text span {
+    font-size: 1rem;
+  }
+}
+
+/* Durante a câmera de chegada, o HUD sai (é uma "cena"). */
+body:has(#finish-cam:not([hidden])) :is(#hud, #dash, #minimap, #topbar, #speedlines, #touch, #message) {
+  visibility: hidden;
+}

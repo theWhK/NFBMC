@@ -240,6 +240,30 @@ function isSoftwareRenderer(renderer: THREE.WebGLRenderer) {
   return /swiftshader|llvmpipe|software/i.test(name);
 }
 
+/** Poste de radar do speedtrap: braço sobre a pista, a câmera e a faixa listrada. */
+function makeRadar(x: number, z: number, heading: number) {
+  const group = new THREE.Group();
+  const grey = new THREE.MeshLambertMaterial({ color: "#d9d4cc" });
+  const dark = new THREE.MeshLambertMaterial({ color: "#2c2a2e" });
+  const pole = new THREE.Mesh(new THREE.BoxGeometry(0.35, 6, 0.35), grey);
+  pole.position.y = 3;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(4, 0.3, 0.3), grey);
+  // O braço avança por cima da pista (para o lado de dentro).
+  arm.position.set(-2, 5.8, 0);
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 1.2), dark);
+  box.position.set(-3.6, 5.3, 0);
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.2, 10), new THREE.MeshBasicMaterial({ color: "#3fd4ff" }));
+  lens.rotation.x = Math.PI / 2;
+  lens.position.set(-3.6, 5.3, -0.65);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), new THREE.MeshLambertMaterial({ color: "#c1121f" }));
+  stripe.position.y = 1.2;
+  group.add(pole, arm, box, lens, stripe);
+  group.position.set(x, heightAt(x, z), z);
+  // A lente olha para quem vem pela pista.
+  group.rotation.y = heading;
+  return group;
+}
+
 export class GameScene {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -265,6 +289,13 @@ export class GameScene {
   private clock = new THREE.Clock();
   private time = 0;
   private cockpit = makeCockpit();
+  /** Câmera de chegada ligada desde este instante (null = câmera normal). */
+  finishCam: number | null = null;
+  /** Liga ou desliga a câmera de chegada (gira em volta do carro seguido). */
+  setFinishCam(on: boolean) {
+    if (on && this.finishCam === null) this.finishCam = this.time;
+    else if (!on) this.finishCam = null;
+  }
   /** O que o jogador está apertando (para prever a curva do próprio carro). */
   localInput: (() => { steer: number; handbrake?: boolean }) | null = null;
   /** Ida e volta até o servidor (s), medida pelo main. */
@@ -408,7 +439,13 @@ export class GameScene {
     }
     this.raceOverlay = null;
     if (raceId && raceId !== "autodromo") {
-      this.raceOverlay = buildTrackMesh(RACES[raceId].track, { asphalt: false, bannerColor: "#ff7a00" });
+      const race = RACES[raceId];
+      this.raceOverlay = buildTrackMesh(race.track, { asphalt: false, bannerColor: race.kind === "radar" ? "#2a6bff" : "#ff7a00" });
+      // Speedtrap: um poste de radar na beira da pista em cada ponto de medição.
+      for (const dist of race.radars ?? []) {
+        const spot = pointOnTrack(race.track, dist, race.track.width / 2 + 2.5);
+        this.raceOverlay.add(makeRadar(spot.x, spot.z, spot.heading));
+      }
       this.dress(this.raceOverlay);
       this.scene.add(this.raceOverlay);
     }
@@ -640,6 +677,19 @@ export class GameScene {
     const followedCar = followId ? cars.get(followId) : undefined;
     if (this.director) {
       this.director(dt, this.camera, this.cameraTarget);
+      this.camera.updateProjectionMatrix();
+    } else if (followed && followedCar && this.finishCam !== null) {
+      // Chegada: a câmera gira devagar em volta do carro, baixa, como nos replays da série.
+      const t = this.time - this.finishCam;
+      const angle = followed.heading + 2.4 - t * 0.45;
+      const radius = 8 - Math.min(2.5, t * 0.8);
+      const y = followed.y ?? 0;
+      this.camera.position.lerp(new THREE.Vector3(followed.x + Math.sin(angle) * radius, y + 1.6 + t * 0.15, followed.z + Math.cos(angle) * radius), 1 - Math.exp(-5 * dt));
+      this.cameraTarget.set(followed.x, y + 0.9, followed.z);
+      followed.model.group.visible = followedCar.visible;
+      this.cockpit.group.visible = false;
+      this.camera.near = 0.8;
+      this.camera.fov = damp(this.camera.fov, 45, 3, dt);
       this.camera.updateProjectionMatrix();
     } else if (followed && followedCar) {
       const forwardX = Math.sin(followed.heading);
