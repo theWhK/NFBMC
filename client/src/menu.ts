@@ -45,6 +45,19 @@ interface MenuOptions {
   onScreen?: (id: string) => void;
 }
 
+/** Manchetes da faixa de notícias do menu. */
+const HEADLINES = [
+  "URGENTE: Vigilância Sanitária apreende três toneladas de maionese caseira no Porto",
+  "Sargento Cross-fit bate recorde de supino; ninguém pediu",
+  "Bruno é visto comendo X-Tudo no café da manhã. De novo.",
+  "Preço do pastel de feira sobe 10% na Vila; feirantes culpam o óleo",
+  "Coxinha Turbo lança sabor catupiry nitro",
+  "Voo atrasa no Aeroporto do Pastel: excesso de bagagem (era fritura)",
+  "Bandeira do Orgulho Gordo tremula em todos os pontos de encontro",
+  "Previsão do tempo: nublado com chance de molho especial",
+  "Academia da Liberdade fecha por falta de alunos; lanchonete ao lado abre filial",
+];
+
 export function createMenu(options: MenuOptions) {
   const { sound, scene, storage } = options;
   const list = document.getElementById("menu-list")!;
@@ -74,7 +87,12 @@ export function createMenu(options: MenuOptions) {
     if (!buttons.length) return;
     selected = (index + buttons.length) % buttons.length;
     for (const b of buttons) b.classList.toggle("selected", b === buttons[selected]);
-    if (buttons === items) hint.textContent = items[selected].dataset.hint ?? "";
+    if (buttons === items) {
+      // Nome grande do item e a descrição embaixo, em cima do carrossel.
+      const label = items[selected].querySelector(".label")?.textContent ?? "";
+      setHtml(hint, `<strong>${escapeHtml(label)}</strong><span>${escapeHtml(items[selected].dataset.hint ?? "")}</span>`);
+      items[selected].scrollIntoView?.({ block: "nearest", inline: "center" });
+    }
   };
 
   const showScreen = (id: string | null) => {
@@ -203,22 +221,26 @@ export function createMenu(options: MenuOptions) {
     optSfx.textContent = `Efeitos: ${sound.prefs.sfx ? "ligados" : "desligados"}`;
     optGearbox.textContent = `Câmbio: ${manual ? "manual (E/Q)" : "automático"}`;
   };
-  // Gráficos: automático → alto → médio → baixo. Recarrega para aplicar (muda o jeito de desenhar).
+  // Gráficos: automático → alto → médio → baixo. Vale na hora (sem recarregar a
+  // página, que fazia a abertura tocar de novo a cada clique).
   const optQuality = document.getElementById("opt-quality") as HTMLButtonElement;
   const QUALITY_KEY = "nfbmc:quality";
   const qualityOrder = ["", "alto", "medio", "baixo"];
-  const qualityLabel: Record<string, string> = {
+  const qualityLabel = (choice: string) => ({
     "": `automático (${scene?.quality === "medio" ? "médio" : scene?.quality ?? "baixo"})`,
     alto: "alto (contorno + sombras)",
     medio: "médio (contorno)",
     baixo: "baixo (mais leve)",
-  };
-  const currentQuality = storage.get(QUALITY_KEY);
-  optQuality.textContent = `Gráficos: ${qualityLabel[currentQuality] ?? qualityLabel[""]}`;
+  } as Record<string, string>)[choice] ?? "automático";
+  let currentQuality = storage.get(QUALITY_KEY);
+  if (!qualityOrder.includes(currentQuality)) currentQuality = "";
+  const refreshQuality = () => (optQuality.textContent = `Gráficos: ${qualityLabel(currentQuality)}`);
+  refreshQuality();
   optQuality.addEventListener("click", () => {
-    const next = qualityOrder[(qualityOrder.indexOf(currentQuality) + 1) % qualityOrder.length];
-    storage.set(QUALITY_KEY, next);
-    location.reload();
+    currentQuality = qualityOrder[(qualityOrder.indexOf(currentQuality) + 1) % qualityOrder.length];
+    storage.set(QUALITY_KEY, currentQuality);
+    scene?.setQuality(currentQuality);
+    refreshQuality();
   });
   // Abertura (aviso, logos e trailer) ao abrir o jogo.
   const optIntro = document.getElementById("opt-intro") as HTMLButtonElement;
@@ -282,18 +304,30 @@ export function createMenu(options: MenuOptions) {
     });
   }
 
+  // Faixa de notícias de Porto Gordo no rodapé (troca a cada passada).
+  const ticker = document.getElementById("menu-ticker");
+  if (ticker) {
+    let headline = Math.floor(Math.random() * HEADLINES.length);
+    const nextHeadline = () => {
+      ticker.textContent = HEADLINES.map((_, i) => HEADLINES[(headline + i) % HEADLINES.length]).join("   ✦   ");
+      headline = (headline + 1) % HEADLINES.length;
+    };
+    nextHeadline();
+    ticker.addEventListener("animationiteration", nextHeadline);
+  }
+
   // Teclado: ↑↓ navega, Enter seleciona, Esc volta. Não atrapalha quem está digitando o nome.
   window.addEventListener("keydown", (e) => {
     if (ui.join.hidden || document.activeElement === ui.name) {
       if (e.code === "Enter" && document.activeElement === ui.name) ui.name.blur();
       return;
     }
-    const inSubmenu = active !== items;
-    if (e.code === "ArrowDown" || (e.code === "ArrowRight" && inSubmenu)) {
+    // O carrossel principal é horizontal (←→), mas ↑↓ também andam por ele e pelos submenus.
+    if (e.code === "ArrowDown" || e.code === "ArrowRight") {
       e.preventDefault();
       select(selected + 1);
       sound.click();
-    } else if (e.code === "ArrowUp" || (e.code === "ArrowLeft" && inSubmenu)) {
+    } else if (e.code === "ArrowUp" || e.code === "ArrowLeft") {
       e.preventDefault();
       select(selected - 1);
       sound.click();
