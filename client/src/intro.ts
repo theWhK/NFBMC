@@ -137,7 +137,11 @@ function script(sound: Sound, hooks: IntroHooks): Step[] {
           <p class="intro-fine">O Ministério da Gordura adverte: hambúrguer a 300 km/h faz mal à saúde.</p>
           <p class="intro-press">${touch ? "Toque na tela" : "Aperte qualquer tecla"}</p>
         </div>`,
-      enter: () => sound.song(null),
+      enter: () => {
+        sound.song(null);
+        // A trilha do trailer começa a ser gravada já (fica pronta quando ele começar).
+        sound.prefetchSong("trailer");
+      },
     },
     {
       id: "eat", group: "eat", look: "black", ms: 3600,

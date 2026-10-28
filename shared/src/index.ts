@@ -17,6 +17,12 @@ export const NAME_MAX_LENGTH = 16;
 export const COUNTDOWN_SECONDS = 3;
 /** Depois que o primeiro cruza a chegada, quanto tempo os outros têm para terminar. */
 export const FINISH_GRACE_SECONDS = 45;
+/**
+ * Quando todos os humanos cruzam a chegada, a corrida não espera os bots: a
+ * câmera enquadra o carro por estes segundos e o resultado sai com o tempo dos
+ * bots projetado pelo ritmo deles ("fast-forward", como na série).
+ */
+export const FINISH_CAM_SECONDS = 4;
 /** Quanto tempo a tela de resultado fica antes de voltar para o lobby. */
 export const RESULTS_SECONDS = 15;
 

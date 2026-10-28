@@ -8,7 +8,7 @@
 import { carSpec, wheelRpm, type EngineSound, type FoodKind, type TrafficKind } from "@nfbmc/shared";
 
 import { EngineVoice, PlayerEngine, engineBank, type EngineBank } from "./engine-sound.ts";
-import { Music, type SongName } from "./music.ts";
+import { Music, prefetchMood, type CueName, type SongName, type TrackInfo } from "./music.ts";
 import * as fx from "./sfx.ts";
 import { Voices, type VoiceLine } from "./voices.ts";
 
@@ -242,6 +242,13 @@ export class Sound {
   private ctx: AudioContext | null = null;
   private kit!: fx.Kit;
   private sfxBus!: GainNode;
+  /**
+   * Sons do jogo (motores, pneus, sirene, buzinas, efeitos): passam por aqui
+   * para as cinemáticas calarem tudo menos as vozes e a trilha delas.
+   */
+  private gameBus!: GainNode;
+  private gameSend!: GainNode;
+  private cine = false;
   private musicBus!: GainNode;
   private engine: PlayerEngine | null = null;
   private engineKey = "";
@@ -260,6 +267,9 @@ export class Sound {
   private music: Music | null = null;
   private voices = new Voices();
   private wantedSong: SongName | null = null;
+  private wantedCue: CueName | null = null;
+  /** Começou uma faixa (o aviso "tocando agora"). */
+  onTrack: ((info: TrackInfo) => void) | null = null;
   private lastFrame = 0;
   private hornWave: PeriodicWave | null = null;
   private preview: { engine: PlayerEngine; timer: ReturnType<typeof setInterval> } | null = null;
@@ -299,20 +309,29 @@ export class Sound {
       reverb.buffer = fx.impulseResponse(ctx, 1.4, 4.2, 0.5);
       const reverbIn = ctx.createGain();
       reverbIn.connect(reverb).connect(this.sfxBus);
+      this.gameBus = ctx.createGain();
+      this.gameBus.connect(this.sfxBus);
+      this.gameSend = ctx.createGain();
+      this.gameSend.connect(reverbIn);
 
       const noise = fx.noiseBuffer(ctx);
-      this.kit = { ctx, out: this.sfxBus, reverb: reverbIn, noise };
+      this.kit = { ctx, out: this.gameBus, reverb: this.gameSend, noise };
       this.voices.attach(ctx, this.sfxBus, reverbIn);
+      // Fala alguém: a música abaixa enquanto durar a fala.
+      this.voices.onPlay = (delay, seconds) => this.music?.duck(seconds, delay);
 
       // Pneu cantando: dois ressonadores estreitos no ruído (o chiado afinado do pneu).
-      this.squeal = [noiseLoop(ctx, noise, this.sfxBus, "bandpass", 1100, 18), noiseLoop(ctx, noise, this.sfxBus, "bandpass", 2300, 14)];
-      this.scrub = noiseLoop(ctx, noise, this.sfxBus, "bandpass", 2400, 0.8);
-      this.road = noiseLoop(ctx, noise, this.sfxBus, "lowpass", 380, 0.7);
-      this.gravel = noiseLoop(ctx, gravelBuffer(ctx), this.sfxBus, "highpass", 900, 0.7);
-      this.dirt = noiseLoop(ctx, noise, this.sfxBus, "lowpass", 180, 1);
-      this.wind = noiseLoop(ctx, noise, this.sfxBus, "bandpass", 700, 0.5);
-      this.nitroHiss = noiseLoop(ctx, noise, this.sfxBus, "bandpass", 1600, 0.7);
-      this.music = new Music(ctx, this.musicBus, noise);
+      this.squeal = [noiseLoop(ctx, noise, this.gameBus, "bandpass", 1100, 18), noiseLoop(ctx, noise, this.gameBus, "bandpass", 2300, 14)];
+      this.scrub = noiseLoop(ctx, noise, this.gameBus, "bandpass", 2400, 0.8);
+      this.road = noiseLoop(ctx, noise, this.gameBus, "lowpass", 380, 0.7);
+      this.gravel = noiseLoop(ctx, gravelBuffer(ctx), this.gameBus, "highpass", 900, 0.7);
+      this.dirt = noiseLoop(ctx, noise, this.gameBus, "lowpass", 180, 1);
+      this.wind = noiseLoop(ctx, noise, this.gameBus, "bandpass", 700, 0.5);
+      this.nitroHiss = noiseLoop(ctx, noise, this.gameBus, "bandpass", 1600, 0.7);
+      this.music = new Music(ctx, this.musicBus);
+      this.music.onTrack = (info) => this.onTrack?.(info);
+      this.music.setEnabled(this.prefs.music);
+      if (this.wantedCue) this.music.setCue(this.wantedCue);
       if (this.wantedSong) this.music.play(this.wantedSong);
     } catch (err) {
       console.error("Áudio indisponível", err);
@@ -335,6 +354,7 @@ export class Sound {
     const t = this.ctx.currentTime;
     this.musicBus.gain.setTargetAtTime(this.prefs.music ? 0.3 : 0, t, 0.1);
     this.sfxBus.gain.setTargetAtTime(this.prefs.sfx ? 0.9 : 0, t, 0.1);
+    this.music?.setEnabled(this.prefs.music);
   }
 
   song(name: SongName | null) {
@@ -343,6 +363,40 @@ export class Sound {
     if (!this.music) return;
     if (name) this.music.play(name);
     else this.music.stop();
+  }
+
+  /** Começa a gravar o começo de uma trilha antes de ela tocar (a abertura). */
+  prefetchSong(name: SongName) {
+    if (this.music) this.music.prefetch(name);
+    else if (this.prefs.music) prefetchMood(name);
+  }
+
+  /**
+   * Cinemática: `cue` é o tema do plano (null = acabou a cena). Durante a cena
+   * os sons do jogo calam (as vozes continuam) e a música do jogo dá lugar ao tema.
+   */
+  cinematic(cue: CueName | null) {
+    this.wantedCue = cue;
+    this.music?.setCue(cue);
+    const on = cue !== null;
+    if (on !== this.cine && this.ctx) {
+      const t = this.ctx.currentTime;
+      for (const g of [this.gameBus.gain, this.gameSend.gain]) g.setTargetAtTime(on ? 0 : 1, t, on ? 0.15 : 0.5);
+    }
+    this.cine = on;
+  }
+
+  /** Corte de plano dentro do mesmo tema: uma pancada leve (na trilha, não nos efeitos). */
+  cineCut(strength = 1) {
+    if (!this.ctx || !this.prefs.music) return;
+    const kit = { ...this.kit, out: this.musicBus, reverb: this.musicBus };
+    fx.tone(kit, { dur: 0.7, freq: 62, freqTo: 30, gain: 0.8 * strength });
+    fx.burst(kit, { dur: 0.5, type: "bandpass", freq: 300, freqTo: 2500, q: 1, gain: 0.25 * strength, attack: 0.25 });
+  }
+
+  /** Estado da trilha (para os testes). */
+  audioState() {
+    return { ...(this.music?.state() ?? { mood: this.wantedSong, cue: this.wantedCue, track: null, enabled: this.prefs.music }), cinematic: this.cine };
   }
 
   /** Segundos desde o último quadro de som (para as contas de tempo dos motores). */
@@ -431,7 +485,7 @@ export class Sound {
       if (!engine) {
         const bank = this.bankFor(car, false);
         if (!bank) continue;
-        engine = new EngineVoice(this.ctx, this.sfxBus, bank, false, { node: this.kit.reverb, amount: 0.12 });
+        engine = new EngineVoice(this.ctx, this.gameBus, bank, false, { node: this.kit.reverb, amount: 0.12 });
         this.others.set(id, engine);
       }
       // Carga estimada: ganhando velocidade = acelerando.
@@ -452,7 +506,7 @@ export class Sound {
     if (!this.ctx) return;
     if (!this.siren) {
       if (distance === null) return;
-      this.siren = new Siren(this.ctx, this.sfxBus, this.kit.reverb);
+      this.siren = new Siren(this.ctx, this.gameBus, this.kit.reverb);
     }
     this.siren.set(distance, pan);
   }
@@ -517,7 +571,7 @@ export class Sound {
     gain.gain.value = 0;
     const panner = ctx.createStereoPanner();
     panner.pan.value = pan;
-    funnel.connect(lowpass).connect(shaper).connect(gain).connect(panner).connect(this.sfxBus);
+    funnel.connect(lowpass).connect(shaper).connect(gain).connect(panner).connect(this.gameBus);
     const send = ctx.createGain();
     send.gain.value = 0.25 + (1 - volume) * 0.4;
     panner.connect(send).connect(this.kit.reverb);
@@ -669,7 +723,7 @@ export class Sound {
   /** Uma subida de sirene só ("uóóó"). */
   wail() {
     if (!this.ctx) return;
-    if (!this.siren) this.siren = new Siren(this.ctx, this.sfxBus, this.kit.reverb);
+    if (!this.siren) this.siren = new Siren(this.ctx, this.gameBus, this.kit.reverb);
     this.siren.wail();
   }
 }

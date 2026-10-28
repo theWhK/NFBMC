@@ -18,6 +18,7 @@ import {
   TREES,
   districtAt,
   heightAt,
+  insideBuilding,
   slopeAt,
   isOnRoad,
   raceMarker,
@@ -160,7 +161,7 @@ const instancedBoxes = (material: THREE.Material, list: { matrix: THREE.Matrix4;
  * escondido na neblina de qualquer jeito). `CHUNKS` guarda cada bloco com o
  * centro dele em `userData.center`.
  */
-const TILE = 250;
+const TILE = 400;
 export const CHUNKS: THREE.Object3D[] = [];
 
 function byTile<T>(items: T[], position: (item: T) => [number, number]) {
@@ -777,9 +778,9 @@ function buildBillboards(scene: THREE.Scene) {
 
 /** Árvores de brócolis, porque toda dieta precisa de um vegetal (de enfeite). */
 function buildTrees(scene: THREE.Scene) {
-  const stemGeometry = new THREE.CylinderGeometry(0.5, 0.8, 3, 8);
+  const stemGeometry = new THREE.CylinderGeometry(0.5, 0.8, 3, 5);
   const stemMaterial = new THREE.MeshLambertMaterial({ color: "#9bc25b" });
-  const crownGeometry = new THREE.IcosahedronGeometry(2.4, 1);
+  const crownGeometry = new THREE.IcosahedronGeometry(2.6, 0);
   const crownMaterial = new THREE.MeshLambertMaterial({ color: "#3d7d2c", flatShading: true });
   const matrix = new THREE.Matrix4();
   const scale = new THREE.Vector3();
@@ -858,6 +859,213 @@ function buildFlags(scene: THREE.Scene) {
   }
 }
 
+/** Placa de posto em canvas (nome e o "preço" do combustível). */
+function stationTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 320;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const draw = () => {
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#f2b705";
+    ctx.fillRect(0, 0, 256, 320);
+    ctx.fillStyle = "#c1121f";
+    ctx.fillRect(0, 0, 256, 120);
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.font = "44px 'Russo One', sans-serif";
+    ctx.fillText("POSTO", 128, 58);
+    ctx.fillText("GORDURA", 128, 104);
+    ctx.fillStyle = "#16110d";
+    ctx.font = "26px 'Russo One', sans-serif";
+    ctx.fillText("ÓLEO DE FRITURA", 128, 170);
+    ctx.font = "56px 'Russo One', sans-serif";
+    ctx.fillText("4,99", 128, 240);
+    ctx.font = "22px 'Russo One', sans-serif";
+    ctx.fillText("o litro (reusado)", 128, 286);
+    texture.needsUpdate = true;
+  };
+  draw();
+  document.fonts?.load("44px 'Russo One'").then(draw).catch(() => {});
+  return texture;
+}
+
+/**
+ * Lugares na beira das ruas, fora do asfalto e dos prédios: `offset` metros
+ * além da calçada, de frente para a rua. Sempre os mesmos (semente fixa).
+ */
+function roadsideSpots(seed: number, count: number, kinds: string[], offset: number, footprint: number, accept?: (x: number, z: number) => boolean) {
+  const random = seeded(seed);
+  const roads = ROADS.filter((r) => kinds.includes(r.kind) && r.points.length > 12);
+  const spots: { x: number; z: number; facing: number }[] = [];
+  for (let tries = 0; tries < count * 40 && spots.length < count && roads.length; tries++) {
+    const road = roads[Math.floor(random() * roads.length)];
+    const i = 4 + Math.floor(random() * (road.points.length - 8));
+    const [x, z] = road.points[i];
+    const [nx, nz] = road.points[i + 1];
+    const len = Math.hypot(nx - x, nz - z) || 1;
+    const side = random() < 0.5 ? 1 : -1;
+    const ox = ((nz - z) / len) * side;
+    const oz = (-(nx - x) / len) * side;
+    const d = road.width / 2 + offset;
+    const sx = x + ox * d;
+    const sz = z + oz * d;
+    if (accept && !accept(sx, sz)) continue;
+    // O "terreno" inteiro do enfeite tem que estar livre.
+    let free = true;
+    for (const [px, pz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) {
+      const qx = sx + px * footprint;
+      const qz = sz + pz * footprint;
+      if (isOnRoad(qx, qz) && footprint > 2) free = false;
+      if (insideBuilding(qx, qz)) free = false;
+    }
+    if (!free || spots.some((o) => Math.hypot(o.x - sx, o.z - sz) < footprint * 4)) continue;
+    // De frente para a rua.
+    spots.push({ x: sx, z: sz, facing: Math.atan2(-ox, -oz) });
+  }
+  return spots;
+}
+
+/**
+ * Enfeites pela cidade inteira: postos de gasolina, outdoors nas avenidas,
+ * pontos de ônibus e torres de antena nos morros (sem colisão, como os postes).
+ */
+function buildProps(scene: THREE.Scene) {
+  const lambert = (color: string) => new THREE.MeshLambertMaterial({ color });
+  const white = lambert("#f1ece2");
+  const red = lambert("#c1121f");
+  const dark = lambert("#2c2a2e");
+  const glass = new THREE.MeshLambertMaterial({ color: "#9fd3e6", transparent: true, opacity: 0.45 });
+  // Tudo vira uma malha por material em cada bloco da cidade (centenas de
+  // enfeites separados seriam centenas de chamadas de desenho por quadro).
+  const batches = new Map<string, { material: THREE.Material; parts: THREE.BufferGeometry[]; center: [number, number] }>();
+  const place = (group: THREE.Group, x: number, z: number, facing: number) => {
+    group.position.set(x, heightAt(x, z) - 0.2, z);
+    group.rotation.y = facing;
+    group.updateMatrixWorld(true);
+    const tx = Math.floor(x / TILE);
+    const tz = Math.floor(z / TILE);
+    group.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const material = mesh.material as THREE.Material;
+      const key = `${tx},${tz}|${material.uuid}`;
+      let batch = batches.get(key);
+      if (!batch) batches.set(key, (batch = { material, parts: [], center: [(tx + 0.5) * TILE, (tz + 0.5) * TILE] }));
+      const geometry = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+      geometry.applyMatrix4(mesh.matrixWorld);
+      // Só posição, normal e UV (todas as formas têm), para poderem ser juntadas.
+      for (const name of Object.keys(geometry.attributes)) if (!["position", "normal", "uv"].includes(name)) geometry.deleteAttribute(name);
+      batch.parts.push(geometry);
+    });
+  };
+
+  // Postos "Gordura": cobertura em 4 pilares, bombas, lojinha e a placa alta.
+  const sign = new THREE.MeshLambertMaterial({ map: stationTexture(), emissive: "#ffffff", emissiveIntensity: 0.3 });
+  for (const spot of roadsideSpots(901, 8, ["avenida", "rodovia"], 12, 9)) {
+    const g = new THREE.Group();
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(16, 0.8, 10), white);
+    canopy.position.y = 5.2;
+    const band = new THREE.Mesh(new THREE.BoxGeometry(16.2, 0.5, 10.2), red);
+    band.position.y = 4.7;
+    g.add(canopy, band);
+    for (const [px, pz] of [[-6, -3.5], [6, -3.5], [-6, 3.5], [6, 3.5]]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4.8, 0.5), white);
+      pillar.position.set(px, 2.4, pz);
+      g.add(pillar);
+    }
+    for (const px of [-3, 3]) {
+      const pump = new THREE.Mesh(new THREE.BoxGeometry(1, 1.8, 0.7), red);
+      pump.position.set(px, 0.9, 0);
+      g.add(pump);
+    }
+    const shop = new THREE.Mesh(new THREE.BoxGeometry(10, 3.6, 6), lambert("#e9c46a"));
+    shop.position.set(0, 1.8, 10);
+    const pole = new THREE.Mesh(new THREE.BoxGeometry(0.5, 9, 0.5), dark);
+    pole.position.set(9.5, 4.5, -4);
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(3.2, 4, 0.4), sign);
+    panel.position.set(9.5, 9.5, -4);
+    g.add(shop, pole, panel);
+    place(g, spot.x, spot.z, spot.facing);
+  }
+
+  // Outdoors nas avenidas e no Rodoanel (os mesmos anúncios do autódromo).
+  const faces = BILLBOARDS.map((ad) => new THREE.MeshLambertMaterial({ map: billboardTexture(ad), emissive: "#ffffff", emissiveIntensity: 0.25, side: THREE.DoubleSide }));
+  const boardGeometry = new THREE.PlaneGeometry(16, 8);
+  const legGeometry = new THREE.BoxGeometry(0.5, 6, 0.5);
+  roadsideSpots(902, 36, ["avenida", "rodovia"], 9, 6).forEach((spot, i) => {
+    const g = new THREE.Group();
+    const face = new THREE.Mesh(boardGeometry, faces[i % faces.length]);
+    face.position.y = 9;
+    g.add(face);
+    for (const x of [-5, 5]) {
+      const leg = new THREE.Mesh(legGeometry, dark);
+      leg.position.set(x, 3, -0.3);
+      g.add(leg);
+    }
+    // Meio virado para quem vem pela rua.
+    place(g, spot.x, spot.z, spot.facing + (i % 2 ? 0.5 : -0.5));
+  });
+
+  // Pontos de ônibus na calçada: cobertura, vidro, banco e a placa.
+  const roofGeometry = new THREE.BoxGeometry(3.2, 0.15, 1.5);
+  const backGeometry = new THREE.BoxGeometry(3.2, 2, 0.08);
+  const benchGeometry = new THREE.BoxGeometry(2.4, 0.15, 0.45);
+  const postGeometry = new THREE.BoxGeometry(0.12, 2.5, 0.12);
+  const plateGeometry = new THREE.BoxGeometry(0.6, 0.6, 0.06);
+  for (const spot of roadsideSpots(903, 70, ["avenida", "rua"], 2.2, 1.6)) {
+    const g = new THREE.Group();
+    const roof = new THREE.Mesh(roofGeometry, red);
+    roof.position.y = 2.5;
+    const back = new THREE.Mesh(backGeometry, glass);
+    back.position.set(0, 1.25, 0.65);
+    const bench = new THREE.Mesh(benchGeometry, dark);
+    bench.position.set(0, 0.5, 0.35);
+    const post = new THREE.Mesh(postGeometry, dark);
+    post.position.set(-1.9, 1.25, -0.5);
+    const plate = new THREE.Mesh(plateGeometry, lambert("#2a6bff"));
+    plate.position.set(-1.9, 2.6, -0.5);
+    g.add(roof, back, bench, post, plate);
+    place(g, spot.x, spot.z, spot.facing);
+  }
+
+  // Torres de antena nos pontos mais altos da serra e do morro, com a luz vermelha no topo.
+  const random = seeded(904);
+  const light = new THREE.MeshBasicMaterial({ color: "#ff2a2a" });
+  const towers: [number, number][] = [];
+  for (let k = 0; k < 4000 && towers.length < 7; k++) {
+    const x = WORLD_BOUNDS.minX + random() * (WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX);
+    const z = WORLD_BOUNDS.minZ + random() * (WORLD_BOUNDS.maxZ - WORLD_BOUNDS.minZ);
+    const district = districtAt(x, z);
+    if ((district !== "serra" && district !== "morro") || heightAt(x, z) < 30 || isOnRoad(x, z) || insideBuilding(x, z)) continue;
+    if (towers.some(([tx, tz]) => Math.hypot(tx - x, tz - z) < 300)) continue;
+    towers.push([x, z]);
+    const g = new THREE.Group();
+    for (const [lx, lz] of [[-1.2, -1.2], [1.2, -1.2], [-1.2, 1.2], [1.2, 1.2]]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.2, 38, 4), white);
+      leg.position.set(lx * 0.6, 19, lz * 0.6);
+      leg.rotation.set(lz * 0.03, 0, -lx * 0.03);
+      g.add(leg);
+    }
+    for (let y = 6; y < 38; y += 6) {
+      const ring = new THREE.Mesh(new THREE.BoxGeometry(2.2 - y * 0.03, 0.25, 2.2 - y * 0.03), y % 12 ? red : white);
+      ring.position.y = y;
+      g.add(ring);
+    }
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.6, 8, 6), light);
+    beacon.position.y = 39;
+    g.add(beacon);
+    place(g, x, z, 0);
+  }
+
+  for (const batch of batches.values()) {
+    const mesh = new THREE.Mesh(mergeGeometries(batch.parts), batch.material);
+    mesh.geometry.computeBoundingSphere();
+    addChunk(scene, mesh, batch.center, TILE * 0.71 + 45);
+  }
+}
+
 export function buildScenery(scene: THREE.Scene) {
   scene.background = new THREE.Color(FOG_COLOR);
   scene.fog = new THREE.Fog(FOG_COLOR, 160, 620);
@@ -886,6 +1094,7 @@ export function buildScenery(scene: THREE.Scene) {
   buildBillboards(scene);
   buildTrees(scene);
   buildFlags(scene);
+  buildProps(scene);
   scene.add(buildTrackMesh(RACES.autodromo.track, { asphalt: true }));
   return { sky, sun: sunSprite, light: sun, clouds };
 }

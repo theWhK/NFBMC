@@ -103,6 +103,8 @@ export function hideModeUi() {
     ui.wanted, ui.pursuit, ui.banner, ui.district,
     // O painel (velocímetro e turbo) também: senão ficava aparecendo no menu.
     ui.dash,
+    // Chegada e flash do radar (corrida).
+    $("finish-cam"), $("trap-flash"), $("trap-row"),
   ]) el.hidden = true;
   ui.vignette.classList.remove("chase");
 }

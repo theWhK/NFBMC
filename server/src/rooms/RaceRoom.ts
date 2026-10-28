@@ -1,6 +1,7 @@
 import { Room, type Client, type CloseCode } from "colyseus";
 import {
   COUNTDOWN_SECONDS,
+  FINISH_CAM_SECONDS,
   FINISH_GRACE_SECONDS,
   FOOD,
   FOOD_PICKUP_RADIUS,
@@ -92,6 +93,8 @@ const isDifficulty = (value: unknown): value is Difficulty =>
  * o que aparecer → resultado (calorias + bônus de colocação) → lobby de novo.
  * O cliente só manda acelerar/virar; quem move os carros é o servidor.
  */
+const TEST_HOOKS = process.env.NFBMC_TEST_HOOKS === "1";
+
 export class RaceRoom extends Room<{ state: RaceState }> {
   maxClients = MAX_PLAYERS;
   state = new RaceState();
@@ -110,6 +113,10 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   private lastHorn = new Map<string, number>();
   private joinCount = 0;
   private track: Track = RACES.autodromo.track;
+  /** Speedtrap: distância de cada radar numa volta (vazio nas corridas normais). */
+  private radars: number[] = [];
+  /** Todos os humanos chegaram: a corrida acaba neste instante (depois da câmera de chegada). */
+  private finishCamUntil = Infinity;
   private layout = foodLayout(this.track);
   /** Corrida de evento: quantos jogadores esperar e até quando. */
   private expected = 0;
@@ -123,6 +130,27 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       if (input) this.controls.set(client.sessionId, input);
     },
     horn: (client: Client) => this.horn(client),
+    // Ganchos dos testes (só com NFBMC_TEST_HOOKS=1): cruzar a chegada e passar num radar.
+    ...(TEST_HOOKS && {
+      debugFinish: (client: Client) => {
+        const player = this.state.players.get(client.sessionId);
+        if (!player || !player.racing || player.finished || this.state.phase !== "racing") return;
+        player.lap = this.state.laps;
+        player.progress = this.state.laps * this.track.length;
+        player.finished = true;
+        player.finishTime = this.state.raceTime;
+        if (!this.racers().some(([, p]) => p.finished && p !== player)) this.state.timer = FINISH_GRACE_SECONDS;
+        if (this.racers().every(([, p]) => p.bot || p.finished)) this.finishCamUntil = this.state.raceTime + FINISH_CAM_SECONDS;
+      },
+      debugRadar: (client: Client, message: { speed?: unknown }) => {
+        const player = this.state.players.get(client.sessionId);
+        if (!player || !this.radars.length || this.state.phase !== "racing" || typeof message?.speed !== "number") return;
+        const lap = Math.floor(player.traps / this.radars.length);
+        player.progress = lap * this.track.length + this.radars[player.traps % this.radars.length] + 1;
+        player.speed = message.speed;
+        this.checkRadar(player);
+      },
+    }),
     pause: (_client: Client, message: { paused?: unknown }) => {
       // Só sala de um jogador só; com mais gente, o jogo não para.
       if (this.state.pausable && typeof message?.paused === "boolean") this.state.paused = message.paused;
@@ -166,6 +194,8 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     this.layout = foodLayout(this.track);
     this.state.raceId = race.id;
     this.state.laps = race.laps;
+    this.state.kind = race.kind ?? "circuito";
+    this.radars = race.radars ?? [];
 
     if (options?.solo) {
       // Sala solo: some da busca do "entrar" e só cabe quem criou.
@@ -327,12 +357,16 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       player.boost = 0;
       player.finished = false;
       player.finishTime = 0;
+      player.trapTotal = 0;
+      player.traps = 0;
+      player.lastTrap = 0;
       // O grid fica antes da linha, no último setor: cruzar a linha começa a volta 1.
       this.sectors.set(sessionId, SECTORS - 1);
     });
     for (const food of this.state.foods) food.active = true;
     this.respawnAt.clear();
     this.state.raceTime = 0;
+    this.finishCamUntil = Infinity;
     this.setPhase("countdown", COUNTDOWN_SECONDS);
   }
 
@@ -479,6 +513,11 @@ export class RaceRoom extends Room<{ state: RaceState }> {
           if (!this.racers().some(([, p]) => p.finished && p !== player)) {
             this.state.timer = FINISH_GRACE_SECONDS;
           }
+          // Último humano a chegar: a câmera enquadra o carro e o resultado sai
+          // logo (os bots que ainda correm têm o tempo projetado).
+          if (this.racers().every(([, p]) => p.bot || p.finished)) {
+            this.finishCamUntil = this.state.raceTime + FINISH_CAM_SECONDS;
+          }
         }
       }
     }
@@ -492,6 +531,22 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     if (player.lap > 0 && sector === SECTORS - 1 && this.sectors.get(sessionId) !== SECTORS - 1) {
       player.progress -= length;
     }
+    this.checkRadar(player);
+  }
+
+  /**
+   * Speedtrap: ao passar pelo próximo radar, a velocidade (km/h) entra na soma.
+   * Quem corta caminho e pula um radar leva 0 nele.
+   */
+  private checkRadar(player: Player) {
+    if (!this.radars.length || player.traps >= this.radars.length * this.state.laps) return;
+    const lap = Math.floor(player.traps / this.radars.length);
+    const at = lap * this.track.length + this.radars[player.traps % this.radars.length];
+    if (player.progress < at) return;
+    const speed = player.progress - at < 60 ? Math.round(Math.abs(player.speed) * 3.6) : 0;
+    player.trapTotal += speed;
+    player.traps++;
+    player.lastTrap = speed;
   }
 
   private eat(player: Player) {
@@ -515,21 +570,48 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   }
 
   private finishRace() {
+    const racers = this.racers();
+    const total = this.state.laps * this.track.length;
+    const radarCount = this.radars.length * this.state.laps;
+    // "Fast-forward": quem ainda corria (bot) ganha um tempo projetado pelo ritmo
+    // médio dele e, no speedtrap, a média dele nos radares que faltavam.
+    const outcome = new Map<string, { time: number; trap: number; projected: boolean }>();
+    for (const [sessionId, p] of racers) {
+      if (p.finished) {
+        outcome.set(sessionId, { time: p.finishTime, trap: p.trapTotal, projected: false });
+      } else if (p.bot) {
+        const pace = Math.max(5, p.progress / Math.max(1, this.state.raceTime));
+        const time = this.state.raceTime + Math.max(0, total - p.progress) / pace;
+        const average = p.traps ? p.trapTotal / p.traps : pace * 3.6 * 1.25;
+        outcome.set(sessionId, { time, trap: p.trapTotal + average * Math.max(0, radarCount - p.traps), projected: true });
+      }
+    }
+    // Colocação: no circuito, pelo tempo; no speedtrap, pela soma dos radares.
+    const radar = this.state.kind === "radar";
+    const order = [...outcome.entries()].sort(([, a], [, b]) => (radar ? b.trap - a.trap || a.time - b.time : a.time - b.time));
+    const placeOf = new Map(order.map(([id], i) => [id, i + 1]));
+
     const rows: Result[] = [];
-    this.racers().forEach(([sessionId, p]) => {
+    racers.forEach(([sessionId, p]) => {
+      const done = outcome.get(sessionId);
+      const place = placeOf.get(sessionId) ?? 0;
+      p.place = place || p.place;
       const row = new Result();
       row.sessionId = sessionId;
       row.name = p.name;
       row.color = p.color;
       row.bot = p.bot;
-      row.place = p.finished ? p.place : 0;
+      row.place = place;
+      row.time = done?.time ?? 0;
+      row.projected = done?.projected ?? false;
+      row.trap = Math.round(done?.trap ?? p.trapTotal);
       row.calories = p.calories;
-      // Só ganha bônus de colocação quem cruzou a chegada.
-      row.bonus = p.finished ? (PLACE_BONUS[p.place - 1] ?? 0) : 0;
+      // Só ganha bônus de colocação quem terminou (ou teria terminado, no caso dos bots).
+      row.bonus = place ? (PLACE_BONUS[place - 1] ?? 0) : 0;
       row.total = p.calories + row.bonus;
       rows.push(row);
       // O que comeu e ganhou na corrida entra na conta do jogador no mundo aberto.
-      if (!p.bot) recordRace(this.tokens.get(sessionId), row.total, p.finished && p.place === 1);
+      if (!p.bot) recordRace(this.tokens.get(sessionId), row.total, place === 1);
     });
     // Empate em calorias: quem chegou antes leva.
     rows.sort((a, b) => b.total - a.total || (a.place || 99) - (b.place || 99));
@@ -550,7 +632,11 @@ export class RaceRoom extends Room<{ state: RaceState }> {
     const someoneFinished = racers.some((p) => p.finished);
     if (someoneFinished) this.state.timer -= dt;
 
-    if (racers.every((p) => p.finished) || (someoneFinished && this.state.timer <= 0)) {
+    // (Também quando quem faltava saiu da sala: os que ficaram já chegaram.)
+    if (this.finishCamUntil === Infinity && racers.some((p) => !p.bot) && racers.every((p) => p.bot || p.finished)) {
+      this.finishCamUntil = this.state.raceTime + FINISH_CAM_SECONDS;
+    }
+    if (this.state.raceTime >= this.finishCamUntil || (someoneFinished && this.state.timer <= 0)) {
       this.finishRace();
     }
   }
