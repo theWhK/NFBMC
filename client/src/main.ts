@@ -30,6 +30,8 @@ import {
 } from "@nfbmc/shared";
 
 import { Sound, type OtherCarSound } from "./audio.ts";
+import type { CueName } from "./music.ts";
+import { showNowPlaying } from "./now-playing.ts";
 import { makeBridge, playStory, showRadio, type Cast } from "./cinematic.ts";
 import { createFullMap, createMinimap, createTacho, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
@@ -87,6 +89,7 @@ ui.toggleSfx.addEventListener("click", () => {
   refreshAudioButtons();
   ui.toggleSfx.blur();
 });
+sound.onTrack = showNowPlaying;
 sound.song("lobby");
 
 // --- Cena 3D ---------------------------------------------------------------
@@ -278,13 +281,33 @@ function storyCast(hero = story.story.car, rival?: string, rivalData?: Rival): C
 }
 const heroCast = () => storyCast(HERO_CAR);
 
-/** Som das cinemáticas: sirene nas cenas com a Vigilância, música de perseguição na fuga. */
-const SIREN_SHOTS = new Set<CineShot>(["sirene", "cerco", "radio", "fuga", "beira"]);
+/**
+ * Trilha das cinemáticas: cada plano tem o seu tema (client/src/tracks.ts,
+ * CUES). Enquanto a cena dura, a música e os sons do jogo calam; só ficam as
+ * vozes e o tema, que abaixa sozinho quando alguém fala.
+ */
+const CUE_OF: Record<CineShot, CueName> = {
+  aereo: "chegada", chegada: "chegada",
+  sirene: "cerco", abordagem: "cerco", cerco: "cerco",
+  sabotagem: "sabotagem",
+  lista: "rival", bruno: "rival", aposta: "rival", rival: "rival", duelo: "rival", apresenta: "rival",
+  entrega: "nota", nota: "nota",
+  radio: "radio", beira: "radio",
+  tv: "tv", fuga: "fuga", ponte: "ponte", fim: "fim", mia: "mia", sozinho: "sozinho",
+};
+/** Temas em que cada corte de plano ganha uma pancada. */
+const CUT_HITS = new Set<CueName>(["cerco", "rival", "fuga"]);
+let lastShot: CineShot | null = null;
 function cineSound(shot: CineShot | null) {
-  sound.updateSiren(shot && SIREN_SHOTS.has(shot) ? (shot === "radio" || shot === "beira" ? 45 : 15) : null);
-  if (shot === "fuga") sound.song("pursuit");
-  else if (shot === "ponte") sound.whoosh();
-  else if (shot === null && !mode) sound.song("lobby");
+  const cue = shot ? CUE_OF[shot] : null;
+  // Corte de plano dentro do mesmo tema: a cama segue e o corte ganha uma pancada.
+  if (shot && lastShot && cue === CUE_OF[lastShot]) {
+    if (shot === "apresenta") sound.cineCut(1.2);
+    else if (CUT_HITS.has(cue!)) sound.cineCut(0.6);
+  }
+  lastShot = shot;
+  sound.cinematic(cue);
+  if (shot === null && !mode) sound.song("lobby");
 }
 
 /** Toca um trecho do roteiro (cinemática 3D com WebGL, quadrinhos sem) e devolve a vitrine do menu. */
@@ -852,8 +875,10 @@ async function start(entry: MenuEntry) {
       await playStoryScene(rivalTauntScene(rival), cast);
     } else {
       // Sem 3D: o cartão do rival e a provocação em quadrinhos.
+      cineSound("apresenta");
       await showRivalIntro(rival, story.story.car);
       await playStoryScene(rival.taunt, cast);
+      cineSound(null);
     }
     const room = await joinQuickRace({
       ...carOptions(), raceId: rival.race, rival: { name: rival.name, car: rival.car, skill: rival.skill },
@@ -982,6 +1007,9 @@ $("story-car").addEventListener("click", () => {
 // --- Gancho para os testes e2e ---------------------------------------------
 
 /** Deixa os testes (Playwright) lerem o estado sem depender do canvas. */
+// A trilha (clima, faixa e tema da cinemática) fica visível para os testes desde o menu.
+window.__nfbmcAudio = () => sound.audioState();
+
 function publishTestHook() {
   const current = mode;
   if (!current) return;
@@ -1001,6 +1029,7 @@ function publishTestHook() {
 
 declare global {
   interface Window {
+    __nfbmcAudio?: () => { mood: string | null; cue: string | null; track: string | null; enabled: boolean; cinematic: boolean };
     __nfbmc?: {
       sessionId: string;
       mode: () => "world" | "race";

@@ -1164,7 +1164,18 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
 export async function playStory(panels: ComicPanel[], scene: GameScene | null, cast: Cast, hooks: CineHooks = {}): Promise<void> {
   if (!panels.length) return;
   if (!scene) {
-    await playComic(panels, { onPanel: (p) => (hooks.hush?.(), void hooks.speak?.(p)), onEnd: () => hooks.hush?.() });
+    // Nos quadrinhos também: cada quadro avisa o plano (a trilha da cena acompanha).
+    await playComic(panels, {
+      onPanel: (p) => {
+        hooks.hush?.();
+        hooks.onShot?.(shotFor(p));
+        void hooks.speak?.(p);
+      },
+      onEnd: () => {
+        hooks.hush?.();
+        hooks.onShot?.(null);
+      },
+    });
     return;
   }
   await playCinematic(panels, scene, cast, hooks);

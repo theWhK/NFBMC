@@ -20,6 +20,8 @@ export class Voices {
   private playing = new Set<AudioBufferSourceNode>();
   /** Fala pedida depois deste instante é ignorada se um `stopAll` veio no meio. */
   private generation = 0;
+  /** Começou uma fala: daqui a `delay` s, durando `seconds` (a trilha abaixa). */
+  onPlay: ((delay: number, seconds: number) => void) | null = null;
 
   attach(ctx: AudioContext, out: AudioNode, reverb: AudioNode) {
     this.ctx = ctx;
@@ -79,6 +81,7 @@ export class Voices {
       source.start(start);
       this.playing.add(source);
       source.onended = () => this.playing.delete(source);
+      this.onPlay?.(start - ctx.currentTime, buffer.duration);
       options.onEnd?.(start - ctx.currentTime + buffer.duration);
     });
   }

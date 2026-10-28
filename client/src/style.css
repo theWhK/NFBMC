@@ -2974,3 +2974,50 @@ body.touch #dash {
 body.touch:has(#marker-panel:not([hidden])) #dash {
   visibility: hidden;
 }
+
+/* Aviso "tocando agora" da trilha (canto de baixo, à esquerda; entra e sai deslizando). */
+.now-playing {
+  position: fixed;
+  left: 16px;
+  bottom: 96px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 8px 14px 8px 10px;
+  color: #f5ebe0;
+  background: var(--panel);
+  border-left: 4px solid var(--mustard);
+  box-shadow: 4px 4px 0 #0a0806;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-120%);
+  transition: transform 0.45s cubic-bezier(0.2, 1.3, 0.4, 1), opacity 0.3s;
+}
+.now-playing.show {
+  opacity: 1;
+  transform: none;
+}
+.now-playing .np-icon {
+  font-size: 1.6rem;
+  color: var(--mustard);
+}
+.now-playing small {
+  display: block;
+  font: 0.65rem var(--hud);
+  color: var(--orange);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.now-playing strong {
+  display: block;
+  font: 0.95rem var(--hud);
+}
+.now-playing span:last-child {
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+body.cine-on .now-playing {
+  display: none;
+}
