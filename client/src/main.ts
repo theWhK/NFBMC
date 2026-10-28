@@ -995,6 +995,7 @@ function publishTestHook() {
     police: () => (current instanceof WorldMode ? current.policeSnapshot() : null),
     send: (type: string, message: unknown) => {
       if (current instanceof WorldMode) current.send(type, message);
+      else (current.room as unknown as { send: (type: string, message: unknown) => void }).send(type, message);
     },
   };
 }

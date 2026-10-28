@@ -14,7 +14,7 @@ import {
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import type { RaceRoom } from "./net.ts";
 import type { CarView } from "./scene.ts";
-import { escapeHtml, foodByCalories, kcal, ordinal, setHtml, showPopup, ui } from "./ui.ts";
+import { $, escapeHtml, foodByCalories, kcal, ordinal, setHtml, showPopup, ui } from "./ui.ts";
 
 export interface RaceFinish {
   /** Colocação na chegada (0 = não terminou). */
@@ -24,11 +24,21 @@ export interface RaceFinish {
   challenge: boolean;
 }
 
+/** Tempo de prova: 1:23,45. */
+const raceTime = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const rest = seconds - m * 60;
+  return `${m}:${rest.toFixed(2).padStart(5, "0").replace(".", ",")}`;
+};
+
 export class RaceMode {
   readonly room: RaceRoom;
   private ctx: ModeContext;
   /** Pista já desenhada na cena (o estado pode chegar um instante depois da conexão). */
   private drawnRace: RaceId | null = null;
+  /** Radares já mostrados (para o flash aparecer uma vez por radar). */
+  private seenTraps = 0;
+  private flashTimer: ReturnType<typeof setTimeout> | undefined;
   /** Valores do quadro anterior, para perceber eventos (comeu, deu volta, bateu...). */
   private previous = { phase: "", countdown: 0, lap: 0, finished: false, calories: 0, boost: 0, speed: 0, bumpAt: 0 };
 
@@ -175,6 +185,32 @@ export class RaceMode {
       ui.place.textContent = `${ordinal(me.place)}/${racers.length}`;
       ui.calories.textContent = kcal(me.calories);
     }
+    // Speedtrap: soma dos radares no HUD e o flash a cada radar passado.
+    const radar = room.state.kind === "radar";
+    const radarCount = (RACES[this.raceId].radars?.length ?? 0) * laps;
+    $("trap-row").hidden = !(inRace && radar);
+    if (radar && inRace) $("trap").textContent = `${kcal(Math.round(me.trapTotal))} km/h · ${me.traps}/${radarCount}`;
+    if (current !== "racing") this.seenTraps = 0;
+    else if (me.traps > this.seenTraps) {
+      this.seenTraps = me.traps;
+      const flash = $("trap-flash");
+      flash.textContent = `📸 ${Math.round(me.lastTrap)} km/h`;
+      flash.hidden = true;
+      void flash.offsetWidth;
+      flash.hidden = false;
+      ctx.sound.click();
+      clearTimeout(this.flashTimer);
+      this.flashTimer = setTimeout(() => (flash.hidden = true), 1000);
+    }
+
+    // Chegada: faixas de cinema, posição e tempo, e a câmera girando em volta do carro.
+    const finishing = current === "racing" && me.racing && me.finished;
+    ctx.scene?.setFinishCam(finishing);
+    $("finish-cam").hidden = !finishing;
+    if (finishing) {
+      $("finish-place").textContent = radar ? `${kcal(Math.round(me.trapTotal))} km/h` : `${ordinal(me.place)} lugar`;
+      $("finish-time").textContent = radar ? `${ordinal(me.place)} no radar · ${raceTime(me.finishTime)}` : raceTime(me.finishTime);
+    }
     ui.dash.hidden = spectating;
     if (!spectating) {
       ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
@@ -198,7 +234,9 @@ export class RaceMode {
     } else if (spectating && current !== "results") {
       message = "Corrida em andamento: você entra na próxima! 🍟";
     } else if (current === "racing" && me.finished) {
-      message = `Você chegou em ${ordinal(me.place)}! Esperando os outros… ${secondsLeft}s`;
+      // Só humanos fazem esperar: contra bots, a corrida acaba logo (o tempo deles é projetado).
+      const humansRacing = racers.some((p) => !p.bot && !p.finished);
+      message = humansRacing ? `Esperando a galera chegar… ${secondsLeft}s` : "";
     } else if (current === "racing" && firstDone) {
       message = `${escapeHtml(firstDone.name)} já chegou! Você tem ${secondsLeft}s`;
     }
@@ -215,6 +253,7 @@ export class RaceMode {
 
     // Resultado
     ui.results.hidden = current !== "results" || room.state.challenge;
+    ui.results.classList.toggle("radar-off", !radar);
     if (current === "results") {
       const rows = [...(room.state.results ?? [])];
       const winner = rows[0];
@@ -228,7 +267,9 @@ export class RaceMode {
           .map((row, i) =>
             `<tr class="${row.sessionId === room.sessionId ? "me" : ""}"><td>${i + 1}</td>` +
             `<td><span class="dot" style="background:${row.color}"></span>${row.bot ? "🤖 " : ""}${escapeHtml(row.name)}</td>` +
-            `<td>${row.place ? ordinal(row.place) : "—"}</td><td>${kcal(row.calories)}</td>` +
+            `<td>${row.place ? ordinal(row.place) : "—"}</td>` +
+            `<td>${row.time ? `${row.projected ? "~" : ""}${raceTime(row.time)}` : "—"}</td>` +
+            `<td class="trap-col">${kcal(Math.round(row.trap))} km/h</td><td>${kcal(row.calories)}</td>` +
             `<td>+${kcal(row.bonus)}</td><td>${kcal(row.total)}</td></tr>`)
           .join(""),
       );
@@ -321,6 +362,8 @@ export class RaceMode {
   }
 
   dispose() {
+    this.ctx.scene?.setFinishCam(false);
+    clearTimeout(this.flashTimer);
     ui.botsMinus.onclick = ui.botsPlus.onclick = ui.start.onclick = null;
     ui.difficulty.onchange = null;
   }

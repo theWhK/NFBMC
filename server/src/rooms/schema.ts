@@ -27,6 +27,10 @@ export const Player = schema({
   finished: t.boolean().default(false),
   /** Segundos desde a largada até cruzar a chegada da última volta. */
   finishTime: t.number().default(0),
+  /** Speedtrap: soma das velocidades (km/h) nos radares, quantos já passou e a última medida. */
+  trapTotal: t.number().default(0),
+  traps: t.uint8().default(0),
+  lastTrap: t.number().default(0),
 });
 export type Player = SchemaType<typeof Player>;
 
@@ -49,6 +53,11 @@ export const Result = schema({
   calories: t.uint32().default(0),
   bonus: t.uint32().default(0),
   total: t.uint32().default(0),
+  /** Tempo de prova (s; 0 = não terminou) e se ele foi projetado pelo ritmo (bot que ainda corria). */
+  time: t.number().default(0),
+  projected: t.boolean().default(false),
+  /** Speedtrap: soma das velocidades nos radares (km/h). */
+  trap: t.number().default(0),
 });
 export type Result = SchemaType<typeof Result>;
 
@@ -57,6 +66,8 @@ export const RaceState = schema({
   /** Qual corrida de Porto Gordo é esta, e quantas voltas tem. */
   raceId: t.string().default("autodromo"),
   laps: t.uint8().default(3),
+  /** "circuito" ou "radar" (speedtrap). */
+  kind: t.string().default("circuito"),
   /** Corrida disparada do mundo aberto (larga sozinha e devolve todo mundo ao mundo). */
   event: t.boolean().default(false),
   /** Duelo do modo história contra um rival da Lista Gorda (larga sozinho). */
