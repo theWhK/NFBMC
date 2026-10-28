@@ -129,3 +129,57 @@ test("corrida rápida: escolhe a pista (bairros novos) e larga nela", async ({ b
   await expect(other.locator("#quick-info")).toContainText("1 volta");
   await again.close();
 });
+
+test("fim de corrida contra bots: não espera ninguém, câmera de chegada e tempo projetado dos bots", async ({ browser }) => {
+  const context = await browser.newContext();
+  contexts.push(context);
+  const page = await context.newPage();
+  await page.goto("/");
+  await page.getByTestId("name-input").fill("Will");
+  await page.getByTestId("quick-menu").click();
+  await page.getByTestId("quick-track").selectOption("centro");
+  await page.getByTestId("solo-button").click();
+  await page.getByTestId("start-button").click();
+  await expect.poll(() => phase(page), { timeout: 15_000 }).toBe("racing");
+  await page.waitForTimeout(2500);
+
+  // Cruza a chegada (gancho de teste): a câmera de chegada aparece com a posição.
+  await page.evaluate(() => window.__nfbmc!.send("debugFinish", {}));
+  await expect(page.getByTestId("finish-cam")).toBeVisible();
+  await expect(page.locator("#finish-place")).toContainText("lugar");
+  // Sem esperar os bots: o resultado sai em poucos segundos, com o tempo de todo mundo.
+  await expect.poll(() => phase(page), { timeout: 8_000 }).toBe("results");
+  await expect(page.getByTestId("finish-cam")).toBeHidden();
+  const rows = page.getByTestId("results").locator("tbody tr");
+  await expect(rows).toHaveCount(6);
+  // Os bots que ainda corriam têm o tempo projetado (com "~").
+  await expect(page.getByTestId("results")).toContainText("~");
+});
+
+test("speedtrap: radares somam a velocidade e decidem a colocação", async ({ browser }) => {
+  const context = await browser.newContext();
+  contexts.push(context);
+  const page = await context.newPage();
+  await page.goto("/");
+  await page.getByTestId("name-input").fill("Will");
+  await page.getByTestId("quick-menu").click();
+  await page.getByTestId("quick-track").selectOption("radar-porto");
+  await page.getByTestId("solo-button").click();
+  await page.getByTestId("start-button").click();
+  await expect.poll(() => phase(page), { timeout: 15_000 }).toBe("racing");
+  await expect(page.getByTestId("trap")).toContainText("0/4");
+
+  // Passa no primeiro radar a 100 m/s (360 km/h): flash e soma no HUD.
+  await page.evaluate(() => window.__nfbmc!.send("debugRadar", { speed: 100 }));
+  await expect(page.getByTestId("trap-flash")).toContainText("360 km/h");
+  await expect(page.getByTestId("trap")).toContainText("360 km/h · 1/4");
+  for (let i = 0; i < 3; i++) await page.evaluate(() => window.__nfbmc!.send("debugRadar", { speed: 100 }));
+  await expect(page.getByTestId("trap")).toContainText("4/4");
+
+  await page.evaluate(() => window.__nfbmc!.send("debugFinish", {}));
+  await expect.poll(() => phase(page), { timeout: 8_000 }).toBe("results");
+  // 4 × 360 km/h ninguém alcança: primeiro lugar, e a coluna dos radares aparece.
+  const mine = page.getByTestId("results").locator("tr.me");
+  await expect(mine).toContainText("1º");
+  await expect(mine).toContainText("1.440 km/h");
+});
