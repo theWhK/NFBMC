@@ -3,8 +3,12 @@
 // grua), câmera lenta, carros seguindo caminhos pelas ruas, a sirene do
 // Couve-vette do Sargento Cross-fit e o salto da ponte inacabada do Cais.
 //
-// O texto vem do roteiro (shared/src/story.ts): cada quadro com `shot` vira um
-// plano da cinemática, com a fala na legenda. Sem WebGL (e nos testes), os
+// Os personagens aparecem como bonecos low-poly (client/src/figures.ts), ao
+// lado dos carros, gesticulando enquanto falam; cada fala tem a voz gravada do
+// personagem (scripts/vozes.py), e a legenda acompanha a voz.
+//
+// O texto vem do roteiro (shared/src/story.ts): cada quadro tem o seu `shot`,
+// um plano da cinemática, com a fala na legenda. Sem WebGL (e nos testes), os
 // mesmos quadros aparecem como quadrinhos (`playComic`). Clique, toque, Enter
 // ou espaço passam para o próximo plano; Esc ou "Pular" pulam a cena toda.
 import * as THREE from "three";
@@ -15,27 +19,50 @@ import {
   ROADS,
   carSpec,
   routeBetween,
+  MIA,
+  CROSSFIT,
+  REPORTER,
+  YOU,
   type CineShot,
   type ComicPanel,
+  RIVALS_LADDER,
+  type Rival,
 } from "@nfbmc/shared";
 
 import "./cinematic.css";
+import { lookOf, makeFigure, type Acting, type Figure } from "./figures.ts";
 import { makeCar, type CarModel } from "./models.ts";
 import type { GameScene } from "./scene.ts";
-import { graphemes, playComic } from "./story.ts";
+import { graphemes, playComic, rivalCard } from "./story.ts";
 import { escapeHtml } from "./ui.ts";
 
-/** Quem aparece nas cenas: o seu carro (e cor) e, no duelo, o carro do rival. */
+/** Quem aparece nas cenas: o seu carro (e cor) e, no duelo, o rival e o carro dele. */
 export interface Cast {
   hero: string;
   heroColor: string;
   rival?: string;
+  /** O rival da vez (apresentação, provocação, derrota): nome, carro, ranking. */
+  rivalData?: Rival;
 }
 
 export interface CineHooks {
   /** Começou um plano (null = acabou a cinemática): o main liga sirene, música, efeitos. */
   onShot?: (shot: CineShot | null) => void;
+  /**
+   * Fala a voz gravada de um quadro. Resolve com a duração (s) da fala, ou
+   * null se não vai ter voz (efeitos desligados, sem áudio, sem arquivo).
+   */
+  speak?: (panel: ComicPanel) => Promise<number | null>;
+  /** Cala a voz (passou de quadro ou pulou a cena). */
+  hush?: () => void;
 }
+
+/**
+ * Altura do chão num ponto. Hoje a cidade é plana (0); quando o relevo chegar
+ * (heightAt em shared/src/terrain.ts), é só trocar aqui que carros e bonecos
+ * das cinemáticas acompanham o terreno.
+ */
+export const groundY = (_x: number, _z: number) => 0;
 
 // --- Caminhos pelas ruas -------------------------------------------------------
 
@@ -258,6 +285,7 @@ interface Actor {
 class Stage {
   private actors = new Map<string, Actor>();
   private props = new Map<string, THREE.Object3D>();
+  private people = new Map<string, Figure>();
   time = 0;
   private scene: GameScene;
 
@@ -269,6 +297,25 @@ class Stage {
   hideAll() {
     for (const actor of this.actors.values()) actor.model.group.visible = false;
     for (const prop of this.props.values()) prop.visible = false;
+    for (const person of this.people.values()) person.group.visible = false;
+  }
+
+  /**
+   * Põe o personagem `name` (pelo figurino dele em figures.ts) em pé num ponto,
+   * olhando para `heading`, fazendo o que `acting` mandar.
+   */
+  person(name: string, x: number, z: number, heading: number, acting: Acting, dt: number) {
+    let figure = this.people.get(name);
+    if (!figure) {
+      figure = makeFigure(lookOf(name));
+      this.scene.addProp(figure.group);
+      this.people.set(name, figure);
+    }
+    figure.group.visible = true;
+    figure.group.position.set(x, groundY(x, z), z);
+    figure.group.rotation.y = heading;
+    figure.update(dt, acting);
+    return figure;
   }
 
   /**
@@ -289,7 +336,7 @@ class Stage {
     actor.x = pose.x;
     actor.z = pose.z;
     group.visible = true;
-    group.position.set(pose.x, opts.y ?? 0, pose.z);
+    group.position.set(pose.x, groundY(pose.x, pose.z) + (opts.y ?? 0), pose.z);
     group.rotation.y = pose.heading;
     group.rotation.x = -(opts.pitch ?? 0);
     group.rotation.z = opts.roll ?? 0;
@@ -321,8 +368,10 @@ class Stage {
   dispose() {
     for (const actor of this.actors.values()) this.scene.removeProp(actor.model.group);
     for (const prop of this.props.values()) this.scene.removeProp(prop);
+    for (const person of this.people.values()) this.scene.removeProp(person.group);
     this.actors.clear();
     this.props.clear();
+    this.people.clear();
   }
 }
 
@@ -344,6 +393,10 @@ interface ShotContext {
   /** Quantas vezes este plano já apareceu seguido (para variar o ângulo). */
   repeat: number;
   lay: Layout;
+  /** O quadro deste plano (quem fala, o texto). */
+  panel: ComicPanel;
+  /** O personagem está falando agora (voz tocando ou legenda sendo escrita)? */
+  talking: (name: string) => boolean;
 }
 
 interface Shot {
@@ -401,22 +454,33 @@ const SHOTS: Record<CineShot, (ctx: ShotContext) => Shot> = {
     },
   }),
 
-  // Os dois parados no meio-fio; a câmera dá a volta no Cross-fit.
-  abordagem: ({ stage, cast, lay, repeat }) => ({
+  // Os dois parados no meio-fio; o Cross-fit desce e vai até a janela do seu carro.
+  abordagem: (ctx) => ({
     min: 4,
-    frame(t, _dt, cam) {
+    frame(t, dt, cam) {
+      const { stage, cast, lay, repeat, panel } = ctx;
       const s = 70 + braking(99, 18, 3.2);
       const hero = lay.avenue.at(s, 1.5);
       const cop = lay.avenue.at(s - 13, 1.2);
       stage.car("hero", cast.hero, cast.heroColor, hero);
       stage.cop("crossfit", CROSSFIT_CAR, cop);
-      const close = repeat % 2;
-      const center = lay.avenue.at(s - (close ? 13 : 6.5), 1.3);
-      const angle = (close ? 2.3 : 0.5) + t * 0.16;
-      const radius = close ? 6.5 : 9;
-      cam.pos.set(center.x + Math.sin(center.heading + angle) * radius, close ? 1.3 : 1.8, center.z + Math.cos(center.heading + angle) * radius);
-      cam.look.set(center.x, 1.0, center.z);
-      cam.fov = 40;
+      // Ele fica do lado do motorista (à esquerda), virado para a janela.
+      const spot = rel(hero, 0.4, -1.9, 0);
+      const window = rel(hero, 0.4, -0.6, 0);
+      const facing = Math.atan2(window.x - spot.x, window.z - spot.z);
+      stage.person(CROSSFIT, spot.x, spot.z, facing, { talking: ctx.talking(CROSSFIT), crossed: !ctx.talking(CROSSFIT) && repeat > 0 }, dt);
+      if (panel.speaker === YOU) {
+        // Você responde: a câmera fica atrás do Cross-fit, olhando a janela.
+        rel({ x: spot.x, z: spot.z, heading: facing }, -1.6, 0.6, 1.9, cam.pos);
+        rel(hero, 0.4, -0.5, 1.15, cam.look);
+        cam.fov = 40;
+      } else {
+        // Ele fala: de dentro do seu carro, pela janela, olhando para cima.
+        const angle = (repeat % 2 ? -0.35 : 0.35) + t * 0.03;
+        cam.pos.set(spot.x + Math.sin(facing + angle) * 1.5, 1.2, spot.z + Math.cos(facing + angle) * 1.5);
+        cam.look.set(spot.x, 1.75, spot.z);
+        cam.fov = 42;
+      }
     },
   }),
 
@@ -439,10 +503,12 @@ const SHOTS: Record<CineShot, (ctx: ShotContext) => Shot> = {
     },
   }),
 
-  // O cerco: as viaturas fecham o carro de todos os lados; a grua desce.
-  cerco: ({ stage, cast, lay }) => ({
+  // O cerco: as viaturas fecham o carro de todos os lados; o Cross-fit desce
+  // apontando e você sai com as mãos na cabeça.
+  cerco: (ctx) => ({
     min: 4.5,
-    frame(t, _dt, cam) {
+    frame(t, dt, cam) {
+      const { stage, cast, lay } = ctx;
       const s = 110;
       const hero = lay.avenue.at(s);
       stage.car("hero", cast.hero, cast.heroColor, hero);
@@ -458,54 +524,73 @@ const SHOTS: Record<CineShot, (ctx: ShotContext) => Shot> = {
         const p = lay.avenue.at(s0 + (s1 - s0) * u, l0 + (l1 - l0) * u);
         stage.cop(id, car, { ...p, heading: p.heading + (front ? Math.PI : 0) + turn * u });
       }
+      // Depois que as viaturas param, os dois aparecem em pé.
+      const you = rel(hero, 0.6, -2.0, 0);
+      const cf = lay.avenue.at(s + 5.5, -2.2);
+      if (u > 0.85) {
+        stage.person(YOU, you.x, you.z, Math.atan2(cf.x - you.x, cf.z - you.z), { handsUp: true }, dt);
+        stage.person(CROSSFIT, cf.x, cf.z, Math.atan2(you.x - cf.x, you.z - cf.z), { reach: true, talking: ctx.talking(CROSSFIT) }, dt);
+      }
       const angle = 0.9 + t * 0.15;
       // Mira um pouco à frente do carro, para o Couve-vette (que vem de frente) entrar no quadro.
-      const ahead = lay.avenue.at(s + 4, -2);
-      cam.pos.set(ahead.x + Math.sin(angle) * (19 - 4 * u), 14 - 6 * u, ahead.z + Math.cos(angle) * (19 - 4 * u));
-      cam.look.set(ahead.x, 1, ahead.z);
-      cam.fov = 58;
+      const ahead = lay.avenue.at(s + 3, -2);
+      const r = 19 - 7 * u;
+      cam.pos.set(ahead.x + Math.sin(angle) * r, 14 - 9.5 * u, ahead.z + Math.cos(angle) * r);
+      cam.look.set(ahead.x, 1.2, ahead.z);
+      cam.fov = 58 - 10 * u;
     },
   }),
 
-  // O Cross-fit no rádio: a câmera chega devagar no Couve-vette parado de sirene ligada.
-  radio: ({ stage, lay, repeat }) => ({
+  // O Cross-fit no rádio, encostado no Couve-vette de sirene ligada; a câmera chega devagar.
+  radio: (ctx) => ({
     min: 4,
-    frame(t, _dt, cam) {
+    frame(t, dt, cam) {
+      const { stage, lay, repeat } = ctx;
       const side = repeat % 2 ? -1 : 1;
       const cop = lay.avenue.at(140 + repeat * 30, 2);
       stage.cop("crossfit", CROSSFIT_CAR, cop);
-      rel(cop, 8.5 - t * 0.7, side * 3.2, 1.3, cam.pos);
-      rel(cop, 0, 0, 1.0, cam.look);
-      cam.fov = 36;
+      const spot = rel(cop, 1.2, 1.9, 0);
+      // Virado um pouco para o lado da câmera.
+      stage.person(CROSSFIT, spot.x, spot.z, cop.heading - 0.6 * side, { toMouth: true, talking: ctx.talking(CROSSFIT) }, dt);
+      rel(cop, 7 - t * 0.5, 1.9 + side * 2.6, 1.6, cam.pos);
+      cam.look.set(spot.x, 1.5, spot.z);
+      cam.fov = 38;
     },
   }),
 
-  // O rival esquentando os pneus antes do duelo.
-  rival: ({ stage, scene, cast, lay, repeat }) => ({
+  // O rival, em pé na frente do carro (que ronca e solta fumaça), provocando.
+  rival: (ctx) => ({
     min: 4,
-    frame(t, _dt, cam) {
+    frame(t, dt, cam) {
+      const { stage, scene, cast, lay, repeat, panel } = ctx;
       const car = cast.rival ?? cast.hero;
       const p = lay.avenue.at(90);
       stage.car("rival", car, carSpec(car).color, p, { roll: Math.sin(t * 40) * 0.01 });
       scene.puff(p.x - Math.sin(p.heading) * 2, p.z - Math.cos(p.heading) * 2, p.heading, 0.7);
-      const angle = 0.5 + t * 0.3 + repeat * 2;
-      cam.pos.set(p.x + Math.sin(p.heading + angle) * 6.5, 0.9, p.z + Math.cos(p.heading + angle) * 6.5);
-      cam.look.set(p.x, 0.8, p.z);
+      const name = panel.speaker ?? cast.rivalData?.name ?? "";
+      const spot = rel(p, 3.6, 0.6, 0);
+      stage.person(name, spot.x, spot.z, p.heading, { talking: ctx.talking(name) }, dt);
+      // Plano médio no rival, com o carro atrás; a câmera desliza de lado.
+      const angle = (repeat % 2 ? -0.45 : 0.45) + t * 0.04 * (repeat % 2 ? -1 : 1);
+      cam.pos.set(spot.x + Math.sin(p.heading + angle) * 4.2, 1.45, spot.z + Math.cos(p.heading + angle) * 4.2);
+      cam.look.set(spot.x, 1.45, spot.z);
       cam.fov = 40;
     },
   }),
 
-  // Os dois lado a lado na largada.
-  duelo: ({ stage, cast, lay }) => ({
+  // Os dois carros lado a lado na largada, os dois pilotos frente a frente.
+  duelo: (ctx) => ({
     min: 4,
-    frame(t, _dt, cam) {
+    frame(t, dt, cam) {
+      const { stage, cast, lay } = ctx;
       const car = cast.rival ?? cast.hero;
-      stage.car("rival", car, carSpec(car).color, lay.avenue.at(90));
-      stage.car("hero", cast.hero, cast.heroColor, lay.avenue.at(90, -4.5));
-      const mid = lay.avenue.at(90, -2.25);
-      rel(mid, 10 - t * 1.2, 0, 1.0, cam.pos);
-      rel(mid, 0, 0, 0.9, cam.look);
-      cam.fov = 45;
+      const rivalCar = lay.avenue.at(90);
+      const heroCar = lay.avenue.at(90, -4.5);
+      stage.car("rival", car, carSpec(car).color, rivalCar);
+      stage.car("hero", cast.hero, cast.heroColor, heroCar);
+      const them = rel(rivalCar, 3.4, -0.6, 0);
+      const you = rel(heroCar, 3.4, 0.6, 0);
+      conversation(ctx, t, dt, cam, { name: YOU, x: you.x, z: you.z }, { name: cast.rivalData?.name ?? "", x: them.x, z: them.z });
     },
   }),
 
@@ -579,9 +664,10 @@ const SHOTS: Record<CineShot, (ctx: ShotContext) => Shot> = {
   },
 
   // O Cross-fit parado na beira, olhando você ir embora do outro lado do vão.
-  beira: ({ stage, cast }) => ({
+  beira: (ctx) => ({
     min: 5,
-    frame(t, _dt, cam) {
+    frame(t, dt, cam) {
+      const { stage, cast } = ctx;
       stage.prop("bridge", () => makeBridge());
       const start = FINALE_BRIDGE.z - QUAY_Z + 12;
       const z0 = FINALE_BRIDGE.z + 12;
@@ -592,22 +678,244 @@ const SHOTS: Record<CineShot, (ctx: ShotContext) => Shot> = {
       stage.cop("crossfit", CROSSFIT_CAR, cf);
       stage.cop("cop1", "viatura-tatica", { x: FINALE_BRIDGE.x - 4, z: z0 - (start - 11), heading: Math.PI + 0.35 });
       stage.cop("cop2", "viatura-tatica", { x: FINALE_BRIDGE.x + 4, z: z0 - (start - 18), heading: Math.PI - 0.35 });
-      if (t < 2.4) {
-        // De perto: o Cross-fit parado na beira, de sirene ligada.
-        const a = 2.4 + t * 0.12;
-        cam.pos.set(cf.x + Math.sin(a) * 6, 1.4, cf.z + Math.cos(a) * 6);
-        cam.look.set(cf.x, 1.0, cf.z);
+      // O Cross-fit desce e fica na beira, olhando você do outro lado do vão.
+      const man = { x: FINALE_BRIDGE.x + 1.2, z: cf.z - 4 };
+      stage.person(CROSSFIT, man.x, man.z, Math.PI, { toMouth: ctx.talking(CROSSFIT), talking: ctx.talking(CROSSFIT) }, dt);
+      if (t < 3.2) {
+        // De frente para ele, com o mar atrás da câmera.
+        const a = Math.PI + 0.5 - t * 0.08;
+        cam.pos.set(man.x + Math.sin(a) * 3.2, 1.7, man.z + Math.cos(a) * 3.2);
+        cam.look.set(man.x, 1.65, man.z);
         cam.fov = 40;
       } else {
         // De longe e do alto: a beira do cais, o vão da obra e você do outro lado.
-        const u = t - 2.4;
+        const u = t - 3.2;
         cam.pos.set(FINALE_BRIDGE.x + 20 - u * 0.8, 13 + u * 0.4, QUAY_Z - 15 + u * 0.6);
         cam.look.set(FINALE_BRIDGE.x, 3, QUAY_Z - BRIDGE.rampLength - BRIDGE.gap / 2);
         cam.fov = 52;
       }
     },
   }),
+
+  // A Lista Gorda: os dez carros estacionados em fila, cada piloto na frente do
+  // seu; a câmera passa por eles até o A3 do Bruno, no fim.
+  lista: (ctx) => ({
+    min: 5,
+    frame(t, dt, cam) {
+      const { stage, lay } = ctx;
+      const ladder = RIVALS_LADDER;
+      ladder.forEach((r, i) => {
+        const base = lay.avenue.at(40 + i * 8, 4);
+        // De bico para a rua (para a câmera), na diagonal.
+        const pose = { ...base, heading: base.heading + Math.PI / 2 + 0.6 };
+        stage.car(`lista-${r.rank}`, r.car, carSpec(r.car).color, pose);
+        const spot = rel(pose, 3, 0, 0);
+        stage.person(r.name, spot.x, spot.z, pose.heading - 0.4, { crossed: r.rank !== 1 }, dt);
+      });
+      const s = Math.min(40 + 9 * 8, 30 + t * 11);
+      const cp = lay.avenue.at(s, -6);
+      cam.pos.set(cp.x, 2.2, cp.z);
+      rel(lay.avenue.at(s + 9, 4), 0, 0, 1.2, cam.look);
+      cam.fov = 50;
+    },
+  }),
+
+  // O Bruno, encostado no A3 dele. No segundo plano, a câmera passa rente ao capô.
+  bruno: (ctx) => ({
+    min: 4,
+    frame(t, dt, cam) {
+      const { stage, lay, repeat } = ctx;
+      const a3 = lay.avenue.at(100, 1.5);
+      stage.car("a3", "a3bruno", carSpec("a3bruno").color, a3);
+      const spot = rel(a3, 1.0, -2.0, 0);
+      stage.person("Bruno", spot.x, spot.z, a3.heading - 0.9, { talking: ctx.talking("Bruno"), crossed: !ctx.talking("Bruno") }, dt);
+      if (repeat % 2) {
+        // Rente ao capô do A3, que ronca.
+        rel(a3, 5.5 - t * 0.6, 1.2, 0.85, cam.pos);
+        rel(a3, 1.4, -0.4, 0.9, cam.look);
+        cam.fov = 44;
+        cam.shake = 0.01;
+      } else {
+        const front = rel(a3, 4.5, -3.2 + t * 0.15, 1.6);
+        cam.pos.copy(front);
+        cam.look.set(spot.x, 1.55, spot.z);
+        cam.fov = 40;
+      }
+    },
+  }),
+
+  // A aposta: o seu M3 e o A3 frente a frente, você e o Bruno no meio.
+  aposta: (ctx) => ({
+    min: 4,
+    frame(t, dt, cam) {
+      const { stage, cast, lay } = ctx;
+      const a = lay.avenue.at(120, 0);
+      const m3 = { ...a, heading: a.heading + Math.PI };
+      const a3 = lay.avenue.at(108, 0);
+      stage.car("hero", cast.hero, cast.heroColor, m3);
+      stage.car("a3", "a3bruno", carSpec("a3bruno").color, a3);
+      const you = rel(a3, 3.0, -2.6, 0);
+      const bruno = rel(a3, 9.0, -2.6, 0);
+      const keys = ctx.panel.speaker === "Bruno" && ctx.panel.text.includes("Regra");
+      conversation(ctx, t, dt, cam, { name: YOU, x: you.x, z: you.z }, { name: "Bruno", x: bruno.x, z: bruno.z, acting: keys ? { reach: true } : undefined });
+    },
+  }),
+
+  // A Mia, encostada no carro dela, conversando com você.
+  mia: (ctx) => ({
+    min: 4,
+    frame(t, dt, cam) {
+      const { stage, cast, lay, repeat } = ctx;
+      const hers = lay.avenue.at(60 + repeat * 25, 2);
+      stage.car("mia", "civic", "#2a6f97", hers);
+      stage.car("hero", cast.hero, cast.heroColor, lay.avenue.at(48 + repeat * 25, 2));
+      const mia = rel(hers, -0.5, -1.9, 0);
+      const you = rel(hers, -3.6, -2.6, 0);
+      conversation(ctx, t, dt, cam, { name: YOU, x: you.x, z: you.z }, { name: MIA, x: mia.x, z: mia.z });
+    },
+  }),
+
+  // Você sozinho entre o Uno e o Fusca; a câmera se afasta e sobe.
+  sozinho: (ctx) => ({
+    min: 4.5,
+    frame(t, dt, cam) {
+      const { stage, lay } = ctx;
+      const uno = lay.avenue.at(80, 2);
+      const fusca = lay.avenue.at(72, 2);
+      stage.car("uno", "uno", carSpec("uno").color, uno);
+      stage.car("fusca", "fusca", carSpec("fusca").color, fusca);
+      const spot = rel(uno, -4, -2.3, 0);
+      stage.person(YOU, spot.x, spot.z, uno.heading - 1.2, {}, dt);
+      const back = 3 + t * 1.6;
+      cam.pos.set(spot.x + Math.sin(uno.heading - 1.2) * back, 1.6 + t * 0.9, spot.z + Math.cos(uno.heading - 1.2) * back);
+      cam.look.set(spot.x, 1.4, spot.z);
+      cam.fov = 45;
+    },
+  }),
+
+  // Apresentação do rival (a Lista Gorda): o cartão na tela e, depois, a câmera
+  // dando a volta no piloto de braços cruzados na frente do carro.
+  apresenta: (ctx) => ({
+    min: 5,
+    frame(t, dt, cam) {
+      const { stage, scene, cast, lay } = ctx;
+      const car = cast.rival ?? cast.hero;
+      const p = lay.avenue.at(90);
+      stage.car("rival", car, carSpec(car).color, p, { roll: Math.sin(t * 40) * 0.008 });
+      if (t > 2.5) scene.puff(p.x - Math.sin(p.heading) * 2, p.z - Math.cos(p.heading) * 2, p.heading, 0.6);
+      const name = cast.rivalData?.name ?? "";
+      const spot = rel(p, 3.4, 0, 0);
+      stage.person(name, spot.x, spot.z, p.heading, { crossed: true }, dt);
+      const angle = -0.9 + t * 0.32;
+      const r = 6.5 - Math.min(2, t * 0.3);
+      cam.pos.set(spot.x + Math.sin(p.heading + angle) * r, 0.9 + t * 0.08, spot.z + Math.cos(p.heading + angle) * r);
+      cam.look.set(spot.x - Math.sin(p.heading) * 1.2, 1.2, spot.z - Math.cos(p.heading) * 1.2);
+      cam.fov = 42;
+    },
+  }),
+
+  // A entrega: o rival estende a chave do carro para você.
+  entrega: (ctx) => ({
+    min: 4,
+    frame(t, dt, cam) {
+      const { stage, cast, lay } = ctx;
+      const car = cast.rival ?? cast.hero;
+      const p = lay.avenue.at(90, 1.5);
+      stage.car("rival", car, carSpec(car).color, p);
+      const name = ctx.panel.speaker ?? cast.rivalData?.name ?? "";
+      const them = rel(p, 0.5, -2.2, 0);
+      const you = rel(p, 0.5, -4.2, 0);
+      conversation(ctx, t, dt, cam, { name: YOU, x: you.x, z: you.z }, { name, x: them.x, z: them.z, acting: { reach: true } });
+    },
+  }),
+
+  // A nota fiscal: o carro do rival agora é seu e sai rodando, com o carimbo na tela.
+  nota: (ctx) => ({
+    min: 4.5,
+    frame(t, _dt, cam) {
+      const { stage, cast, lay } = ctx;
+      const car = cast.rival ?? cast.hero;
+      const s = 90 + Math.max(0, t - 1.2) ** 2 * 2.2;
+      const p = lay.avenue.at(s, 1.5);
+      stage.car("rival", car, carSpec(car).color, p);
+      rel(lay.avenue.at(90, 1.5), 9, -3, 0.7, cam.pos);
+      rel(p, 0, 0, 0.8, cam.look);
+      cam.fov = 40;
+    },
+  }),
+
+  // Jornal da Gordura, ao vivo: a repórter e o Cross-fit na frente do Couve-vette.
+  tv: (ctx) => ({
+    min: 4.5,
+    frame(t, dt, cam) {
+      const { stage, lay } = ctx;
+      const cop = lay.avenue.at(150, 2);
+      stage.cop("crossfit", CROSSFIT_CAR, cop);
+      const cf = rel(cop, 3.5, -1.2, 0);
+      const rep = rel(cop, 3.5, -2.4, 0);
+      const toCam = cop.heading;
+      stage.person(CROSSFIT, cf.x, cf.z, toCam + 0.35, { talking: ctx.talking(CROSSFIT) }, dt);
+      stage.person(REPORTER, rep.x, rep.z, toCam - 0.35, { toMouth: true, talking: ctx.talking(REPORTER) }, dt);
+      // Câmera de TV: parada, com um zoom lento.
+      const mid = rel(cop, 3.5, -1.8, 0);
+      rel(cop, 8.5, -1.8, 1.6, cam.pos);
+      cam.look.set(mid.x, 1.45, mid.z);
+      cam.fov = 34 - t * 0.6;
+    },
+  }),
+
+  // Fim: o M3 indo embora pela avenida e a câmera subindo até a cidade toda.
+  fim: ({ stage, cast, lay }) => ({
+    min: 6,
+    frame(t, _dt, cam) {
+      const hero = lay.avenue.at(30 + t * 14);
+      stage.car("hero", cast.hero, cast.heroColor, hero);
+      const up = Math.min(1, t / 6);
+      rel(lay.avenue.at(20), 0, 1, 1.4 + up * up * 70, cam.pos);
+      cam.look.set(hero.x, 1 + up * 10, hero.z);
+      cam.fov = 45 + up * 10;
+    },
+  }),
 };
+
+/** Um personagem que entra numa conversa: onde está e o que faz quando não fala. */
+interface Talker {
+  name: string;
+  x: number;
+  z: number;
+  acting?: Acting;
+}
+
+/**
+ * Dois personagens frente a frente. A câmera fica por cima do ombro de quem
+ * ouve, mirando quem fala (com o narrador, um plano dos dois de lado).
+ */
+function conversation(ctx: ShotContext, t: number, dt: number, cam: CamPose, a: Talker, b: Talker) {
+  const toB = Math.atan2(b.x - a.x, b.z - a.z);
+  ctx.stage.person(a.name, a.x, a.z, toB, { ...a.acting, talking: ctx.talking(a.name) }, dt);
+  ctx.stage.person(b.name, b.x, b.z, toB + Math.PI, { ...b.acting, talking: ctx.talking(b.name) }, dt);
+  const speaker = ctx.panel.speaker === a.name ? a : ctx.panel.speaker === b.name ? b : null;
+  if (!speaker) {
+    const mx = (a.x + b.x) / 2;
+    const mz = (a.z + b.z) / 2;
+    const side = toB + Math.PI / 2;
+    cam.pos.set(mx + Math.sin(side) * (5 - t * 0.2), 1.6, mz + Math.cos(side) * (5 - t * 0.2));
+    cam.look.set(mx, 1.4, mz);
+    cam.fov = 45;
+    return;
+  }
+  const listener = speaker === a ? b : a;
+  const dx = speaker.x - listener.x;
+  const dz = speaker.z - listener.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const ux = dx / len;
+  const uz = dz / len;
+  // Atrás e um pouco ao lado de quem ouve, devagar chegando mais perto.
+  const back = 1.7 - Math.min(0.5, t * 0.06);
+  cam.pos.set(listener.x - ux * back - uz * 0.75, 1.8, listener.z - uz * back + ux * 0.75);
+  cam.look.set(speaker.x, 1.55, speaker.z);
+  cam.fov = 38;
+}
 
 // --- Tela (faixas, legenda) e o diretor ---------------------------------------------
 
@@ -623,6 +931,8 @@ function overlay() {
     <div class="cine-bar top"></div>
     <div class="cine-bar bottom"></div>
     <div class="cine-flash"></div>
+    <div class="cine-tv" hidden><strong>JORNAL DA GORDURA</strong><span>● AO VIVO</span></div>
+    <div class="cine-stamp" hidden><span>Nota fiscal</span><strong></strong></div>
     <div class="cine-sfx"></div>
     <div class="cine-sub">
       <div class="cine-who"><span class="cine-art"></span><strong class="cine-speaker"></strong></div>
@@ -636,7 +946,18 @@ function overlay() {
   return el;
 }
 
-/** Uma cinemática (quadros seguidos com `shot`). Resolve com true se pulou tudo (Esc). */
+/** Plano de um quadro: o que veio no roteiro ou, sem nada, pelo personagem que fala. */
+export function shotFor(panel: ComicPanel): CineShot {
+  if (panel.shot) return panel.shot;
+  if (panel.speaker === CROSSFIT) return "radio";
+  if (panel.speaker === MIA) return "mia";
+  if (panel.speaker === "Bruno") return "bruno";
+  if (panel.speaker === REPORTER) return "tv";
+  if (panel.speaker === YOU) return "duelo";
+  return panel.speaker ? "rival" : "aereo";
+}
+
+/** Uma cinemática. Resolve com true se pulou tudo (Esc ou "Pular"). */
 function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks: CineHooks): Promise<boolean> {
   const el = overlay();
   const q = <T extends HTMLElement>(selector: string) => el.querySelector(selector) as T;
@@ -658,7 +979,14 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
     let repeat = 0;
     let typing: ReturnType<typeof setInterval> | null = null;
     let safety: ReturnType<typeof setTimeout> | null = null;
+    let cardTimer: ReturnType<typeof setTimeout> | null = null;
     let full = "";
+    /** Até quando (em `elapsed`) a voz do quadro está tocando. */
+    let voiceUntil = 0;
+    /** Quanto tempo (ms) cada letra da legenda leva; com voz, acompanha a fala. */
+    let msPerLetter = 22;
+    let typedAt = 0;
+    let typedLetters = 0;
     const cam: CamPose = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, shake: 0 };
 
     const finishTyping = () => {
@@ -667,17 +995,31 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
       textEl.textContent = full;
     };
 
+    const showCard = (on: boolean) => {
+      if (cardTimer) clearTimeout(cardTimer);
+      cardTimer = null;
+      rivalCard(on && cast.rivalData ? { rival: cast.rivalData, yourCar: cast.hero } : null);
+    };
+
     const show = () => {
       const p = panels[index];
+      const kind = shotFor(p);
       const previous = panels[index - 1];
-      repeat = previous?.shot === p.shot ? repeat + 1 : 0;
+      repeat = previous && shotFor(previous) === kind ? repeat + 1 : 0;
       stage.hideAll();
-      shot = SHOTS[p.shot!]({ stage, scene, cast, repeat, lay });
+      hooks.hush?.();
+      const panelIndex = index;
+      shot = SHOTS[kind]({
+        stage, scene, cast, repeat, lay, panel: p,
+        // Fala enquanto a voz toca (ou, sem voz, enquanto a legenda é escrita).
+        talking: (name) => name === p.speaker && (elapsed < voiceUntil || !!typing),
+      });
       elapsed = 0;
       sceneTime = 0;
+      voiceUntil = 0;
       const letters = graphemes(p.text);
       duration = Math.min(shot.max ?? 11, Math.max(shot.min, 2 + letters.length * 0.06));
-      hooks.onShot?.(p.shot!);
+      hooks.onShot?.(kind);
 
       // Legenda: quem fala (com o "retrato" em emoji) e o texto em máquina de escrever.
       q(".cine-speaker").textContent = p.speaker ?? "";
@@ -691,17 +1033,44 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
       const flash = q(".cine-flash");
       flash.classList.remove("on");
       void flash.offsetWidth;
-      if (p.fx === "flash" || p.shot === "ponte") flash.classList.add("on");
+      if (p.fx === "flash" || kind === "ponte") flash.classList.add("on");
+      q(".cine-tv").hidden = kind !== "tv";
+      // Nota fiscal: o carimbo com o carro que agora é seu.
+      const stamp = q(".cine-stamp");
+      stamp.hidden = kind !== "nota";
+      if (kind === "nota") q(".cine-stamp strong").textContent = carSpec(cast.rival ?? cast.hero).name;
+      // Apresentação: o cartão da Lista Gorda nos primeiros segundos, depois só a cena.
+      showCard(kind === "apresenta");
+      if (kind === "apresenta") cardTimer = setTimeout(() => showCard(false), 2800);
+
       full = p.text;
       textEl.textContent = "";
       if (typing) clearInterval(typing);
-      // ~45 letras por segundo, pelo relógio (com a máquina lenta, o intervalo atrasa).
-      const typedAt = performance.now();
+      msPerLetter = 22;
+      typedAt = performance.now();
+      typedLetters = 0;
+      // Pelo relógio (com a máquina lenta, o intervalo atrasa).
       typing = setInterval(() => {
-        const shown = Math.floor((performance.now() - typedAt) / 22);
+        const shown = typedLetters + Math.floor((performance.now() - typedAt) / msPerLetter);
         textEl.textContent = letters.slice(0, shown).join("");
         if (shown >= letters.length) finishTyping();
       }, 30);
+
+      // A voz do personagem: quando chega, a legenda passa a acompanhar a fala e o
+      // plano dura pelo menos até ela acabar.
+      void hooks.speak?.(p).then((seconds) => {
+        if (seconds === null || done || index !== panelIndex || !shot) return;
+        voiceUntil = elapsed + seconds;
+        duration = Math.max(shot.min, seconds + 0.8);
+        if (typing) {
+          typedLetters += Math.floor((performance.now() - typedAt) / msPerLetter);
+          typedAt = performance.now();
+          const left = Math.max(1, letters.length - typedLetters);
+          msPerLetter = Math.min(110, Math.max(16, (seconds * 900) / left));
+        }
+        if (safety) clearTimeout(safety);
+        safety = setTimeout(advance, (duration - elapsed + 3) * 1000);
+      });
       // Se a cena 3D parar de desenhar (aba escondida, erro), o plano acaba sozinho.
       if (safety) clearTimeout(safety);
       safety = setTimeout(advance, (duration + 3) * 1000);
@@ -713,6 +1082,8 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
       done = true;
       finishTyping();
       if (safety) clearTimeout(safety);
+      showCard(false);
+      hooks.hush?.();
       scene.setDirector(null);
       stage.dispose();
       el.hidden = true;
@@ -776,7 +1147,7 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
         target.y += (Math.random() - 0.5) * cam.shake * 4;
       }
       camera.fov = cam.fov;
-      if (elapsed >= duration && !typing) advance();
+      if (elapsed >= duration && !typing && elapsed >= voiceUntil) advance();
     });
 
     document.body.classList.add("cine-on");
@@ -786,26 +1157,17 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
 }
 
 /**
- * Toca um trecho do roteiro: os quadros com `shot` viram cinemática 3D e os
- * outros, quadrinhos. Sem 3D, tudo vira quadrinho. Esc pula o trecho inteiro.
+ * Toca um trecho do roteiro. Com 3D, tudo vira cinemática (cada quadro é um
+ * plano, com a voz do personagem); sem 3D, quadrinhos (também com voz). Esc
+ * pula o trecho inteiro.
  */
 export async function playStory(panels: ComicPanel[], scene: GameScene | null, cast: Cast, hooks: CineHooks = {}): Promise<void> {
   if (!panels.length) return;
   if (!scene) {
-    await playComic(panels);
+    await playComic(panels, { onPanel: (p) => (hooks.hush?.(), void hooks.speak?.(p)), onEnd: () => hooks.hush?.() });
     return;
   }
-  // Agrupa os quadros seguidos do mesmo tipo (cinemática ou quadrinho).
-  const runs: ComicPanel[][] = [];
-  for (const panel of panels) {
-    const last = runs[runs.length - 1];
-    if (last && !!last[0].shot === !!panel.shot) last.push(panel);
-    else runs.push([panel]);
-  }
-  for (const run of runs) {
-    const skipped = run[0].shot ? await playCinematic(run, scene, cast, hooks) : await playComic(run);
-    if (skipped) return;
-  }
+  await playCinematic(panels, scene, cast, hooks);
 }
 
 /** Texto de rádio do Cross-fit na tela (perseguições do modo história). */

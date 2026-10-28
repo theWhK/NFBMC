@@ -9,6 +9,10 @@ import {
   FINALE_BUSTED,
   FINALE_ESCAPE,
   FINALE_INTRO,
+  RIVALS_LADDER,
+  radioLineId,
+  rivalDefeatScene,
+  rivalTauntScene,
   HERO_CAR,
   PROLOGUE,
   carSpec,
@@ -21,6 +25,7 @@ import {
   type Phase,
   type CineShot,
   type ComicPanel,
+  type Rival,
   type RaceId,
 } from "@nfbmc/shared";
 
@@ -268,8 +273,8 @@ let storyMode = false;
 let finaleRun = false;
 
 /** Quem aparece nas cinemáticas: o seu carro da carreira (ou o M3, no prólogo e no final). */
-function storyCast(hero = story.story.car, rival?: string): Cast {
-  return { hero, heroColor: hero === HERO_CAR ? carSpec(HERO_CAR).color : menu.color(), rival };
+function storyCast(hero = story.story.car, rival?: string, rivalData?: Rival): Cast {
+  return { hero, heroColor: hero === HERO_CAR ? carSpec(HERO_CAR).color : menu.color(), rival, rivalData };
 }
 const heroCast = () => storyCast(HERO_CAR);
 
@@ -284,14 +289,23 @@ function cineSound(shot: CineShot | null) {
 
 /** Toca um trecho do roteiro (cinemática 3D com WebGL, quadrinhos sem) e devolve a vitrine do menu. */
 async function playStoryScene(panels: ComicPanel[], cast = storyCast()) {
-  await playStory(panels, scene, cast, { onShot: cineSound });
+  // As vozes do trecho começam a baixar já (cada fala é um MP3 pequeno).
+  sound.preloadVoices(panels.filter((p) => p.id).map((p) => `historia/${p.id}` as const));
+  await playStory(panels, scene, cast, {
+    onShot: cineSound,
+    speak: (panel) => (panel.id ? sound.sayStory(panel.id) : Promise.resolve(null)),
+    hush: () => sound.hush(),
+  });
   if (!mode) scene?.setShowcase(menu.color(), story.story.car);
 }
 
 /** Recado do Cross-fit pelo rádio (perseguições do modo história). */
 function crossfitRadio(event: keyof typeof CROSSFIT_RADIO) {
   const lines = CROSSFIT_RADIO[event];
-  showRadio(CROSSFIT, lines[Math.floor(Math.random() * lines.length)]);
+  const index = Math.floor(Math.random() * lines.length);
+  showRadio(CROSSFIT, lines[index]);
+  // A voz dele pelo rádio (depois do "tchk" e do rádio da central, que já tocam na hora).
+  setTimeout(() => void sound.sayStory(radioLineId(event, index), true), event === "start" || event === "crossfit" ? 300 : 2200);
 }
 
 /** A ponte inacabada do Cais na cidade, com a coluna de luz verde (fuga final). */
@@ -398,16 +412,16 @@ function duelFinished(result: RaceFinish) {
     $("duel-result").hidden = true;
     await returnToMenu();
     if (won) {
-      await playStoryScene(rival.defeat);
+      const cast = storyCast(story.story.car, rival.car, rival);
       if (rival.rank === 1) {
         // Venceu o Bruno: o M3 volta, o Cross-fit fecha a cidade e começa a fuga final.
-        await playStoryScene(FINALE_INTRO, heroCast());
+        await playStoryScene(FINALE_INTRO, storyCast(HERO_CAR, HERO_CAR, rival));
         renderStoryScreen(story.story);
         enter("finale");
         return;
       }
-      // Entre um rival e outro: o Cross-fit no rádio, a Mia...
-      await playStoryScene(rival.interlude ?? []);
+      // A chave, a nota fiscal e, entre um rival e outro, o Cross-fit no rádio, a Mia...
+      await playStoryScene(rivalDefeatScene(rival), cast);
       renderStoryScreen(story.story);
     }
   };
@@ -831,16 +845,16 @@ async function start(entry: MenuEntry) {
     // Duelo: apresentação do rival, a provocação dele e a corrida 1x1.
     const rival = currentRival(story.story);
     if (!rival) return;
-    // Durante a apresentação, a vitrine 3D mostra o carro do rival girando atrás.
-    await showRivalIntro(rival, story.story.car, {
-      onStart: () => scene?.setShowcase(carSpec(rival.car).color, rival.car),
-      onEnd: () => scene?.setShowcase(null),
-    });
-    // A provocação: com 3D, o carro do rival esquentando os pneus e os dois lado a lado.
-    await playStoryScene(
-      rival.taunt.map((p) => ({ ...p, shot: p.shot ?? (p.speaker === "Você" ? "duelo" : "rival") })),
-      storyCast(story.story.car, rival.car),
-    );
+    const cast = storyCast(story.story.car, rival.car, rival);
+    if (scene) {
+      // Com 3D, tudo é cinemática: o cartão da Lista Gorda com o rival na frente
+      // do carro, a provocação dele e vocês dois frente a frente na largada.
+      await playStoryScene(rivalTauntScene(rival), cast);
+    } else {
+      // Sem 3D: o cartão do rival e a provocação em quadrinhos.
+      await showRivalIntro(rival, story.story.car);
+      await playStoryScene(rival.taunt, cast);
+    }
     const room = await joinQuickRace({
       ...carOptions(), raceId: rival.race, rival: { name: rival.name, car: rival.car, skill: rival.skill },
     }, true);
@@ -900,9 +914,34 @@ const menu = createMenu({
   onScreen: (id) => {
     if (id !== "story") return;
     renderStoryScreen(story.story);
-    if (!story.story.seenPrologue) void playStoryScene(PROLOGUE, heroCast()).then(() => story.markPrologueSeen());
+    const named = new URLSearchParams(location.search).get("cena");
+    if (named && namedScene(named)) void playNamedScene(named);
+    else if (!story.story.seenPrologue) void playStoryScene(PROLOGUE, heroCast()).then(() => story.markPrologueSeen());
   },
 });
+
+/**
+ * Cenas do modo história pelo nome, para rever qualquer uma (e para os testes):
+ * `?cena=prologo`, `r7-provoca`, `r7-perde`, `final`, `autuado`, `fuga` ou
+ * `epilogo`, tocada ao abrir o Modo história.
+ */
+function namedScene(name: string): { panels: ComicPanel[]; cast: Cast } | null {
+  const rival = RIVALS_LADDER.find((r) => name.startsWith(`r${r.rank}-`));
+  if (rival) {
+    const cast = storyCast(story.story.car, rival.car, rival);
+    if (name.endsWith("-provoca")) return { panels: rivalTauntScene(rival), cast };
+    if (name.endsWith("-perde")) return { panels: rivalDefeatScene(rival), cast };
+    return null;
+  }
+  const scenes: Record<string, ComicPanel[]> = { prologo: PROLOGUE, final: FINALE_INTRO, autuado: FINALE_BUSTED, fuga: FINALE_ESCAPE, epilogo: EPILOGUE };
+  const bruno = RIVALS_LADDER[RIVALS_LADDER.length - 1];
+  return scenes[name] ? { panels: scenes[name], cast: storyCast(HERO_CAR, HERO_CAR, bruno) } : null;
+}
+
+async function playNamedScene(name: string) {
+  const found = namedScene(name);
+  if (found) await playStoryScene(found.panels, found.cast);
+}
 
 // --- Abertura ----------------------------------------------------------------
 
