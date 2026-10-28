@@ -103,3 +103,29 @@ test("sozinho contra bots: sala privada, bots configuráveis e correndo", async 
     .poll(async () => Math.min(...(await bots()).map((b, i) => Math.hypot(b.x - start[i].x, b.z - start[i].z))), { timeout: 20_000 })
     .toBeGreaterThan(12);
 });
+
+test("corrida rápida: escolhe a pista (bairros novos) e larga nela", async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto("/");
+  await page.getByTestId("name-input").fill("Will");
+  await page.getByTestId("quick-menu").click();
+  await page.getByTestId("quick-track").selectOption("aeroporto");
+  await expect(page.locator("#quick-info")).toContainText("2 voltas");
+  await page.getByTestId("solo-button").click();
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.raceId())).toBe("aeroporto");
+  await page.getByTestId("start-button").click();
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.phase()), { timeout: 15_000 }).toBe("racing");
+  await context.close();
+
+  // A escolha fica guardada para a próxima vez.
+  const again = await browser.newContext();
+  const other = await again.newPage();
+  await other.goto("/");
+  await other.evaluate(() => localStorage.setItem("nfbmc:quick-track", "rodoanel"));
+  await other.reload();
+  await other.getByTestId("quick-menu").click();
+  await expect(other.getByTestId("quick-track")).toHaveValue("rodoanel");
+  await expect(other.locator("#quick-info")).toContainText("1 volta");
+  await again.close();
+});

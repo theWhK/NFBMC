@@ -63,6 +63,13 @@ test("abertura: aviso, vinhetas de mentira, trailer e título; Esc pula tudo", a
   await expect(page.getByTestId("opt-intro")).toHaveText("Abertura: desligada");
 });
 
+test("créditos: a Bandeira do Orgulho Gordo e quem fez a piada", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Créditos" }).click();
+  await expect(page.locator(".credit-flag")).toContainText("Bandeira do Orgulho Gordo");
+  await expect(page.locator(".credit-flag")).toContainText("@barlattiraphael");
+});
+
 test("menu: carrossel anda com ←→ e o seletor de gráficos vale na hora, sem recarregar (nem repetir a abertura)", async ({ page }) => {
   await page.goto("/");
   await page.keyboard.press("ArrowRight");

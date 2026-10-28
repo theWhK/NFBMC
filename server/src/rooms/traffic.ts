@@ -16,7 +16,7 @@ const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
 type Link = NavNode["links"][number];
 
 /** Velocidade de cruzeiro por tipo de rua (m/s). */
-const CRUISE = { avenida: 17, rua: 13, viela: 9 } as const;
+const CRUISE = { rodovia: 25, avenida: 17, rua: 13, viela: 9, pista: 15 } as const;
 
 export interface TrafficBrain {
   /** Nó de onde o carro saiu e a ligação que ele está percorrendo. */

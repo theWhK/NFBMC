@@ -169,6 +169,8 @@ export function stepCar(
   onGrass: boolean,
   boosting: boolean,
   motion?: CarMotion,
+  /** Rampa na direção do carro (m por m, positivo = subida): ver `gradeAt` em terrain.ts. */
+  grade = 0,
 ) {
   const gas = boosting ? 1 : Math.max(0, input.throttle);
   const brakeInput = Math.max(0, -input.throttle);
@@ -222,9 +224,12 @@ export function stepCar(
   // Freio motor: tirar o pé segura o carro, mais forte em giro alto.
   const engineBrake = drive.pedal < 0.05 && drive.shiftTimer <= 0 ? spec.mass * 1.4 * (drive.rpm / spec.redline) * Math.sign(v) : 0;
 
-  let next = v + ((engineForce * direction + boostForce - drag - rolling - engineBrake) / spec.mass) * dt;
-  // Sem tração, o atrito para o carro, mas não o faz andar para trás.
-  if (engineForce === 0 && boostForce === 0 && Math.sign(next) !== Math.sign(v) && v !== 0) next = 0;
+  // Ladeira: a gravidade puxa para baixo do morro (na subida segura, na descida embala).
+  const hill = (spec.mass * GRAVITY * grade) / Math.sqrt(1 + grade * grade);
+  let next = v + ((engineForce * direction + boostForce - drag - rolling - engineBrake - hill) / spec.mass) * dt;
+  // Sem tração, o atrito para o carro, mas não o faz andar para trás (a não ser
+  // que a ladeira seja forte o bastante para vencer a rolagem: aí desce de ré).
+  if (engineForce === 0 && boostForce === 0 && Math.abs(grade) < 0.06 && (Math.abs(v) < 0.3 || (Math.sign(next) !== Math.sign(v) && v !== 0))) next = 0;
   // Freio: sempre contra o movimento, até parar.
   if (braking > 0) {
     const drop = brakeDecel(spec) * braking * dt;

@@ -7,6 +7,8 @@ import {
   pointOnTrack,
   RACE_IDS,
   carSpec,
+  heightAt,
+  slopeAt,
   isOnRoad,
   rampSteer,
   yawRate,
@@ -17,8 +19,9 @@ import {
 } from "@nfbmc/shared";
 
 import { Effects } from "./effects.ts";
+import { forgetFlags, waveFlags } from "./flag.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
-import { SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
+import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
 import { InkPass, toonify, type Quality } from "./toon.ts";
 import { buildTrackMesh } from "./track-mesh.ts";
 
@@ -67,6 +70,8 @@ interface CarEntry {
   receivedAt: number;
   /** Volante previsto do próprio carro (o mesmo `rampSteer` do servidor). */
   steer: number;
+  /** Altura do chão embaixo do carro (relevo). */
+  y: number;
 }
 
 /**
@@ -157,7 +162,7 @@ function makeMarker(id: RaceId) {
   const label = markerLabel(race.name, `${race.laps} voltas · ${km} km`);
   label.position.y = 22;
   group.add(label);
-  group.position.set(spot.x, 0, spot.z);
+  group.position.set(spot.x, heightAt(spot.x, spot.z), spot.z);
   return group;
 }
 
@@ -397,7 +402,10 @@ export class GameScene {
    * marcam o traçado por cima das ruas; o autódromo já está sempre desenhado.
    */
   setRace(raceId: RaceId | null) {
-    if (this.raceOverlay) this.scene.remove(this.raceOverlay);
+    if (this.raceOverlay) {
+      this.scene.remove(this.raceOverlay);
+      forgetFlags(this.raceOverlay);
+    }
     this.raceOverlay = null;
     if (raceId && raceId !== "autodromo") {
       this.raceOverlay = buildTrackMesh(RACES[raceId].track, { asphalt: false, bannerColor: "#ff7a00" });
@@ -485,7 +493,7 @@ export class GameScene {
         model.group.rotation.order = "YXZ";
         entry = {
           model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false,
-          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0,
+          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0, y: heightAt(car.x, car.z),
         };
         this.scene.add(model.group);
         this.cars.set(id, entry);
@@ -508,6 +516,20 @@ export class GameScene {
       this.foods[i].position.x = f.x;
       this.foods[i].position.z = f.z;
     });
+  }
+
+  /**
+   * Esconde os blocos da cidade (prédios, árvores, postes) que estão além da
+   * neblina: com o mapa grande, desenhar tudo pesava demais no celular.
+   */
+  private cullChunks() {
+    const fog = this.scene.fog as THREE.Fog | null;
+    const far = fog?.far ?? 620;
+    const { x, z } = this.camera.position;
+    for (const chunk of CHUNKS) {
+      const [cx, cz] = chunk.userData.center as [number, number];
+      chunk.visible = Math.hypot(cx - x, cz - z) - (chunk.userData.radius as number) < far;
+    }
   }
 
   /** Desenha um quadro. `followId` é o carro que a câmera persegue. */
@@ -570,9 +592,13 @@ export class GameScene {
 
       const { group, flame, wheels } = entry.model;
       group.visible = car.visible;
-      group.position.set(entry.x, 0, entry.z);
-      group.rotation.y = entry.heading;
-      group.rotation.z = entry.lean;
+      // No morro, o carro sobe e desce com o chão e inclina junto (frente/trás e de lado).
+      const [sx, sz] = slopeAt(entry.x, entry.z);
+      const fx = Math.sin(entry.heading);
+      const fz = Math.cos(entry.heading);
+      entry.y = heightAt(entry.x, entry.z);
+      group.position.set(entry.x, entry.y, entry.z);
+      group.rotation.set(-Math.atan(sx * fx + sz * fz), entry.heading, entry.lean + Math.atan(sx * fz - sz * fx), "YXZ");
       for (const wheel of wheels) wheel.rotation.x += (car.speed * dt) / 0.45;
       if (entry.model.lights) {
         // Giroflex: vermelho e azul alternando rápido.
@@ -590,10 +616,11 @@ export class GameScene {
       }
     }
     this.effects.update(dt);
+    waveFlags(this.time);
 
     this.foods.forEach((food, i) => {
       food.rotation.y = this.time * 2 + i;
-      food.position.y = 0.6 + Math.sin(this.time * 3 + i) * 0.3;
+      food.position.y = heightAt(food.position.x, food.position.z) + 0.6 + Math.sin(this.time * 3 + i) * 0.3;
     });
     if (this.markers.visible) {
       // A coluna pulsa de longe e some quando a câmera chega perto (de dentro dela, a
@@ -622,11 +649,15 @@ export class GameScene {
       const seat = view.seat ?? 0;
       const sideX = Math.cos(followed.heading) * seat;
       const sideZ = -Math.sin(followed.heading) * seat;
-      const desired = new THREE.Vector3(followed.x - forwardX * view.back + sideX, view.height, followed.z - forwardZ * view.back + sideZ);
+      // A câmera acompanha a altura do carro (e não entra no morro atrás dele numa subida).
+      const camX = followed.x - forwardX * view.back + sideX;
+      const camZ = followed.z - forwardZ * view.back + sideZ;
+      const camHeight = view.seat ? followed.y : Math.max(followed.y, heightAt(camX, camZ) + 1);
+      const desired = new THREE.Vector3(camX, camHeight + view.height, camZ);
       // No capô e no banco a câmera vai presa ao carro; nas outras, ela vem atrás com um pouco de atraso.
       if (view.back < 0 || view.seat) this.camera.position.copy(desired);
       else this.camera.position.lerp(desired, 1 - Math.exp(-6 * dt));
-      this.cameraTarget.set(followed.x + forwardX * view.ahead + sideX, view.lookHeight, followed.z + forwardZ * view.ahead + sideZ);
+      this.cameraTarget.set(followed.x + forwardX * view.ahead + sideX, followed.y + view.lookHeight, followed.z + forwardZ * view.ahead + sideZ);
       followed.model.group.visible = view.showCar && followedCar.visible;
       // Primeira pessoa: painel e volante (que gira com o volante de verdade).
       this.cockpit.group.visible = !!view.seat && followedCar.visible;
@@ -665,6 +696,7 @@ export class GameScene {
       this.camera.updateProjectionMatrix();
     }
     this.camera.lookAt(this.cameraTarget);
+    this.cullChunks();
     // Céu e sol acompanham a câmera, para nunca chegar perto da borda do céu.
     this.sky.position.copy(this.camera.position);
     // As nuvens acompanham a câmera no chão (ficam sempre no horizonte) e andam devagar.

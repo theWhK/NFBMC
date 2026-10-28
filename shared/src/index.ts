@@ -2,6 +2,7 @@
 
 export * from "./track.ts";
 export * from "./physics.ts";
+export * from "./terrain.ts";
 export * from "./cars.ts";
 export * from "./collision.ts";
 export * from "./story.ts";

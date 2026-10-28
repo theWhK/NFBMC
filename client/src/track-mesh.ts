@@ -1,7 +1,9 @@
 // Desenho de um traçado: asfalto (opcional), zebras, linha de chegada e pórtico.
 // O autódromo usa tudo; as corridas de rua só marcam as zebras por cima da rua.
 import * as THREE from "three";
-import type { Track } from "@nfbmc/shared";
+
+import { makeFlag } from "./flag.ts";
+import { heightAt, type Track } from "@nfbmc/shared";
 
 /** Faixa ao longo da pista, entre `inner` e `outer` metros do centro (negativo = lado direito). */
 function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?: (i: number) => THREE.Color) {
@@ -12,8 +14,12 @@ function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?:
   for (let i = 0; i <= samples.length; i++) {
     const s = samples[i % samples.length];
     // Esquerda de quem corre: (tz, -tx).
-    positions.push(s.x + s.tz * inner, y, s.z - s.tx * inner);
-    positions.push(s.x + s.tz * outer, y, s.z - s.tx * outer);
+    // Acompanha o relevo.
+    const ix = s.x + s.tz * inner;
+    const iz = s.z - s.tx * inner;
+    const ox = s.x + s.tz * outer;
+    const oz = s.z - s.tx * outer;
+    positions.push(ix, heightAt(ix, iz) + y, iz, ox, heightAt(ox, oz) + y, oz);
     if (colorAt) {
       const c = colorAt(i);
       colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
@@ -74,7 +80,8 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
   line.rotation.x = -Math.PI / 2;
   // Com o plano deitado, o eixo X dele vira (cos, 0, -sin) do ângulo: igual ao pórtico, atravessando a pista.
   line.rotation.z = heading;
-  line.position.set(start.x, 0.13, start.z);
+  // Um pouco mais alta: na ladeira, o meio da linha não pode afundar no asfalto.
+  line.position.set(start.x, heightAt(start.x, start.z) + 0.25, start.z);
   group.add(line);
 
   // Pórtico de largada: duas colunas e uma faixa em cima.
@@ -84,8 +91,15 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
   gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(half + 2).translateY(3.5));
   gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(-half - 2).translateY(3.5));
   gate.add(new THREE.Mesh(new THREE.BoxGeometry(track.width + 4.6, 1.6, 0.4), banner).translateY(7));
+  // Bandeiras do Orgulho Gordo em cima das colunas, apontando para fora da pista.
+  for (const side of [1, -1]) {
+    const flag = makeFlag(4, 3.6);
+    flag.position.set(side * (half + 2), 7.8, 0);
+    flag.rotation.y = side > 0 ? 0 : Math.PI;
+    gate.add(flag);
+  }
   gate.rotation.y = heading;
-  gate.position.set(start.x, 0, start.z);
+  gate.position.set(start.x, heightAt(start.x, start.z), start.z);
   group.add(gate);
 
   return group;

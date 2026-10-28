@@ -17,6 +17,7 @@ import {
   isOnRoad,
   isRaceId,
   raceMarker,
+  gradeAt,
   stepCar,
   pickColor,
   TRAFFIC_SIZE,
@@ -401,7 +402,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const spec = carSpec(player.car);
       const drive = this.driveOf(sessionId, spec, player.manual, true);
       const motion = this.motions.get(sessionId);
-      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), player.boost > 0, motion);
+      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), player.boost > 0, motion, gradeAt(player.x, player.z, player.heading));
       const size = carHalfSize(player.car);
       collideWorld(player, size.halfLength, size.halfWidth, motion);
       player.rpm = Math.round(drive.rpm);
@@ -522,7 +523,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       // O trânsito anda num carro popular comum, com câmbio automático.
       const spec = carSpec("uno");
       const motion = this.motions.get(id);
-      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z), false, motion);
+      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z), false, motion, gradeAt(npc.x, npc.z, npc.heading));
       collideWorld(npc, TRAFFIC_SIZE.length / 2, TRAFFIC_SIZE.width / 2, motion);
     }
   }
@@ -544,7 +545,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const { input, boost } = copInput(brain, cop, spec, target, stars, dt);
       cop.boost = boost ? 1 : 0;
       const motion = this.motions.get(id);
-      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z), boost, motion);
+      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z), boost, motion, gradeAt(cop.x, cop.z, cop.heading));
       const size = carHalfSize(cop.car);
       collideWorld(cop, size.halfLength, size.halfWidth, motion);
     }

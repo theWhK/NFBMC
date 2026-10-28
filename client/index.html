@@ -32,7 +32,7 @@
         <button type="button" data-screen="story" data-testid="story-menu" data-hint="Recupere o seu M3 Gorgonzola: suba a Lista Gorda do #10 ao #1 e derrote o Bruno."><span class="icon" aria-hidden="true">📋</span><span class="label">Modo história</span></button>
         <button type="button" id="world" data-testid="world-button" data-hint="Porto Gordo com a galera: veja no mapa (M) quem está online e desafie para um pega, coma tudo e corra nos pontos de encontro."><span class="icon" aria-hidden="true">👥</span><span class="label">Co-op</span> <span class="online-badge" id="online-badge" data-testid="online-badge" hidden></span></button>
         <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="A cidade inteira só para você (e para a Vigilância Sanitária)."><span class="icon" aria-hidden="true">🚗</span><span class="label">Modo solo</span></button>
-        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida no autódromo, sem passar pela cidade."><span class="icon" aria-hidden="true">🏁</span><span class="label">Corrida rápida</span></button>
+        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida direto na largada, sem passar pela cidade: escolha a pista."><span class="icon" aria-hidden="true">🏁</span><span class="label">Corrida rápida</span></button>
         <button type="button" data-screen="lista" data-testid="lista-menu" data-hint="Os rivais mais calóricos de Porto Gordo e o placar de todos os tempos."><span class="icon" aria-hidden="true">🏆</span><span class="label">Lista Gorda</span></button>
         <button type="button" data-screen="garage" data-testid="garage-menu" data-hint="Escolha a cor do seu carrinho de lanche."><span class="icon" aria-hidden="true">🔧</span><span class="label">Garagem</span></button>
         <button type="button" data-screen="options" data-testid="options-menu" data-hint="Som, música e seu apelido de piloto."><span class="icon" aria-hidden="true">⚙️</span><span class="label">Opções</span></button>
@@ -56,7 +56,10 @@
 
       <section class="mw-screen" data-screen-id="quick" hidden>
         <h2>Corrida rápida</h2>
-        <p class="hint">No Autódromo do Colesterol, 3 voltas.</p>
+        <label class="quick-track">Pista
+          <select id="quick-track" data-testid="quick-track"></select>
+        </label>
+        <p class="hint" id="quick-info"></p>
         <div class="mw-list sub">
           <button type="button" id="quick" data-testid="join-button">Com a galera</button>
           <button type="button" id="solo" data-testid="solo-button">Sozinho contra bots</button>
@@ -97,6 +100,7 @@
       <section class="mw-screen" data-screen-id="credits" hidden>
         <h2>Créditos</h2>
         <p>Feito para a galera do Will, com muito colesterol.</p>
+        <p class="credit-flag"><span class="burger-flag small" aria-hidden="true"></span> Bandeira do Orgulho Gordo: piada do <strong>@barlattiraphael</strong>, que chegou pelo zap de um amigo. Tremula pela cidade toda.</p>
         <p class="hint">Paródia carinhosa de Need for Speed: Most Wanted (2005). EAT Games, LunchBox e Nhamvidia são de mentira, com logos desenhados à mão. Músicas, sons e locução gerados no próprio jogo. Fontes Russo One e Black Ops One (OFL).</p>
         <div class="mw-list sub">
           <button type="button" id="credits-intro" data-testid="credits-intro">Ver a abertura</button>
@@ -154,6 +158,7 @@
     <div id="popups"></div>
 
     <div id="results" class="panel center" data-testid="results" hidden>
+      <div class="burger-flag" aria-hidden="true"></div>
       <p class="stamp">Lista Gorda</p>
       <h2 id="winner"></h2>
       <table>

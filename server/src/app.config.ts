@@ -16,7 +16,8 @@ const clientDist = process.env.CLIENT_DIST
 
 const server = defineServer({
   rooms: {
-    [ROOM_NAME]: defineRoom(RaceRoom),
+    // A sala pública da corrida rápida é uma por pista.
+    [ROOM_NAME]: defineRoom(RaceRoom).filterBy(["raceId"]),
     [WORLD_ROOM_NAME]: defineRoom(WorldRoom),
   },
 

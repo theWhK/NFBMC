@@ -27,6 +27,7 @@ import {
   type ComicPanel,
   RIVALS_LADDER,
   type Rival,
+  heightAt,
 } from "@nfbmc/shared";
 
 import "./cinematic.css";
@@ -57,12 +58,8 @@ export interface CineHooks {
   hush?: () => void;
 }
 
-/**
- * Altura do chão num ponto. Hoje a cidade é plana (0); quando o relevo chegar
- * (heightAt em shared/src/terrain.ts), é só trocar aqui que carros e bonecos
- * das cinemáticas acompanham o terreno.
- */
-export const groundY = (_x: number, _z: number) => 0;
+/** Altura do chão num ponto (relevo de shared/src/terrain.ts): carros e bonecos das cinemáticas acompanham o terreno. */
+export const groundY = (x: number, z: number) => heightAt(x, z);
 
 // --- Caminhos pelas ruas -------------------------------------------------------
 
@@ -1140,8 +1137,10 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
       stage.time += dt;
       cam.shake = 0;
       shot.frame(sceneTime, dt * scale, cam);
-      camera.position.copy(cam.pos);
-      target.copy(cam.look);
+      // Os planos são escritos com alturas acima do chão: soma o relevo embaixo
+      // da câmera e do ponto que ela olha (no cais e na ponte é tudo plano).
+      camera.position.set(cam.pos.x, cam.pos.y + groundY(cam.pos.x, cam.pos.z), cam.pos.z);
+      target.set(cam.look.x, cam.look.y + groundY(cam.look.x, cam.look.z), cam.look.z);
       if (cam.shake > 0) {
         target.x += (Math.random() - 0.5) * cam.shake * 4;
         target.y += (Math.random() - 0.5) * cam.shake * 4;
