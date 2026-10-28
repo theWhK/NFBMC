@@ -89,14 +89,16 @@ const STEER_UP = 6;
 const STEER_BACK = 11;
 /**
  * Aderência lateral máxima (m/s²): em alta, o giro do carro fica limitado por
- * ela (antes, a 150 km/h o carro virava com 6 g e ficava arisco demais).
- * É arcade: ~3 g, bem mais que um carro de rua.
+ * ela (sem limite, a 150 km/h o carro virava com 6 g e ficava arisco demais).
+ * É arcade: ~5 g, bem mais que um carro de rua, para as esquinas da cidade
+ * caberem sem frear quase até parar. Calibrado com um "piloto de teclado"
+ * simulado (setas tudo-ou-nada, 0,15 s de atraso, entrando rápido demais).
  */
-const LATERAL_GRIP = 32;
+const LATERAL_GRIP = 50;
 /** Com o freio de mão, a traseira solta e o carro gira bem mais. */
 const HANDBRAKE_GRIP = 55;
-/** Freio de jogo: mais forte que o de verdade, para dar para frear perto da esquina. */
-const BRAKE_GAIN = 1.5;
+/** Freio de jogo: bem mais forte que o de verdade (~2 g), para dar para frear perto da esquina. */
+const BRAKE_GAIN = 2.3;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
@@ -248,7 +250,7 @@ export function stepCar(
   const oldHeading = car.heading;
   car.heading -= yaw * dt;
   // Curva forte "arrasta" os pneus: o carro perde um pouco de velocidade (ajuda a entrar na curva).
-  const scrub = Math.abs(yaw * car.speed) * 0.035 * dt;
+  const scrub = Math.abs(yaw * car.speed) * 0.06 * dt;
   car.speed = Math.abs(car.speed) <= scrub ? 0 : car.speed - Math.sign(car.speed) * scrub;
 
   if (motion) {
@@ -259,14 +261,33 @@ export function stepCar(
       motion.vx += (Math.sin(oldHeading) - Math.sin(car.heading)) * car.speed * keep;
       motion.vz += (Math.cos(oldHeading) - Math.cos(car.heading)) * car.speed * keep;
     }
-    // Empurrão lateral e giro (batidas, drift): os pneus vão segurando.
-    car.heading += motion.spin * dt;
+    // Giro de batida: o carro roda, mas o movimento não roda junto (antes, a
+    // velocidade inteira acompanhava o bico e o carro saía disparado para onde
+    // apontasse). O que deixa de estar na direção do bico vira escorregada de lado.
+    if (motion.spin !== 0) {
+      const vx = Math.sin(car.heading) * car.speed + motion.vx;
+      const vz = Math.cos(car.heading) * car.speed + motion.vz;
+      car.heading += motion.spin * dt;
+      car.speed = vx * Math.sin(car.heading) + vz * Math.cos(car.heading);
+      motion.vx = vx - Math.sin(car.heading) * car.speed;
+      motion.vz = vz - Math.cos(car.heading) * car.speed;
+    }
     car.x += motion.vx * dt;
     car.z += motion.vz * dt;
-    const tireGrip = Math.exp(-(handbrake ? 1.2 : onGrass ? 2.5 : 4) * dt);
-    motion.vx *= tireGrip;
-    motion.vz *= tireGrip;
-    motion.spin *= Math.exp(-5 * dt);
+    if (handbrake) {
+      // Drift: a traseira solta segura pouco (a escorregada dura).
+      const grip = Math.exp(-1.2 * dt);
+      motion.vx *= grip;
+      motion.vz *= grip;
+    } else {
+      // Pneu escorregando de lado freia como pneu de verdade (~1 g no asfalto,
+      // menos na grama), em vez de parar de uma vez.
+      const sliding = Math.hypot(motion.vx, motion.vz);
+      const left = sliding > 0 ? (Math.max(0, sliding - (onGrass ? 6 : 10) * dt) * Math.exp(-1.5 * dt)) / sliding : 0;
+      motion.vx *= left;
+      motion.vz *= left;
+    }
+    motion.spin *= Math.exp(-4 * dt);
   }
   car.heading = Math.atan2(Math.sin(car.heading), Math.cos(car.heading));
 

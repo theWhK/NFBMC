@@ -69,3 +69,23 @@ test("créditos: a Bandeira do Orgulho Gordo e quem fez a piada", async ({ page 
   await expect(page.locator(".credit-flag")).toContainText("Bandeira do Orgulho Gordo");
   await expect(page.locator(".credit-flag")).toContainText("@barlattiraphael");
 });
+
+test("menu: carrossel anda com ←→ e o seletor de gráficos vale na hora, sem recarregar (nem repetir a abertura)", async ({ page }) => {
+  await page.goto("/");
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByTestId("world-button")).toHaveClass(/selected/);
+  await expect(page.locator("#menu-hint strong")).toHaveText("Co-op");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByTestId("story-menu")).toHaveClass(/selected/);
+
+  // Marca a página: se ela recarregar, a marca some.
+  await page.evaluate(() => ((window as unknown as { marca: number }).marca = 1));
+  await page.getByTestId("options-menu").click();
+  const quality = page.getByTestId("opt-quality");
+  const before = await quality.textContent();
+  await quality.click();
+  await expect(quality).not.toHaveText(before!);
+  await quality.click();
+  expect(await page.evaluate(() => (window as unknown as { marca?: number }).marca)).toBe(1);
+  await expect(page.getByTestId("intro")).toBeHidden();
+});

@@ -114,23 +114,6 @@ export interface IntroHooks {
   onTrailer?: () => void;
 }
 
-/** Locução sintetizada pelo próprio navegador (quando ele tiver vozes). */
-function say(sound: Sound, text: string, lang: string, pitch: number, rate: number) {
-  if (!sound.prefs.sfx || !("speechSynthesis" in window)) return;
-  try {
-    const line = new SpeechSynthesisUtterance(text);
-    const voice = speechSynthesis.getVoices().find((v) => v.lang.replace("_", "-").startsWith(lang));
-    if (voice) line.voice = voice;
-    line.lang = lang;
-    line.pitch = pitch;
-    line.rate = rate;
-    line.volume = 0.9;
-    speechSynthesis.speak(line);
-  } catch {
-    // Sem voz: a vinheta segue muda.
-  }
-}
-
 /** Letreiro do trailer; o da sirene vem com o pisca vermelho e azul na tela toda. */
 const card = (kicker: string, line: string, fx = "") =>
   `${fx === "fx-siren" ? '<div class="intro-siren"></div>' : ""}` +
@@ -162,7 +145,7 @@ function script(sound: Sound, hooks: IntroHooks): Step[] {
       enter: (later) => {
         sound.whoosh();
         later(() => sound.shimmer(), 450);
-        later(() => say(sound, "EAT Games. Chantilly everything.", "en", 0.55, 0.85), 700);
+        later(() => sound.say("eat"), 700);
       },
     },
     {
@@ -175,18 +158,25 @@ function script(sound: Sound, hooks: IntroHooks): Step[] {
       html: `<div class="intro-brand nham">${NHAM_SVG}</div>`,
       enter: (later) => {
         sound.whoosh();
-        later(() => say(sound, "Nhãm vídia.", "pt", 0.1, 0.6), 500);
+        later(() => sound.say("nham"), 500);
       },
     },
     trailer("cidade", card("Fim de tarde. 38 °C. Cheiro de fritura no ar.", "Porto Gordo."), () => {
       hooks.onTrailer?.();
       sound.song("trailer");
       sound.whoosh();
+      sound.say("trailer-cidade", 0.9);
     }),
     trailer("digestao", card("Uma cidade que nunca dorme…", "…porque está fazendo a digestão."), () => sound.whoosh()),
-    trailer("vigilancia", card("Ninguém come na rua impunemente.", "A Vigilância Sanitária quer você.", "fx-siren"), () => sound.wail()),
+    trailer("vigilancia", card("Ninguém come na rua impunemente.", "A Vigilância Sanitária quer você.", "fx-siren"), () => {
+      sound.wail();
+      sound.say("trailer-vigilancia", 0.5);
+    }),
     trailer("rivais", card("Dez rivais. Uma Lista Gorda.", "E um A3 todo mexido."), () => sound.boom()),
-    trailer("calorico", card("Só um pode ser", "o mais calórico.", "fx-slam"), () => sound.boom(), 2200),
+    trailer("calorico", card("Só um pode ser", "o mais calórico.", "fx-slam"), () => {
+      sound.boom();
+      sound.say("trailer-calorico", 0.1);
+    }, 2600),
     {
       id: "titulo", group: "titulo", look: "title",
       html: `
@@ -211,6 +201,8 @@ export function playIntro(sound: Sound, hooks: IntroHooks = {}): Promise<void> {
   const stage = $("intro-stage");
   const skip = $<HTMLButtonElement>("intro-skip");
   const steps = script(sound, hooks);
+  // As falas da abertura começam a baixar já (são poucos KB).
+  sound.preloadVoices(["eat", "nham", "trailer-cidade", "trailer-vigilancia", "trailer-calorico"]);
   return new Promise((resolve) => {
     let index = -1;
     let timers: ReturnType<typeof setTimeout>[] = [];
@@ -242,7 +234,7 @@ export function playIntro(sound: Sound, hooks: IntroHooks = {}): Promise<void> {
     /** Próxima vinheta (o trailer inteiro conta como uma só). */
     const advance = () => {
       sound.unlock();
-      if ("speechSynthesis" in window) speechSynthesis.cancel();
+      sound.hush();
       const group = steps[index].group;
       let next = index + 1;
       while (next < steps.length && steps[next].group === group) next++;
@@ -253,7 +245,7 @@ export function playIntro(sound: Sound, hooks: IntroHooks = {}): Promise<void> {
       if (done) return;
       done = true;
       clearTimers();
-      if ("speechSynthesis" in window) speechSynthesis.cancel();
+      sound.hush();
       overlay.hidden = true;
       stage.innerHTML = "";
       delete overlay.dataset.step;

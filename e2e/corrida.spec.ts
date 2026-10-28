@@ -122,10 +122,10 @@ test("corrida rápida: escolhe a pista (bairros novos) e larga nela", async ({ b
   const again = await browser.newContext();
   const other = await again.newPage();
   await other.goto("/");
-  await other.evaluate(() => localStorage.setItem("nfbmc:quick-track", "rodizio"));
+  await other.evaluate(() => localStorage.setItem("nfbmc:quick-track", "rodoanel"));
   await other.reload();
   await other.getByTestId("quick-menu").click();
-  await expect(other.getByTestId("quick-track")).toHaveValue("rodizio");
+  await expect(other.getByTestId("quick-track")).toHaveValue("rodoanel");
   await expect(other.locator("#quick-info")).toContainText("1 volta");
   await again.close();
 });

@@ -84,6 +84,7 @@ export class RaceMode {
         heading: p.heading,
         speed: p.speed,
         boost: p.boost,
+        rpm: p.rpm,
         visible: showAll || p.racing,
       });
     });
@@ -118,6 +119,8 @@ export class RaceMode {
       skid: followed.skid,
       offroad: followed.offroad,
       boost: me.boost > 0,
+      car: me.car,
+      gear: me.gear,
     } : null);
     if (paused) ctx.sound.updateOthers(new Map());
     else ctx.updateOtherEngines(cars, room.sessionId, me);
@@ -239,20 +242,21 @@ export class RaceMode {
     this.playEventSounds(me);
   }
 
-  private playEventSounds(me: { lap: number; finished: boolean; calories: number; boost: number; speed: number; racing: boolean }) {
+  private playEventSounds(me: { lap: number; finished: boolean; calories: number; boost: number; speed: number; racing: boolean; place: number }) {
     const { ctx, previous } = this;
     const current = this.phase();
 
     if (current === "countdown") {
       const count = Math.ceil(this.room.state.timer);
-      if (count !== previous.countdown && count > 0) ctx.sound.beep();
+      if (count !== previous.countdown && count > 0) ctx.sound.beep(false, count);
       previous.countdown = count;
     }
     if (current === "racing" && previous.phase === "countdown" && me.racing) ctx.sound.beep(true);
 
     if (current === "racing" && me.racing) {
-      if (me.lap > previous.lap && me.lap > 1) ctx.sound.lap();
-      if (me.finished && !previous.finished) ctx.sound.finish();
+      const laps = this.room.state.laps || RACES[this.raceId].laps;
+      if (me.lap > previous.lap && me.lap > 1 && !me.finished) ctx.sound.lap(laps > 1 && me.lap === laps);
+      if (me.finished && !previous.finished) ctx.sound.finish(me.place === 1);
       if (me.calories > previous.calories) {
         const gained = me.calories - previous.calories;
         const food = foodByCalories(gained);

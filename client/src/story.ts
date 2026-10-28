@@ -7,6 +7,7 @@ import {
   carSpec,
   currentRival,
   defeatRival,
+  finalePending,
   newStory,
   storyFinished,
   type ComicPanel,
@@ -39,7 +40,7 @@ export function saveStory(story: StoryProgress) {
 // --- Quadrinhos --------------------------------------------------------------
 
 /** Separa um texto em "letras" visíveis (emoji com variação conta como uma só). */
-function graphemes(text: string) {
+export function graphemes(text: string) {
   const Segmenter = (Intl as unknown as { Segmenter?: new (l: string, o: object) => { segment: (t: string) => Iterable<{ segment: string }> } }).Segmenter;
   return Segmenter ? [...new Segmenter("pt-BR", { granularity: "grapheme" }).segment(text)].map((g) => g.segment) : [...text];
 }
@@ -49,15 +50,16 @@ function graphemes(text: string) {
  * como máquina de escrever e cada quadro pode ter efeito (tremer, zoom, linhas
  * de velocidade, flash da sirene) e onomatopeia. Clique, Enter, espaço ou →:
  * a primeira vez completa o texto, a segunda avança. Esc pula tudo.
+ * Resolve com true se pulou (Esc ou "Pular").
  */
-export function playComic(panels: ComicPanel[]): Promise<void> {
+export function playComic(panels: ComicPanel[], hooks: { onPanel?: (panel: ComicPanel) => void; onEnd?: () => void } = {}): Promise<boolean> {
   const overlay = $("comic");
   const panel = $("comic-panel");
   const art = $("comic-art");
   const textEl = $("comic-text");
   const next = $<HTMLButtonElement>("comic-next");
   const skip = $<HTMLButtonElement>("comic-skip");
-  if (!panels.length) return Promise.resolve();
+  if (!panels.length) return Promise.resolve(false);
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   return new Promise((resolve) => {
     let index = 0;
@@ -86,6 +88,7 @@ export function playComic(panels: ComicPanel[]): Promise<void> {
       $("comic-sfx").textContent = p.sfx ?? "";
       $("comic-page").textContent = `${index + 1}/${panels.length}`;
       next.textContent = index === panels.length - 1 ? "Fechar ▶" : "Continuar ▶";
+      hooks.onPanel?.(p);
 
       // Máquina de escrever (~45 letras por segundo).
       full = p.text;
@@ -105,12 +108,13 @@ export function playComic(panels: ComicPanel[]): Promise<void> {
       }, 22);
     };
 
-    const finish = () => {
+    const finish = (skipped = false) => {
       finishTyping();
       overlay.hidden = true;
       window.removeEventListener("keydown", onKey, true);
       next.onclick = skip.onclick = panel.onclick = null;
-      resolve();
+      hooks.onEnd?.();
+      resolve(skipped);
     };
     const advance = () => {
       if (typing) {
@@ -128,26 +132,20 @@ export function playComic(panels: ComicPanel[]): Promise<void> {
         advance();
       } else if (e.code === "Escape") {
         e.stopPropagation();
-        finish();
+        finish(true);
       }
     };
     next.onclick = advance;
     panel.onclick = advance;
-    skip.onclick = finish;
+    skip.onclick = () => finish(true);
     window.addEventListener("keydown", onKey, true);
     overlay.hidden = false;
     show();
   });
 }
 
-/**
- * Apresentação do rival, estilo Borderlands: flash, linhas de velocidade, o
- * nome batendo letra por letra e o painel "VOCÊ x RIVAL". `onStart`/`onEnd`
- * deixam quem chamou trocar o carro da vitrine 3D pelo do rival durante a cena.
- * Dura ~4 s; clique ou Enter pula.
- */
-export function showRivalIntro(rival: Rival, yourCar: string, hooks: { onStart?: () => void; onEnd?: () => void } = {}): Promise<void> {
-  const el = $("rival-intro");
+/** Preenche o cartão do rival (#N, nome letra por letra, título e VOCÊ x RIVAL). */
+function fillRivalCard(rival: Rival, yourCar: string) {
   const you = carSpec(yourCar);
   const them = carSpec(rival.car);
   const kmh = (id: string) => `${Math.round(cachedTopSpeed(carSpec(id)) * 3.6)} km/h`;
@@ -161,6 +159,36 @@ export function showRivalIntro(rival: Rival, yourCar: string, hooks: { onStart?:
   $("vs-them-label").textContent = rival.name;
   $("vs-them").textContent = them.name;
   $("vs-them-stat").textContent = kmh(them.id);
+}
+
+/**
+ * Cartão do rival por cima da cinemática de apresentação (null = some). Ali
+ * ele não recebe cliques: quem passa a cena é a cinemática.
+ */
+export function rivalCard(card: { rival: Rival; yourCar: string } | null) {
+  const el = $("rival-intro");
+  if (!card) {
+    el.hidden = true;
+    el.classList.remove("in-cine");
+    return;
+  }
+  fillRivalCard(card.rival, card.yourCar);
+  el.classList.add("in-cine");
+  el.hidden = true;
+  void el.offsetWidth;
+  el.hidden = false;
+}
+
+/**
+ * Apresentação do rival sem 3D, estilo Borderlands: flash, linhas de velocidade, o
+ * nome batendo letra por letra e o painel "VOCÊ x RIVAL". `onStart`/`onEnd`
+ * deixam quem chamou trocar o carro da vitrine 3D pelo do rival durante a cena.
+ * Dura ~4 s; clique ou Enter pula.
+ */
+export function showRivalIntro(rival: Rival, yourCar: string, hooks: { onStart?: () => void; onEnd?: () => void } = {}): Promise<void> {
+  const el = $("rival-intro");
+  fillRivalCard(rival, yourCar);
+  el.classList.remove("in-cine");
   // Reinicia as animações (a cena pode ser vista mais de uma vez).
   el.hidden = true;
   void el.offsetWidth;
@@ -215,8 +243,16 @@ export function renderStoryScreen(story: StoryProgress) {
 
   const target = $("story-target");
   const challenge = $<HTMLButtonElement>("story-challenge");
-  if (!rival) {
-    setHtml(target, `<h3>Você é o Número 1!</h3><p class="quote">O M3 Gorgonzola voltou para casa e o A3 do Bruno está na sua garagem. Porto Gordo é sua.</p>`);
+  if (finalePending(story)) {
+    // Venceu o Bruno: falta a fuga final, com o Cross-fit e a cidade inteira atrás.
+    setHtml(target, `
+      <h3>Fuga final: Sargento Cross-fit</h3>
+      <p class="quote">Você recuperou o M3 Gorgonzola, mas a Vigilância Sanitária inteira fechou a cidade. A única saída é a ponte inacabada do Cais.</p>
+      <div class="req"><span>Chegue na ponte do Cais sem ser autuado</span><strong>🌉</strong></div>`);
+    challenge.disabled = false;
+    challenge.textContent = "Fugir pela ponte 🚨";
+  } else if (!rival) {
+    setHtml(target, `<h3>Você é o Número 1!</h3><p class="quote">O M3 Gorgonzola voltou para casa, o A3 do Bruno está na sua garagem e o Cross-fit ficou na beira do cais. Porto Gordo é sua.</p>`);
     challenge.disabled = true;
     challenge.textContent = "Lista Gorda zerada 👑";
   } else {
@@ -232,10 +268,15 @@ export function renderStoryScreen(story: StoryProgress) {
   $("story-go").textContent = storyFinished(story) ? "Passear por Porto Gordo" : "Ir para Porto Gordo";
 }
 
-export function renderObjective(story: StoryProgress) {
+export function renderObjective(story: StoryProgress, finaleDistance?: number) {
   const el = $("story-objective");
   const rival = currentRival(story);
   el.hidden = false;
+  if (finaleDistance !== undefined) {
+    setHtml(el, `<strong>Fuga final: chegue na ponte do Cais 🌉</strong><br>` +
+      `<span>${Math.round(finaleDistance)} m · siga a coluna de luz verde</span>`);
+    return;
+  }
   if (!rival) {
     setHtml(el, "👑 <strong>Número 1 da Lista Gorda.</strong> Aproveite a cidade.");
     return;
@@ -285,6 +326,11 @@ export class StoryTracker {
 
   setCar(car: string) {
     this.story = { ...this.story, car };
+    saveStory(this.story);
+  }
+
+  finishFinale() {
+    this.story = { ...this.story, finaleDone: true };
     saveStory(this.story);
   }
 

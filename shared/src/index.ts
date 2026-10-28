@@ -158,8 +158,19 @@ export interface WorldJoinOptions extends JoinOptions {
   token?: string;
   /** Voltando de uma corrida: nasce no ponto de encontro dela. */
   spawn?: string;
-  /** Mundo do modo história (só muda o que a lista de online mostra). */
+  /** Mundo do modo história (muda o que a lista de online mostra e liga o Cross-fit). */
   story?: boolean;
+  /**
+   * Modo história: a partir de quantas estrelas o Sargento Cross-fit entra
+   * pessoalmente na perseguição, no Couve-vette (0 ou ausente = não entra).
+   */
+  crossfit?: number;
+  /**
+   * Fuga final do modo história (só em mundo solo): começa com o nível máximo,
+   * o Cross-fit e todas as viaturas atrás, e só termina chegando na ponte
+   * inacabada do Cais (FINALE_BRIDGE) ou sendo autuado.
+   */
+  finale?: boolean;
 }
 
 /** Corrida disparada de um ponto do mundo aberto. */

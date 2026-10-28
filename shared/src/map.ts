@@ -138,7 +138,7 @@ export const NODES: Record<string, [number, number]> = {
   MA: [-760, -250], MB: [-790, 0], MC: [-780, 235], MD: [-770, 480],
   ME: [-1020, -200], MF: [-1040, 30], MG: [-1030, 235], MH: [-1020, 470],
   MI: [-1280, -150], MJ: [-1300, 60], MK: [-1290, 235], ML: [-1280, 480],
-  // Rodovia do Rodízio: o anel em volta de tudo
+  // Rodoanel de Cebola: o anel em volta de tudo
   HW1: [-1560, 235], HW2: [-1560, 900], HW3: [-1550, 1600],
   HN0: [-1300, 2450], HN1: [-450, 2480], HN2: [450, 2480], HN3: [1300, 2450],
   HE3: [1550, 1600], HE2: [1560, 900], HE1: [1560, 250],
@@ -245,7 +245,7 @@ export const EDGES: EdgeSpec[] = [
   ...chain(["P0", "BA0", "BA1"], "avenida"),
   ...chain(["P5", "PE0", "PE1"], "avenida"),
 
-  // Rodovia do Rodízio: o anel (as curvas de canto são largas, dá para passar voando)
+  // Rodoanel de Cebola: o anel (as curvas de canto são largas, dá para passar voando)
   { a: "BA1", b: "HW1", kind: "rodovia", curve: [-1560, -400] },
   ...chain(["HW1", "HW2", "HW3"], "rodovia"),
   { a: "HW3", b: "HN0", kind: "rodovia", curve: [-1560, 2450] },

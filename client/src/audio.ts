@@ -1,9 +1,16 @@
-// Sons do jogo, todos sintetizados com Web Audio (sem arquivos de áudio).
+// Mesa de som do jogo. Motores, pneus, vento, sirene, buzinas e efeitos são
+// sintetizados com Web Audio (engine-sound.ts e sfx.ts); as locuções vêm de
+// arquivos pequenos gravados por scripts/vozes.py (client/public/vozes). Uma
+// reverberação gerada no código dá o "ar" de rua aos sons.
+//
 // O navegador só libera o som depois de um clique, por isso `unlock()` é
 // chamado no botão de entrar. Qualquer erro aqui só deixa o jogo mudo.
-import type { FoodKind } from "@nfbmc/shared";
+import { carSpec, wheelRpm, type EngineSound, type FoodKind, type TrafficKind } from "@nfbmc/shared";
 
+import { EngineVoice, PlayerEngine, engineBank, type EngineBank } from "./engine-sound.ts";
 import { Music, type SongName } from "./music.ts";
+import * as fx from "./sfx.ts";
+import { Voices, type VoiceLine } from "./voices.ts";
 
 const PREFS_KEY = "nfbmc:audio";
 
@@ -32,15 +39,90 @@ export function gearFor(speed: number) {
   return { gear, rpm: Math.min(1, (s - low) / (high - low)) };
 }
 
-/** Um laço de ruído branco, base para pneu cantando, vento e terra. */
-function noiseBuffer(ctx: AudioContext) {
-  const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-  return buffer;
+/** Motores do trânsito (o desenho de cada tipo fica no cliente). */
+const TRAFFIC_ENGINES: Record<TrafficKind, { engine: EngineSound; idle: number; redline: number }> = {
+  sedan: { engine: { cylinders: 4, layout: "linha", liters: 1.6, aspiration: "aspirado", exhaust: "fabrica" }, idle: 800, redline: 6000 },
+  kombi: { engine: { cylinders: 4, layout: "boxer", liters: 1.6, aspiration: "aspirado", exhaust: "fabrica", airCooled: true }, idle: 850, redline: 4600 },
+  picape: { engine: { cylinders: 4, layout: "linha", liters: 2.8, aspiration: "turbo", exhaust: "fabrica", diesel: true }, idle: 750, redline: 4200 },
+};
+
+/** Que motor tem um carro da cena: garagem/viatura pelo id, trânsito pelo tipo. */
+function engineOf(car: { car?: string; traffic?: TrafficKind }) {
+  if (car.traffic) return { key: `npc:${car.traffic}`, ...TRAFFIC_ENGINES[car.traffic] };
+  const spec = carSpec(car.car);
+  return { key: spec.id, engine: spec.engine, idle: spec.idleRpm, redline: spec.redline };
 }
 
-/** Ruído contínuo passando por um filtro, com volume controlável. */
+/** Giro provável de quem não manda o giro (viaturas, trânsito): a marcha que um automático escolheria. */
+function estimateRpm(car: { car?: string; traffic?: TrafficKind }, speed: number) {
+  if (car.traffic) {
+    const { idle, redline } = TRAFFIC_ENGINES[car.traffic];
+    return idle + gearFor(speed).rpm * (redline * 0.7 - idle);
+  }
+  const spec = carSpec(car.car);
+  let gear = 1;
+  while (gear < spec.gears.length && wheelRpm(spec, speed, gear) > spec.redline * 0.72) gear++;
+  return Math.max(spec.idleRpm, Math.min(spec.redline, wheelRpm(spec, speed, gear)));
+}
+
+/** Buzina de cada carro: notas (Hz), timbre e, para alguns, uma melodia. */
+interface HornProfile {
+  notes: number[];
+  /** Brilho do "trompete" da buzina (Hz). */
+  formant: number;
+  /** Sequência de notas (buzina musical) em vez de um toque só. */
+  melody?: { note: number; at: number; dur: number }[];
+}
+
+const CUCARACHA = [392, 392, 392, 523, 659].map((note, i) => ({ note, at: [0, 0.13, 0.26, 0.42, 0.68][i], dur: i < 3 ? 0.1 : 0.22 }));
+
+const HORNS: Record<string, HornProfile> = {
+  fusca: { notes: [470], formant: 2400 },
+  uno: { notes: [440, 554], formant: 2000 },
+  gol: { notes: [415, 523], formant: 1900 },
+  civic: { notes: [466, 587], formant: 2100 },
+  golf: { notes: [440, 554], formant: 2000 },
+  opala: { notes: [330, 415], formant: 1500 },
+  viatura: { notes: [330, 415], formant: 1500 },
+  mustang: { notes: [294, 370], formant: 1400 },
+  supra: { notes: [494, 622], formant: 2200 },
+  skyline: { notes: [494, 622], formant: 2200 },
+  porchetta: { notes: [415, 494], formant: 1900 },
+  lasanha: { notes: [392], formant: 2000, melody: CUCARACHA },
+  farofa: { notes: [523, 659], formant: 2300 },
+  brigadeiro: { notes: [349, 440], formant: 1700 },
+  kibe: { notes: [370, 466], formant: 1800 },
+  m3: { notes: [415, 523], formant: 2000 },
+  // "Turbina de navio": o A3 do Bruno buzina igual navio.
+  a3bruno: { notes: [98, 123, 147], formant: 700 },
+};
+const DEFAULT_HORN: HornProfile = { notes: [415, 523], formant: 1900 };
+
+export interface CarSound {
+  speed: number;
+  rpm: number;
+  redline: number;
+  throttle: number;
+  skid: number;
+  offroad: boolean;
+  boost: boolean;
+  /** Carro (id em CARS): de onde sai o perfil do ronco. */
+  car?: string;
+  gear?: number;
+}
+
+export interface OtherCarSound {
+  speed: number;
+  distance: number;
+  pan: number;
+  rpm?: number;
+  car?: string;
+  traffic?: TrafficKind;
+  /** Velocidade de aproximação (m/s, positiva chegando): dá o efeito Doppler. */
+  closing?: number;
+}
+
+/** Laço de ruído filtrado com volume controlável (pneu, vento, terra). */
 function noiseLoop(ctx: AudioContext, buffer: AudioBuffer, out: AudioNode, type: BiquadFilterType, freq: number, q = 1) {
   const source = ctx.createBufferSource();
   source.buffer = buffer;
@@ -52,87 +134,135 @@ function noiseLoop(ctx: AudioContext, buffer: AudioBuffer, out: AudioNode, type:
   const gain = ctx.createGain();
   gain.gain.value = 0;
   source.connect(filter).connect(gain).connect(out);
-  source.start();
+  source.start(0, Math.random() * buffer.duration);
   return { filter, gain };
 }
 
-class Engine {
-  private osc1: OscillatorNode;
-  private osc2: OscillatorNode;
-  private filter: BiquadFilterNode;
-  readonly gain: GainNode;
-  readonly panner: StereoPannerNode;
-  private ctx: AudioContext;
+/**
+ * Cascalho: grãozinhos (estalos curtos de alturas e forças diferentes)
+ * espalhados ao acaso. Tocado em laço sob o carro na terra/grama.
+ */
+function gravelBuffer(ctx: AudioContext) {
+  const rate = ctx.sampleRate;
+  const buffer = ctx.createBuffer(1, rate * 2, rate);
+  const data = buffer.getChannelData(0);
+  for (let g = 0; g < 900; g++) {
+    const start = Math.floor(Math.random() * data.length);
+    const len = Math.floor(rate * (0.001 + Math.random() * 0.004));
+    const amp = Math.random() ** 2;
+    const freq = 1500 + Math.random() * 5000;
+    for (let i = 0; i < len; i++) {
+      const k = (start + i) % data.length;
+      data[k] += Math.sin((2 * Math.PI * freq * i) / rate) * amp * Math.exp((-i / len) * 4) * (Math.random() * 0.6 + 0.4);
+    }
+  }
+  return buffer;
+}
 
-  constructor(ctx: AudioContext, out: AudioNode) {
+/**
+ * Sirene da Vigilância: corneta de alto-falante (onda rica, saturada e com o
+ * "funil" do alto-falante), subindo e descendo pelo LFO. Perto, troca o
+ * "uóóó" lento pelo "iú-iú" rápido.
+ */
+class Siren {
+  private osc: OscillatorNode;
+  private lfo: OscillatorNode;
+  private depth: GainNode;
+  private gain: GainNode;
+  private panner: StereoPannerNode;
+  private tone: BiquadFilterNode;
+  private ctx: AudioContext;
+  private yelp = false;
+
+  constructor(ctx: AudioContext, out: AudioNode, reverb: AudioNode) {
     this.ctx = ctx;
-    this.osc1 = ctx.createOscillator();
-    this.osc1.type = "sawtooth";
-    this.osc2 = ctx.createOscillator();
-    this.osc2.type = "square";
-    this.filter = ctx.createBiquadFilter();
-    this.filter.type = "lowpass";
-    this.filter.Q.value = 4;
+    this.osc = ctx.createOscillator();
+    // Quase quadrada, com harmônicos pares fracos (corneta de verdade não é pura).
+    const real = new Float32Array(16);
+    const imag = new Float32Array(16);
+    for (let k = 1; k < 16; k++) imag[k] = (k % 2 ? 1 : 0.25) / k;
+    this.osc.setPeriodicWave(ctx.createPeriodicWave(real, imag));
+    this.osc.frequency.value = 900;
+    this.lfo = ctx.createOscillator();
+    this.lfo.type = "triangle";
+    this.lfo.frequency.value = 0.3;
+    this.depth = ctx.createGain();
+    this.depth.gain.value = 380;
+    this.lfo.connect(this.depth).connect(this.osc.frequency);
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = fx.saturation(3);
+    const horn = ctx.createBiquadFilter();
+    horn.type = "bandpass";
+    horn.frequency.value = 1500;
+    horn.Q.value = 0.7;
+    this.tone = ctx.createBiquadFilter();
+    this.tone.type = "lowpass";
+    this.tone.frequency.value = 6000;
     this.gain = ctx.createGain();
     this.gain.gain.value = 0;
     this.panner = ctx.createStereoPanner();
-    const mix2 = ctx.createGain();
-    mix2.gain.value = 0.5;
-    this.osc1.connect(this.filter);
-    this.osc2.connect(mix2).connect(this.filter);
-    this.filter.connect(this.gain).connect(this.panner).connect(out);
-    this.osc1.start();
-    this.osc2.start();
+    this.osc.connect(shaper).connect(horn).connect(this.tone).connect(this.gain).connect(this.panner).connect(out);
+    const send = ctx.createGain();
+    send.gain.value = 0.5;
+    this.panner.connect(send).connect(reverb);
+    this.osc.start();
+    this.lfo.start();
   }
 
-  /**
-   * `rpm` e `redline` do motor: o tom acompanha o giro de verdade. Motores que
-   * giram mais alto (faixa vermelha alta) soam mais agudos lá em cima.
-   */
-  set(rpm: number, redline: number, throttle: number, volume: number, pan = 0) {
+  set(distance: number | null, pan: number) {
     const t = this.ctx.currentTime;
-    const ratio = Math.min(1.05, rpm / redline);
-    const freq = 26 + ratio * (55 + redline / 90);
-    this.osc1.frequency.setTargetAtTime(freq, t, 0.03);
-    this.osc2.frequency.setTargetAtTime(freq * 0.5 + 1.5, t, 0.03);
-    this.filter.frequency.setTargetAtTime(300 + ratio * 900 + Math.max(0, throttle) * 900, t, 0.08);
-    this.gain.gain.setTargetAtTime(volume * (0.5 + 0.5 * Math.max(0.2, throttle)), t, 0.08);
-    this.panner.pan.setTargetAtTime(pan, t, 0.1);
+    const volume = distance === null ? 0 : 0.14 * Math.max(0, 1 - distance / 170);
+    this.gain.gain.setTargetAtTime(volume, t, 0.15);
+    if (distance === null) return;
+    // Longe, a sirene chega abafada (o ar e os prédios comem os agudos).
+    this.tone.frequency.setTargetAtTime(7000 / (1 + distance / 30), t, 0.2);
+    this.panner.pan.setTargetAtTime(pan * 0.8, t, 0.15);
+    const yelp = distance < 45;
+    if (yelp !== this.yelp) {
+      this.yelp = yelp;
+      this.lfo.frequency.setTargetAtTime(yelp ? 3.6 : 0.3, t, 0.1);
+      this.depth.gain.setTargetAtTime(yelp ? 300 : 380, t, 0.1);
+    }
   }
 
-  stop() {
-    this.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1);
-    setTimeout(() => {
-      this.osc1.stop();
-      this.osc2.stop();
-      this.panner.disconnect();
-    }, 500);
+  /** Uma subida só ("uóóó"), para a abertura. */
+  wail() {
+    const t = this.ctx.currentTime;
+    this.lfo.frequency.cancelScheduledValues(t);
+    this.lfo.frequency.setValueAtTime(0.35, t);
+    this.panner.pan.setValueAtTime(0, t);
+    this.tone.frequency.setValueAtTime(6000, t);
+    this.gain.gain.cancelScheduledValues(t);
+    this.gain.gain.setTargetAtTime(0.12, t, 0.05);
+    this.gain.gain.setTargetAtTime(0, t + 1.6, 0.2);
   }
-}
-
-export interface CarSound {
-  speed: number;
-  rpm: number;
-  redline: number;
-  throttle: number;
-  skid: number;
-  offroad: boolean;
-  boost: boolean;
 }
 
 export class Sound {
   private ctx: AudioContext | null = null;
+  private kit!: fx.Kit;
   private sfxBus!: GainNode;
   private musicBus!: GainNode;
-  private noise!: AudioBuffer;
-  private engine!: Engine;
-  private others = new Map<string, Engine>();
-  private skid!: ReturnType<typeof noiseLoop>;
+  private engine: PlayerEngine | null = null;
+  private engineKey = "";
+  private others = new Map<string, EngineVoice>();
+  private otherLoad = new Map<string, { speed: number; load: number }>();
+  /** Perfis de motor esperando para serem gerados (um por quadro, para não engasgar). */
+  private pendingBanks = new Map<string, () => EngineBank>();
+  private squeal!: ReturnType<typeof noiseLoop>[];
+  private scrub!: ReturnType<typeof noiseLoop>;
+  private road!: ReturnType<typeof noiseLoop>;
+  private gravel!: ReturnType<typeof noiseLoop>;
   private dirt!: ReturnType<typeof noiseLoop>;
   private wind!: ReturnType<typeof noiseLoop>;
+  private nitroHiss!: ReturnType<typeof noiseLoop>;
+  private siren: Siren | null = null;
   private music: Music | null = null;
-  private siren: { osc: OscillatorNode; gain: GainNode } | null = null;
+  private voices = new Voices();
   private wantedSong: SongName | null = null;
+  private lastFrame = 0;
+  private hornWave: PeriodicWave | null = null;
+  private preview: { engine: PlayerEngine; timer: ReturnType<typeof setInterval> } | null = null;
   readonly prefs = loadPrefs();
 
   /** Liga o áudio. Precisa ser chamado dentro de um clique ou tecla. */
@@ -144,20 +274,45 @@ export class Sound {
     try {
       const ctx = new AudioContext();
       this.ctx = ctx;
-      const master = ctx.createDynamicsCompressor();
-      master.connect(ctx.destination);
+      // Mestre: compressor segurando o conjunto e um limitador no fim (nada estoura).
+      const glue = ctx.createDynamicsCompressor();
+      glue.threshold.value = -16;
+      glue.knee.value = 10;
+      glue.ratio.value = 3;
+      glue.attack.value = 0.005;
+      glue.release.value = 0.2;
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -3;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.001;
+      limiter.release.value = 0.1;
+      glue.connect(limiter).connect(ctx.destination);
       this.sfxBus = ctx.createGain();
       this.musicBus = ctx.createGain();
-      this.sfxBus.connect(master);
-      this.musicBus.connect(master);
+      this.sfxBus.connect(glue);
+      this.musicBus.connect(glue);
       this.applyPrefs();
 
-      this.noise = noiseBuffer(ctx);
-      this.engine = new Engine(ctx, this.sfxBus);
-      this.skid = noiseLoop(ctx, this.noise, this.sfxBus, "bandpass", 1900, 6);
-      this.dirt = noiseLoop(ctx, this.noise, this.sfxBus, "lowpass", 260);
-      this.wind = noiseLoop(ctx, this.noise, this.sfxBus, "bandpass", 700, 0.6);
-      this.music = new Music(ctx, this.musicBus, this.noise);
+      // Reverberação de rua (prédios perto, cauda curta e escura).
+      const reverb = ctx.createConvolver();
+      reverb.buffer = fx.impulseResponse(ctx, 1.4, 4.2, 0.5);
+      const reverbIn = ctx.createGain();
+      reverbIn.connect(reverb).connect(this.sfxBus);
+
+      const noise = fx.noiseBuffer(ctx);
+      this.kit = { ctx, out: this.sfxBus, reverb: reverbIn, noise };
+      this.voices.attach(ctx, this.sfxBus, reverbIn);
+
+      // Pneu cantando: dois ressonadores estreitos no ruído (o chiado afinado do pneu).
+      this.squeal = [noiseLoop(ctx, noise, this.sfxBus, "bandpass", 1100, 18), noiseLoop(ctx, noise, this.sfxBus, "bandpass", 2300, 14)];
+      this.scrub = noiseLoop(ctx, noise, this.sfxBus, "bandpass", 2400, 0.8);
+      this.road = noiseLoop(ctx, noise, this.sfxBus, "lowpass", 380, 0.7);
+      this.gravel = noiseLoop(ctx, gravelBuffer(ctx), this.sfxBus, "highpass", 900, 0.7);
+      this.dirt = noiseLoop(ctx, noise, this.sfxBus, "lowpass", 180, 1);
+      this.wind = noiseLoop(ctx, noise, this.sfxBus, "bandpass", 700, 0.5);
+      this.nitroHiss = noiseLoop(ctx, noise, this.sfxBus, "bandpass", 1600, 0.7);
+      this.music = new Music(ctx, this.musicBus, noise);
       if (this.wantedSong) this.music.play(this.wantedSong);
     } catch (err) {
       console.error("Áudio indisponível", err);
@@ -178,7 +333,7 @@ export class Sound {
   private applyPrefs() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.musicBus.gain.setTargetAtTime(this.prefs.music ? 0.32 : 0, t, 0.1);
+    this.musicBus.gain.setTargetAtTime(this.prefs.music ? 0.3 : 0, t, 0.1);
     this.sfxBus.gain.setTargetAtTime(this.prefs.sfx ? 0.9 : 0, t, 0.1);
   }
 
@@ -190,202 +345,331 @@ export class Sound {
     else this.music.stop();
   }
 
+  /** Segundos desde o último quadro de som (para as contas de tempo dos motores). */
+  private frameDt() {
+    const now = this.ctx!.currentTime;
+    const dt = Math.min(0.1, Math.max(0.001, now - this.lastFrame));
+    this.lastFrame = now;
+    return dt;
+  }
+
+  /** Gera os perfis pendentes, um por chamada. */
+  private bakeOne() {
+    const next = this.pendingBanks.entries().next();
+    if (next.done) return;
+    const [key, make] = next.value;
+    this.pendingBanks.delete(key);
+    make();
+  }
+
+  private bankFor(car: { car?: string; traffic?: TrafficKind }, now: boolean): EngineBank | null {
+    const { key, engine, idle, redline } = engineOf(car);
+    const make = () => engineBank(this.ctx!, key, engine, idle, redline);
+    if (now) return make();
+    // Os outros esperam a vez (gerar leva alguns milissegundos).
+    if (!this.pendingBanks.has(key)) this.pendingBanks.set(key, make);
+    return null;
+  }
+
   /** Atualiza os sons contínuos do carro do jogador. */
   updateMine(car: CarSound | null) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
+    const dt = this.frameDt();
+    this.bakeOne();
     if (!car) {
-      this.engine.set(0, 1, 0, 0);
-      for (const loop of [this.skid, this.dirt, this.wind]) loop.gain.gain.setTargetAtTime(0, t, 0.1);
+      this.engine?.silence();
+      for (const loop of [...this.squeal, this.scrub, this.road, this.gravel, this.dirt, this.wind, this.nitroHiss]) loop.gain.gain.setTargetAtTime(0, t, 0.1);
       return;
     }
+    const key = car.car ?? "";
+    if (!this.engine || key !== this.engineKey) {
+      this.engine?.stop();
+      const bank = this.bankFor({ car: car.car }, true)!;
+      this.engine = new PlayerEngine(this.kit, bank);
+      this.engineKey = key;
+    }
     const speed = Math.abs(car.speed);
-    this.engine.set(car.rpm, car.redline, car.boost ? 1 : car.throttle, 0.22);
-    this.skid.gain.gain.setTargetAtTime(Math.min(1, car.skid) * 0.35, t, 0.04);
-    this.skid.filter.frequency.setTargetAtTime(1600 + Math.random() * 600, t, 0.02);
-    this.dirt.gain.gain.setTargetAtTime(car.offroad ? Math.min(1, speed / 15) * 0.5 : 0, t, 0.08);
-    this.wind.gain.gain.setTargetAtTime(Math.min(1, speed / 55) * (car.boost ? 0.35 : 0.15), t, 0.15);
+    const throttle = car.boost ? 1 : (car.gear ?? 1) < 0 ? Math.abs(car.throttle) : Math.max(0, car.throttle);
+    this.engine.update(dt, { rpm: car.rpm, throttle, gear: car.gear ?? 1 }, 0.42);
+
+    // Pneus: no asfalto canta (afinado, oscilando); na terra/grama, arrasta e espirra cascalho.
+    const skid = Math.min(1, car.skid);
+    const wobble = 1 + Math.sin(t * 7.3) * 0.04 + Math.sin(t * 13.1) * 0.03;
+    const squealPitch = (900 + skid * 300 + Math.min(speed, 40) * 4) * wobble;
+    this.squeal[0].filter.frequency.setTargetAtTime(squealPitch, t, 0.03);
+    this.squeal[1].filter.frequency.setTargetAtTime(squealPitch * 2.07, t, 0.03);
+    const squeal = car.offroad ? 0 : skid * Math.min(1, speed / 6);
+    this.squeal[0].gain.gain.setTargetAtTime(squeal * 3.2, t, 0.04);
+    this.squeal[1].gain.gain.setTargetAtTime(squeal * 1.4, t, 0.04);
+    this.scrub.gain.gain.setTargetAtTime(skid * Math.min(1, speed / 8) * (car.offroad ? 0.35 : 0.05), t, 0.05);
+    const rolling = Math.min(1, speed / 30);
+    this.road.gain.gain.setTargetAtTime(car.offroad ? 0 : rolling * 0.3, t, 0.1);
+    this.road.filter.frequency.setTargetAtTime(250 + speed * 6, t, 0.2);
+    this.gravel.gain.gain.setTargetAtTime(car.offroad ? Math.min(1, speed / 12) * 0.35 : 0, t, 0.06);
+    this.dirt.gain.gain.setTargetAtTime(car.offroad ? Math.min(1, speed / 15) * 0.9 : 0, t, 0.08);
+    // Vento: cresce com o quadrado da velocidade e vem em rajadas.
+    const gust = 0.8 + 0.2 * Math.sin(t * 0.7) * Math.sin(t * 1.9);
+    this.wind.gain.gain.setTargetAtTime(Math.min(1, (speed / 60) ** 2) * 0.3 * gust, t, 0.15);
+    this.wind.filter.frequency.setTargetAtTime(500 + speed * 12, t, 0.2);
+    this.nitroHiss.gain.gain.setTargetAtTime(car.boost ? 0.15 : 0, t, car.boost ? 0.05 : 0.25);
   }
 
-  /** Motores dos outros carros, mais baixos conforme a distância. `pan`: -1 esquerda, 1 direita. */
-  updateOthers(cars: Map<string, { speed: number; distance: number; pan: number; rpm?: number; redline?: number }>) {
+  /** Motores dos outros carros, cada um com o seu ronco, mais baixos e abafados com a distância. */
+  updateOthers(cars: Map<string, OtherCarSound>) {
     if (!this.ctx) return;
+    this.bakeOne();
     for (const [id, engine] of this.others) {
       if (!cars.has(id)) {
         engine.stop();
         this.others.delete(id);
+        this.otherLoad.delete(id);
       }
     }
     for (const [id, car] of cars) {
       let engine = this.others.get(id);
       if (!engine) {
-        engine = new Engine(this.ctx, this.sfxBus);
+        const bank = this.bankFor(car, false);
+        if (!bank) continue;
+        engine = new EngineVoice(this.ctx, this.sfxBus, bank, false, { node: this.kit.reverb, amount: 0.12 });
         this.others.set(id, engine);
       }
-      const volume = 0.12 * Math.max(0, 1 - car.distance / 70);
-      // Sem o giro (viatura, trânsito), estima pela velocidade com marchas fictícias.
-      const estimated = gearFor(car.speed).rpm * 0.75 + 0.2;
-      engine.set(car.rpm ?? estimated * 6000, car.redline ?? 6000, 0.6, volume, car.pan);
+      // Carga estimada: ganhando velocidade = acelerando.
+      const memory = this.otherLoad.get(id) ?? { speed: car.speed, load: 0.6 };
+      const accelerating = Math.abs(car.speed) > Math.abs(memory.speed) + 0.02;
+      memory.load += ((accelerating ? 1 : Math.abs(car.speed) < 1 ? 0.3 : 0.15) - memory.load) * 0.15;
+      memory.speed = car.speed;
+      this.otherLoad.set(id, memory);
+      const volume = 0.65 / (1 + car.distance / 9) * Math.max(0, 1 - car.distance / 70);
+      const rpm = car.rpm || estimateRpm(car, car.speed);
+      const doppler = Math.max(0.85, Math.min(1.2, 343 / (343 - Math.max(-60, Math.min(60, car.closing ?? 0)))));
+      engine.set(rpm, memory.load, volume, car.pan, 9000 / (1 + car.distance / 25), doppler, 0.06);
     }
   }
 
-  /** Sirene da viatura mais próxima (null = nenhuma por perto). Sobe e desce, mais alta quanto mais perto. */
-  updateSiren(distance: number | null) {
+  /** Sirene da viatura mais próxima (null = nenhuma por perto). `pan`: de que lado ela está. */
+  updateSiren(distance: number | null, pan = 0) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime;
     if (!this.siren) {
-      const osc = this.ctx.createOscillator();
-      osc.type = "square";
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.value = 2200;
-      const gain = this.ctx.createGain();
-      gain.gain.value = 0;
-      osc.connect(filter).connect(gain).connect(this.sfxBus);
-      osc.start();
-      this.siren = { osc, gain };
+      if (distance === null) return;
+      this.siren = new Siren(this.ctx, this.sfxBus, this.kit.reverb);
     }
-    const volume = distance === null ? 0 : 0.1 * Math.max(0, 1 - distance / 170);
-    this.siren.gain.gain.setTargetAtTime(volume, t, 0.1);
-    // "Uóóó-uóóó": a frequência vai e volta a cada 1,4 s.
-    this.siren.osc.frequency.setTargetAtTime(650 + 450 * (0.5 + 0.5 * Math.sin((t * Math.PI * 2) / 1.4)), t, 0.02);
+    this.siren.set(distance, pan);
+  }
+
+  /** Ronco de demonstração na garagem: liga, dá duas aceleradas e alivia. */
+  revPreview(carId: string) {
+    if (!this.ctx || !this.prefs.sfx) return;
+    this.stopPreview();
+    const spec = carSpec(carId);
+    const engine = new PlayerEngine(this.kit, this.bankFor({ car: carId }, true)!);
+    const start = this.ctx.currentTime;
+    let rpm = spec.idleRpm;
+    const timer = setInterval(() => {
+      const t = this.ctx!.currentTime - start;
+      // Dois "vrum": acelera de 0,3 a 0,9 s e de 1,3 a 1,9 s, mais forte no segundo.
+      const throttle = (t > 0.3 && t < 0.9) || (t > 1.3 && t < 1.9) ? 1 : 0;
+      const top = t < 1 ? 0.7 : 0.95;
+      const target = throttle ? spec.redline * top : spec.idleRpm;
+      rpm += (target - rpm) * (throttle ? 0.12 : 0.07);
+      engine.update(0.03, { rpm, throttle, gear: 0 }, t > 3.2 ? 0 : 0.42);
+      if (t > 3.6) this.stopPreview();
+    }, 30);
+    this.preview = { engine, timer };
+  }
+
+  private stopPreview() {
+    if (!this.preview) return;
+    clearInterval(this.preview.timer);
+    this.preview.engine.stop();
+    this.preview = null;
   }
 
   /**
-   * Buzina: duas notas juntas (o "fom" de buzina de carro). `volume` de 0 a 1
+   * Buzina: corneta de diafragma (onda rica com a nota caindo de leve no
+   * ataque) passando pelo "funil". Cada carro tem a sua. `volume` de 0 a 1
    * (a dos outros fica mais baixa com a distância) e `pan` de -1 a 1.
    */
-  horn(volume = 1, pan = 0) {
+  horn(volume = 1, pan = 0, carId?: string) {
     if (!this.ctx || volume <= 0) return;
-    const t = this.ctx.currentTime;
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.16 * volume, t + 0.02);
-    gain.gain.setValueAtTime(0.16 * volume, t + 0.32);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
-    const panner = this.ctx.createStereoPanner();
-    panner.pan.value = pan;
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 1800;
-    filter.connect(gain).connect(panner).connect(this.sfxBus);
-    for (const freq of [415, 523]) {
-      const osc = this.ctx.createOscillator();
-      osc.type = "square";
-      osc.frequency.value = freq;
-      osc.connect(filter);
-      osc.start(t);
-      osc.stop(t + 0.42);
+    const ctx = this.ctx;
+    const profile = (carId && HORNS[carId]) || DEFAULT_HORN;
+    if (!this.hornWave) {
+      const real = new Float32Array(24);
+      const imag = new Float32Array(24);
+      for (let k = 1; k < 24; k++) imag[k] = 1 / k ** 0.9;
+      this.hornWave = ctx.createPeriodicWave(real, imag);
     }
+    const t = ctx.currentTime;
+    const notes = profile.melody ?? [{ note: 0, at: 0, dur: 0.42 }];
+    const total = Math.max(...notes.map((n) => n.at + n.dur)) + 0.1;
+    const funnel = ctx.createBiquadFilter();
+    funnel.type = "peaking";
+    funnel.frequency.value = profile.formant;
+    funnel.Q.value = 1.2;
+    funnel.gain.value = 9;
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = "lowpass";
+    lowpass.frequency.value = profile.formant * 2.2;
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = fx.saturation(2);
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+    funnel.connect(lowpass).connect(shaper).connect(gain).connect(panner).connect(this.sfxBus);
+    const send = ctx.createGain();
+    send.gain.value = 0.25 + (1 - volume) * 0.4;
+    panner.connect(send).connect(this.kit.reverb);
+    const level = 0.2 * volume;
+    for (const { note, at, dur } of notes) {
+      gain.gain.setTargetAtTime(level, t + at, 0.008);
+      gain.gain.setTargetAtTime(0, t + at + dur, 0.02);
+      const freqs = profile.melody ? [note, note * 1.5] : profile.notes;
+      for (const f of freqs) {
+        const osc = ctx.createOscillator();
+        osc.setPeriodicWave(this.hornWave);
+        osc.frequency.setValueAtTime(f * 1.03, t + at);
+        osc.frequency.exponentialRampToValueAtTime(f, t + at + 0.04);
+        const g = ctx.createGain();
+        g.gain.value = 0.5 / freqs.length ** 0.5;
+        osc.connect(g).connect(funnel);
+        osc.start(t + at);
+        osc.stop(t + at + dur + 0.1);
+      }
+    }
+    setTimeout(() => panner.disconnect(), (total + 0.5) * 1000);
   }
 
-  /** Escapou da Vigilância: fanfarra curta. */
+  /** Locução gravada (ver scripts/vozes.py). */
+  say(line: VoiceLine, delay = 0) {
+    if (!this.ctx || !this.prefs.sfx) return;
+    if (line.startsWith("radio-")) {
+      // Rádio: o "tchk" de apertar o botão antes e depois da fala.
+      fx.burst(this.kit, { delay, dur: 0.06, type: "bandpass", freq: 2200, q: 0.8, gain: 0.15 });
+      this.voices.play(line, delay + 0.07, { wet: 0.05, onEnd: (late) => fx.burst(this.kit, { delay: late, dur: 0.1, type: "bandpass", freq: 1800, q: 0.6, gain: 0.12 }) });
+      return;
+    }
+    const wet = line === "nham" ? 0.7 : line === "eat" || line.startsWith("trailer") ? 0.4 : 0.15;
+    this.voices.play(line, delay, { wet });
+  }
+
+  /**
+   * Fala do modo história (vozes/historia/<id>.mp3). Resolve com quanto tempo
+   * (s) falta para ela acabar, ou null se não vai tocar (efeitos desligados,
+   * áudio ainda bloqueado ou arquivo que não carregou).
+   */
+  sayStory(id: string, radio = false): Promise<number | null> {
+    if (!this.ctx || !this.prefs.sfx) return Promise.resolve(null);
+    if (radio) fx.burst(this.kit, { delay: 0, dur: 0.06, type: "bandpass", freq: 2200, q: 0.8, gain: 0.15 });
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (value: number | null) => {
+        if (done) return;
+        done = true;
+        resolve(value);
+      };
+      this.voices.play(`historia/${id}`, radio ? 0.07 : 0, { wet: radio ? 0.05 : 0.12, gain: 1, onEnd: finish });
+      // Arquivo que não chegou a tempo: segue sem voz.
+      setTimeout(() => finish(null), 4000);
+    });
+  }
+
+  /** Para as locuções (pulou a vinheta). */
+  hush() {
+    this.voices.stopAll();
+  }
+
+  /** Baixa as locuções antes de precisar delas (vale também "historia/<id>"). */
+  preloadVoices(lines: VoiceLine[]) {
+    this.voices.preload(lines);
+  }
+
+  /** Escapou da Vigilância: fanfarra e o rádio dela. */
   escaped() {
-    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, "square", 0.15, i * 0.1));
+    if (!this.ctx) return;
+    fx.fanfare(this.kit);
+    this.say("radio-escapou", 1.0);
   }
 
-  /** Autuado: "buá buá" descendo. */
+  /** Autuado: metais tristes e o rádio. */
   busted() {
-    [392, 330, 262].forEach((f, i) => this.tone(f, 0.35, "sawtooth", 0.15, i * 0.25, f * 0.9));
+    if (!this.ctx) return;
+    fx.sadTrombone(this.kit);
+    this.say("radio-autuado", 1.4);
+  }
+
+  /** Começou uma perseguição. */
+  pursuitStarted() {
+    this.say("radio-perseguicao", 0.3);
   }
 
   // --- Sons curtos -----------------------------------------------------------
 
-  private tone(freq: number, duration: number, type: OscillatorType = "square", volume = 0.2, delay = 0, slideTo?: number) {
+  /** Bipe da contagem (com a voz do locutor); o último (VAI!) é mais agudo e longo. */
+  beep(go = false, count?: number) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime + delay;
-    const osc = this.ctx.createOscillator();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, t);
-    if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t + duration);
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(volume, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
-    osc.connect(gain).connect(this.sfxBus);
-    osc.start(t);
-    osc.stop(t + duration + 0.05);
-  }
-
-  private burst(duration: number, type: BiquadFilterType, freq: number, volume = 0.4, delay = 0, freqTo?: number) {
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime + delay;
-    const source = this.ctx.createBufferSource();
-    source.buffer = this.noise;
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = type;
-    filter.frequency.setValueAtTime(freq, t);
-    if (freqTo) filter.frequency.exponentialRampToValueAtTime(freqTo, t + duration);
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(volume, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
-    source.connect(filter).connect(gain).connect(this.sfxBus);
-    source.start(t, Math.random());
-    source.stop(t + duration + 0.05);
-  }
-
-  /** Bipe da contagem; o último (VAI!) é mais agudo e longo. */
-  beep(go = false) {
-    this.tone(go ? 880 : 440, go ? 0.6 : 0.25, "square", 0.18);
+    fx.startBeep(this.kit, go);
+    if (go) this.say("vai");
+    else if (count === 3) this.say("tres");
+    else if (count === 2) this.say("dois");
+    else if (count === 1) this.say("um");
   }
 
   /** Nhac! E um "plim" que muda com a comida. */
   eat(kind: FoodKind | undefined) {
-    this.burst(0.08, "lowpass", 900, 0.6);
-    this.burst(0.1, "lowpass", 700, 0.5, 0.11);
-    const base = kind === "burger" ? 523 : kind === "fries" ? 659 : 784;
-    this.tone(base, 0.12, "triangle", 0.2, 0.05);
-    this.tone(base * 1.5, 0.2, "triangle", 0.2, 0.12);
+    if (this.ctx) fx.bite(this.kit, kind);
   }
 
   boost() {
-    this.burst(0.9, "bandpass", 300, 0.7, 0, 3000);
-    this.tone(90, 0.6, "sawtooth", 0.15, 0, 260);
+    if (this.ctx) fx.nitro(this.kit);
   }
 
-  bump() {
-    this.tone(70, 0.25, "sine", 0.6, 0, 35);
-    this.burst(0.15, "lowpass", 500, 0.6);
+  /** Batida: `intensity` de 0 (raspão) a 1 (pancada). */
+  bump(intensity = 0.5, pan = 0) {
+    if (this.ctx) fx.impact(this.kit, intensity, pan);
   }
 
-  lap() {
-    [659, 784, 988].forEach((f, i) => this.tone(f, 0.18, "square", 0.14, i * 0.09));
+  lap(final = false) {
+    if (!this.ctx) return;
+    fx.lapChime(this.kit);
+    if (final) this.say("ultima-volta", 0.25);
   }
 
-  finish() {
-    [523, 659, 784, 1047, 784, 1047].forEach((f, i) => this.tone(f, 0.25, "square", 0.14, i * 0.12));
+  /** Cruzou a chegada; `won` = em primeiro. */
+  finish(won?: boolean) {
+    if (!this.ctx) return;
+    fx.finishFanfare(this.kit);
+    if (won !== undefined) this.say(won ? "vitoria" : "chegada", 0.5);
   }
 
   click() {
-    this.tone(1200, 0.05, "square", 0.08);
+    if (this.ctx) fx.tick(this.kit);
   }
 
   // --- Abertura ----------------------------------------------------------------
 
-  /** "Fuuush" de vinheta: ruído varrendo do grave para o agudo. */
   whoosh() {
-    this.burst(0.9, "bandpass", 220, 0.5, 0, 4200);
+    if (this.ctx) fx.whoosh(this.kit);
   }
 
-  /** Pancada grave de trailer de cinema. */
   boom() {
-    this.tone(70, 1.4, "sine", 0.7, 0, 28);
-    this.burst(0.6, "lowpass", 900, 0.6, 0, 80);
+    if (this.ctx) fx.boom(this.kit);
   }
 
-  /** Brilho de logo: acorde agudo subindo. */
   shimmer() {
-    [784, 988, 1175, 1568].forEach((f, i) => this.tone(f, 0.9 - i * 0.12, "triangle", 0.06, i * 0.06));
+    if (this.ctx) fx.shimmer(this.kit);
   }
 
   /** Lancheira caindo no chão. */
   thud() {
-    this.bump();
-    this.burst(0.25, "lowpass", 300, 0.5, 0.02);
+    if (this.ctx) fx.lunchbox(this.kit);
   }
 
   /** Uma subida de sirene só ("uóóó"). */
   wail() {
-    this.tone(620, 0.7, "sawtooth", 0.08, 0, 1150);
-    this.tone(1150, 0.6, "sawtooth", 0.06, 0.7, 640);
+    if (!this.ctx) return;
+    if (!this.siren) this.siren = new Siren(this.ctx, this.sfxBus, this.kit.reverb);
+    this.siren.wail();
   }
 }

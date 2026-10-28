@@ -30,6 +30,8 @@ import {
   isCarId,
   requestShift,
   CHALLENGE_SECONDS,
+  CROSSFIT_CAR,
+  FINALE_BRIDGE,
   atRace,
   type ChallengeInvite,
   type ChallengeMessage,
@@ -69,6 +71,8 @@ const TEST_HOOKS = process.env.NFBMC_TEST_HOOKS === "1";
 export interface PursuitMessage {
   result: "escaped" | "busted";
   calories: number;
+  /** Era a fuga final do modo história (escapou = chegou na ponte). */
+  finale?: boolean;
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -123,6 +127,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   /** Desafios diretos (co-op) esperando resposta, pelo id. */
   private invites = new Map<string, Invite>();
   private inviteCount = 0;
+  /**
+   * Modo história (sala solo): a partir de quantas estrelas o Sargento Cross-fit
+   * entra na perseguição (0 = não entra), e se é a fuga final até a ponte.
+   */
+  private crossfitAt = 0;
+  private finale = false;
 
   messages = {
     input: (client: Client, message: InputMessage) => {
@@ -171,6 +181,13 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       debugHeat: (client: Client, message: { heat?: unknown }) => {
         const player = this.state.players.get(client.sessionId);
         if (player && typeof message?.heat === "number") player.heat = Math.min(POLICE.maxHeat, Math.max(0, message.heat));
+      },
+      debugMove: (client: Client, message: { x?: unknown; z?: unknown }) => {
+        const player = this.state.players.get(client.sessionId);
+        if (!player || typeof message?.x !== "number" || typeof message?.z !== "number") return;
+        player.x = message.x;
+        player.z = message.z;
+        player.speed = 0;
       },
       debugCalories: (client: Client, message: { calories?: unknown }) => {
         const player = this.state.players.get(client.sessionId);
@@ -228,6 +245,17 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       player.x = spawn.x + (Math.random() - 0.5) * 4;
       player.z = spawn.z + (Math.random() - 0.5) * 4;
       player.heading = spawn.heading;
+    }
+    if (this.state.solo && options?.story) {
+      // Modo história: o Cross-fit entra nas perseguições conforme a carreira avança.
+      const at = typeof options.crossfit === "number" ? Math.round(options.crossfit) : 0;
+      this.crossfitAt = at >= 1 && at <= POLICE.maxHeat ? at : 0;
+      if (options.finale === true) {
+        // Fuga final: nível máximo desde o começo, com o Cross-fit e tudo.
+        this.finale = true;
+        this.crossfitAt = 1;
+        player.heat = POLICE.maxHeat;
+      }
     }
     this.state.players.set(client.sessionId, player);
     const where = this.state.solo ? (options?.story ? "story" : "solo") : "world";
@@ -511,7 +539,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       }
       // De 4 estrelas para cima, a Vigilância manda a viatura tática (superesportiva).
       const stars = Math.floor(target.heat);
-      cop.car = stars >= 4 ? "viatura-tatica" : "viatura";
+      // O Couve-vette do Cross-fit é sempre ele mesmo.
+      if (cop.car !== CROSSFIT_CAR) cop.car = stars >= 4 ? "viatura-tatica" : "viatura";
       const spec = carSpec(cop.car);
       const { input, boost } = copInput(brain, cop, spec, target, stars, dt);
       cop.boost = boost ? 1 : 0;
@@ -523,25 +552,34 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   }
 
   /** Nível de procurado, viaturas, fuga e autuação de um jogador. */
-  private updatePursuit(sessionId: string, player: WorldPlayer, dt: number) {
-    const stars = Math.floor(player.heat);
-    let cops = this.copsOf(sessionId);
+  private spawnCop(sessionId: string, player: WorldPlayer, car?: string) {
+    const cop = new Cop();
+    const spot = spawnPoint(player.x, player.z);
+    cop.x = spot.x;
+    cop.z = spot.z;
+    cop.heading = spot.heading;
+    cop.target = sessionId;
+    if (car) cop.car = car;
+    const id = `cop-${++this.copCount}`;
+    this.state.cops.set(id, cop);
+    this.copBrains.set(id, createCopBrain());
+    if (this.copsOf(sessionId).length === 1) player.chased = true;
+  }
 
-    // Viaturas que faltam para o nível atual.
-    const wanted = this.leaving.has(sessionId) ? 0 : copsForStars(stars);
-    while (cops.length < wanted && this.state.cops.size < MAX_COPS) {
-      const cop = new Cop();
-      const spot = spawnPoint(player.x, player.z);
-      cop.x = spot.x;
-      cop.z = spot.z;
-      cop.heading = spot.heading;
-      cop.target = sessionId;
-      const id = `cop-${++this.copCount}`;
-      this.state.cops.set(id, cop);
-      this.copBrains.set(id, createCopBrain());
-      if (cops.length === 0) player.chased = true;
-      cops = this.copsOf(sessionId);
-    }
+  private updatePursuit(sessionId: string, player: WorldPlayer, dt: number) {
+    // Na fuga final o nível fica no máximo até o fim.
+    if (this.finale) player.heat = POLICE.maxHeat;
+    const stars = Math.floor(player.heat);
+    const away = this.leaving.has(sessionId);
+
+    // Viaturas que faltam para o nível atual (o Cross-fit não conta na cota).
+    const wanted = away ? 0 : copsForStars(stars);
+    const regular = () => this.copsOf(sessionId).filter(([, c]) => c.car !== CROSSFIT_CAR).length;
+    while (regular() < wanted && this.state.cops.size < MAX_COPS) this.spawnCop(sessionId, player);
+    // Modo história: com estrelas suficientes, o próprio Cross-fit sai atrás.
+    const crossfitOut = this.copsOf(sessionId).some(([, c]) => c.car === CROSSFIT_CAR);
+    if (!away && this.crossfitAt > 0 && stars >= this.crossfitAt && !crossfitOut) this.spawnCop(sessionId, player, CROSSFIT_CAR);
+    const cops = this.copsOf(sessionId);
 
     if (cops.length === 0) {
       player.chased = false;
@@ -552,6 +590,19 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     }
 
     const nearest = Math.min(...cops.map(([, c]) => Math.hypot(c.x - player.x, c.z - player.z)));
+
+    if (this.finale) {
+      // Fuga final: não dá para despistar, só chegar na ponte inacabada do Cais.
+      player.chased = true;
+      player.escape = 0;
+      if (Math.hypot(player.x - FINALE_BRIDGE.x, player.z - FINALE_BRIDGE.z) <= FINALE_BRIDGE.radius) {
+        const bonus = POLICE.escapeBonusPerStar * POLICE.maxHeat;
+        player.calories += bonus;
+        this.finale = false;
+        this.endPursuit(sessionId, player, { result: "escaped", calories: bonus, finale: true });
+        return;
+      }
+    }
 
     // Perseguição x fuga: longe de todas as viaturas por um tempo = escapou.
     if (player.chased) {
@@ -575,7 +626,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const lost = Math.floor(player.calories * POLICE.bustPenalty);
       player.calories -= lost;
       player.speed = 0;
-      this.endPursuit(sessionId, player, { result: "busted", calories: lost });
+      const finale = this.finale;
+      this.finale = false;
+      this.endPursuit(sessionId, player, { result: "busted", calories: lost, ...(finale && { finale }) });
     }
   }
 

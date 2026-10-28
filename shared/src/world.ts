@@ -754,7 +754,7 @@ export function findRoute(from: number, to: number): number[] {
 
 export type RaceId =
   | "autodromo" | "centro" | "porto" | "pastel" | "parque"
-  | "praia" | "picanha" | "yakisoba" | "aeroporto" | "serra" | "gordura" | "roca" | "morro" | "rodizio";
+  | "praia" | "picanha" | "yakisoba" | "aeroporto" | "serra" | "gordura" | "roca" | "morro" | "rodoanel";
 
 export interface RaceInfo {
   id: RaceId;
@@ -805,8 +805,8 @@ export const RACES: Record<RaceId, RaceInfo> = {
   gordura: { id: "gordura", name: "Circuito da Gordura Trans", laps: 2, track: routeTrack(["I00", "I10", "I20", "I21", "I22", "I12", "I02", "I01"], 18) },
   roca: { id: "roca", name: "Estrada da Roça", laps: 2, track: routeTrack(["RO0", "RO1", "RO2", "RO3"], 15) },
   // O anel inteiro da rodovia (e a beira-mar): uma volta só, de ~12 km.
-  rodizio: {
-    id: "rodizio", name: "Rodovia do Rodízio", laps: 1,
+  rodoanel: {
+    id: "rodoanel", name: "Rodoanel de Cebola", laps: 1,
     // Larga na subida do lado oeste (longe do ponto de encontro da Volta do Porto).
     track: routeTrack(["HW1", "HW2", "HW3", "HN0", "HN1", "HN2", "HN3", "HE3", "HE2", "HE1", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "P0", "BA0", "BA1"], 24),
   },

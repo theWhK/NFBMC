@@ -1,6 +1,7 @@
 // Modo mundo aberto: dirigir por Porto Gordo, comer nas barraquinhas e
 // disparar corridas nos pontos de encontro.
 import {
+  CROSSFIT_CAR,
   carSpec,
   DIFFICULTY_LABELS,
   DISTRICTS,
@@ -24,9 +25,16 @@ import type { WorldRoom } from "./net.ts";
 import type { CarView } from "./scene.ts";
 import { escapeHtml, foodByCalories, kcal, setHtml, showPopup, ui } from "./ui.ts";
 
+/** Momentos de uma perseguição (o modo história põe o Cross-fit no rádio). */
+export type PursuitEvent = "start" | "crossfit" | "escaped" | "busted";
+
 export interface WorldHooks {
   onCalories?: (gained: number) => void;
   onEscape?: (stars: number, bonus: number) => void;
+  /** Perseguição começou, o Cross-fit entrou, escapou ou foi autuado (`finale`: era a fuga final). */
+  onPursuit?: (event: PursuitEvent, finale: boolean) => void;
+  /** A cada quadro, onde o seu carro está (a fuga final mostra a distância até a ponte). */
+  onFrame?: (me: { x: number; z: number }) => void;
 }
 
 export class WorldMode {
@@ -35,7 +43,7 @@ export class WorldMode {
   private bots = 3;
   private calling = false;
   private sceneReady = false;
-  private previous = { calories: -1, boost: 0, speed: 0, bumpAt: 0 };
+  private previous = { calories: -1, boost: 0, speed: 0, bumpAt: 0, chased: false };
   private bannerTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bairro onde o carro estava no quadro anterior (para mostrar a placa ao trocar). */
   private district: string | null = null;
@@ -44,6 +52,9 @@ export class WorldMode {
   private hooks: WorldHooks;
   /** Co-op: quem está online (no mapa) e os desafios para um pega. */
   private coop: CoopPanel;
+  /** Perseguição e Cross-fit no quadro anterior (para avisar quando começam). */
+  private pursuedBefore = false;
+  private crossfitBefore = false;
 
   constructor(
     room: WorldRoom,
@@ -64,10 +75,14 @@ export class WorldMode {
     });
     room.onMessage("goRace", (message: GoRaceMessage) => onGoRace(message));
     room.onMessage("notice", (message: { text: string }) => showPopup(message.text));
-    room.onMessage("pursuit", (message: { result: "escaped" | "busted"; calories: number }) => {
+    room.onMessage("pursuit", (message: { result: "escaped" | "busted"; calories: number; finale?: boolean }) => {
       // O número que sobe/desce aqui já é o da Vigilância; não é comida.
       this.previous.calories = -1;
-      if (message.result === "escaped") {
+      this.hooks.onPursuit?.(message.result, !!message.finale);
+      if (message.result === "escaped" && message.finale) {
+        ctx.sound.escaped();
+        this.showBanner("escaped", "A ponte!", "Pisa fundo e não freia!");
+      } else if (message.result === "escaped") {
         // O prêmio é 300 kcal por estrela: daí sai o nível da fuga.
         this.hooks.onEscape?.(Math.round(message.calories / POLICE.escapeBonusPerStar), message.calories);
         ctx.sound.escaped();
@@ -140,7 +155,7 @@ export class WorldMode {
     }
     const cars = new Map<string, CarView>();
     room.state.players?.forEach((p, id) => {
-      cars.set(id, { name: p.name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, visible: true });
+      cars.set(id, { name: p.name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible: true });
     });
     room.state.traffic?.forEach((n, id) => {
       cars.set(`npc:${id}`, {
@@ -149,8 +164,9 @@ export class WorldMode {
       });
     });
     room.state.cops?.forEach((c, id) => {
+      const crossfit = c.car === CROSSFIT_CAR;
       cars.set(`cop:${id}`, {
-        name: "🚨 Vigilância", color: "#f4f4f0", x: c.x, z: c.z, heading: c.heading,
+        name: crossfit ? "🏋️ Sgt. Cross-fit" : "🚨 Vigilância", color: crossfit ? "#9be22d" : "#f4f4f0", x: c.x, z: c.z, heading: c.heading,
         speed: c.speed, boost: c.boost, visible: true, cop: true, car: c.car,
       });
     });
@@ -161,11 +177,29 @@ export class WorldMode {
     if (!me) return;
 
     const myCops = [...(room.state.cops?.values() ?? [])].filter((c) => c.target === room.sessionId);
-    const nearestCop = myCops.length ? Math.min(...myCops.map((c) => Math.hypot(c.x - me.x, c.z - me.z))) : null;
+    // Começou a perseguição / o Cross-fit entrou nela.
+    const pursued = myCops.length > 0;
+    const crossfitOut = myCops.some((c) => c.car === CROSSFIT_CAR);
+    if (pursued && !this.pursuedBefore) this.hooks.onPursuit?.("start", false);
+    if (crossfitOut && !this.crossfitBefore) this.hooks.onPursuit?.("crossfit", false);
+    this.pursuedBefore = pursued;
+    this.crossfitBefore = crossfitOut;
+    this.hooks.onFrame?.(me);
+    // Viatura mais perto: a sirene vem dela (distância e de que lado está).
+    let nearestCop: number | null = null;
+    let copPan = 0;
+    for (const c of myCops) {
+      const distance = Math.hypot(c.x - me.x, c.z - me.z);
+      if (nearestCop !== null && distance >= nearestCop) continue;
+      nearestCop = distance;
+      copPan = distance > 0 ? ((c.x - me.x) * -Math.cos(me.heading) + (c.z - me.z) * Math.sin(me.heading)) / distance : 0;
+    }
+    if (myCops.length > 0 && !this.previous.chased) ctx.sound.pursuitStarted();
+    this.previous.chased = myCops.length > 0;
     ctx.sound.song(myCops.length ? "pursuit" : "lobby");
     // Pausado: motores e sirene calados (a música continua).
     const paused = this.paused();
-    ctx.sound.updateSiren(myCops.length && !paused ? nearestCop : null);
+    ctx.sound.updateSiren(myCops.length && !paused ? nearestCop : null, copPan);
     this.updatePursuitUi(me, myCops.length > 0);
     ctx.sound.updateMine(followed && !paused ? {
       speed: me.speed,
@@ -175,6 +209,8 @@ export class WorldMode {
       skid: followed.skid,
       offroad: followed.offroad,
       boost: me.boost > 0,
+      car: me.car,
+      gear: me.gear,
     } : null);
     if (paused) ctx.sound.updateOthers(new Map());
     else ctx.updateOtherEngines(cars, room.sessionId, me);
@@ -323,7 +359,7 @@ export class WorldMode {
     return {
       heat: me?.heat ?? 0,
       chased: me?.chased ?? false,
-      cops: [...(this.room.state.cops?.values() ?? [])].map((c) => ({ x: c.x, z: c.z, target: c.target })),
+      cops: [...(this.room.state.cops?.values() ?? [])].map((c) => ({ x: c.x, z: c.z, target: c.target, car: c.car })),
       traffic: [...(this.room.state.traffic?.values() ?? [])].map((n) => ({ x: n.x, z: n.z, speed: n.speed, kind: n.kind })),
     };
   }
