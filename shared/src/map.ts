@@ -161,6 +161,8 @@ export const NODES: Record<string, [number, number]> = {
   AE0: [700, 700], AE1: [1400, 700], AE4: [1410, 1120], AE2: [1420, 1550], AE3: [720, 1550], AE5: [710, 1120],
   // Serra do Açúcar
   SA: [0, 1720], SB: [-350, 1870], SC: [-720, 2060], SD: [-450, 2290], SE: [320, 1900], SF: [150, 2250], SG: [-1020, 1760],
+  // Serpentina do Açúcar: a estrada cheia de curvas em S até o Rodoanel
+  SZ1: [-880, 2190], SZ2: [-1010, 2300], SZ3: [-1150, 2360],
   // Roça do Milho
   RO0: [760, 1760], RO1: [1120, 1820], RO2: [1150, 2170], RO3: [720, 2160],
 };
@@ -357,6 +359,10 @@ export const EDGES: EdgeSpec[] = [
   { a: "AP7", b: "SG", kind: "rua", curve: [-1150, 1600] },
   { a: "SG", b: "SC", kind: "rua", curve: [-820, 1820] },
   { a: "SG", b: "HW3", kind: "rua", curve: [-1300, 1700] },
+  { a: "SC", b: "SZ1", kind: "rua", curve: [-740, 2210] },
+  { a: "SZ1", b: "SZ2", kind: "rua", curve: [-1020, 2170] },
+  { a: "SZ2", b: "SZ3", kind: "rua", curve: [-1030, 2440] },
+  { a: "SZ3", b: "HN0", kind: "rua", curve: [-1260, 2290] },
 
   // Roça do Milho
   { a: "AE3", b: "RO0", kind: "rua" },
