@@ -2,7 +2,7 @@
    cinema, legenda com quem fala, onomatopeia e flash. A cena 3D aparece no
    meio, sem nada do menu por cima. */
 
-body.cine-on > *:not(#game):not(#cine):not(#comic) {
+body.cine-on > *:not(#game):not(#cine):not(#comic):not(#rival-intro) {
   visibility: hidden;
 }
 
@@ -141,6 +141,80 @@ body.cine-on > *:not(#game):not(#cine):not(#comic) {
   padding: 4px 10px;
   color: #fff;
   cursor: pointer;
+}
+
+/* Cartão do rival por cima da cinemática: sem cliques e sem a dica de pular (a da cena vale). */
+.rival-intro.in-cine {
+  pointer-events: none;
+}
+
+.rival-intro.in-cine .skip-hint {
+  display: none;
+}
+
+/* Jornal da Gordura: tarja de TV ao vivo (interlúdio do Cross-fit). */
+.cine-tv {
+  position: absolute;
+  left: 6%;
+  top: 16vh;
+  display: flex;
+  align-items: stretch;
+  font: 0.95rem var(--hud, "Russo One", system-ui, sans-serif);
+  box-shadow: 4px 4px 0 #0a0806;
+  animation: cine-tv-in 0.5s ease-out both;
+}
+
+.cine-tv strong {
+  padding: 6px 12px;
+  color: #fff;
+  background: #c1121f;
+}
+
+.cine-tv span {
+  padding: 6px 12px;
+  color: #0a0806;
+  background: #ffc42e;
+}
+
+@keyframes cine-tv-in {
+  from {
+    transform: translateX(-120%);
+  }
+}
+
+/* Nota fiscal: o carimbo do carro que agora é seu. */
+.cine-stamp {
+  position: absolute;
+  left: 50%;
+  top: 22vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 26px;
+  color: #c1121f;
+  border: 6px double #c1121f;
+  background: rgba(255, 246, 225, 0.88);
+  transform: translateX(-50%) rotate(-7deg);
+  font-family: var(--stamp, "Black Ops One", system-ui, sans-serif);
+  text-transform: uppercase;
+  pointer-events: none;
+  animation: cine-stamp-in 0.45s 0.5s cubic-bezier(0.2, 1.8, 0.4, 1) both;
+}
+
+.cine-stamp span {
+  font-size: clamp(1.6rem, 5vw, 3rem);
+}
+
+.cine-stamp strong {
+  font: 1rem var(--hud, "Russo One", system-ui, sans-serif);
+  color: #16110d;
+}
+
+@keyframes cine-stamp-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) rotate(-25deg) scale(2.6);
+  }
 }
 
 /* Rádio do Cross-fit nas perseguições do modo história. */

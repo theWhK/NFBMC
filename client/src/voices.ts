@@ -1,11 +1,13 @@
 // Locuções gravadas (client/public/vozes/*.mp3, geradas por scripts/vozes.py).
 // Baixadas sob demanda e guardadas decodificadas; sem rede ou sem áudio, a
-// fala só não acontece.
+// fala só não acontece. As falas do modo história ficam em vozes/historia/,
+// uma por fala do roteiro (o id da fala em shared/src/story.ts).
 
 export type VoiceLine =
   | "eat" | "nham" | "trailer-cidade" | "trailer-vigilancia" | "trailer-calorico"
   | "tres" | "dois" | "um" | "vai" | "ultima-volta" | "vitoria" | "chegada"
-  | "radio-perseguicao" | "radio-escapou" | "radio-autuado";
+  | "radio-perseguicao" | "radio-escapou" | "radio-autuado"
+  | `historia/${string}`;
 
 const url = (line: VoiceLine) => `${import.meta.env.BASE_URL}vozes/${line}.mp3`;
 

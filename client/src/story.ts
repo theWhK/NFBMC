@@ -52,7 +52,7 @@ export function graphemes(text: string) {
  * a primeira vez completa o texto, a segunda avança. Esc pula tudo.
  * Resolve com true se pulou (Esc ou "Pular").
  */
-export function playComic(panels: ComicPanel[]): Promise<boolean> {
+export function playComic(panels: ComicPanel[], hooks: { onPanel?: (panel: ComicPanel) => void; onEnd?: () => void } = {}): Promise<boolean> {
   const overlay = $("comic");
   const panel = $("comic-panel");
   const art = $("comic-art");
@@ -88,6 +88,7 @@ export function playComic(panels: ComicPanel[]): Promise<boolean> {
       $("comic-sfx").textContent = p.sfx ?? "";
       $("comic-page").textContent = `${index + 1}/${panels.length}`;
       next.textContent = index === panels.length - 1 ? "Fechar ▶" : "Continuar ▶";
+      hooks.onPanel?.(p);
 
       // Máquina de escrever (~45 letras por segundo).
       full = p.text;
@@ -112,6 +113,7 @@ export function playComic(panels: ComicPanel[]): Promise<boolean> {
       overlay.hidden = true;
       window.removeEventListener("keydown", onKey, true);
       next.onclick = skip.onclick = panel.onclick = null;
+      hooks.onEnd?.();
       resolve(skipped);
     };
     const advance = () => {
@@ -142,14 +144,8 @@ export function playComic(panels: ComicPanel[]): Promise<boolean> {
   });
 }
 
-/**
- * Apresentação do rival, estilo Borderlands: flash, linhas de velocidade, o
- * nome batendo letra por letra e o painel "VOCÊ x RIVAL". `onStart`/`onEnd`
- * deixam quem chamou trocar o carro da vitrine 3D pelo do rival durante a cena.
- * Dura ~4 s; clique ou Enter pula.
- */
-export function showRivalIntro(rival: Rival, yourCar: string, hooks: { onStart?: () => void; onEnd?: () => void } = {}): Promise<void> {
-  const el = $("rival-intro");
+/** Preenche o cartão do rival (#N, nome letra por letra, título e VOCÊ x RIVAL). */
+function fillRivalCard(rival: Rival, yourCar: string) {
   const you = carSpec(yourCar);
   const them = carSpec(rival.car);
   const kmh = (id: string) => `${Math.round(cachedTopSpeed(carSpec(id)) * 3.6)} km/h`;
@@ -163,6 +159,36 @@ export function showRivalIntro(rival: Rival, yourCar: string, hooks: { onStart?:
   $("vs-them-label").textContent = rival.name;
   $("vs-them").textContent = them.name;
   $("vs-them-stat").textContent = kmh(them.id);
+}
+
+/**
+ * Cartão do rival por cima da cinemática de apresentação (null = some). Ali
+ * ele não recebe cliques: quem passa a cena é a cinemática.
+ */
+export function rivalCard(card: { rival: Rival; yourCar: string } | null) {
+  const el = $("rival-intro");
+  if (!card) {
+    el.hidden = true;
+    el.classList.remove("in-cine");
+    return;
+  }
+  fillRivalCard(card.rival, card.yourCar);
+  el.classList.add("in-cine");
+  el.hidden = true;
+  void el.offsetWidth;
+  el.hidden = false;
+}
+
+/**
+ * Apresentação do rival sem 3D, estilo Borderlands: flash, linhas de velocidade, o
+ * nome batendo letra por letra e o painel "VOCÊ x RIVAL". `onStart`/`onEnd`
+ * deixam quem chamou trocar o carro da vitrine 3D pelo do rival durante a cena.
+ * Dura ~4 s; clique ou Enter pula.
+ */
+export function showRivalIntro(rival: Rival, yourCar: string, hooks: { onStart?: () => void; onEnd?: () => void } = {}): Promise<void> {
+  const el = $("rival-intro");
+  fillRivalCard(rival, yourCar);
+  el.classList.remove("in-cine");
   // Reinicia as animações (a cena pode ser vista mais de uma vez).
   el.hidden = true;
   void el.offsetWidth;

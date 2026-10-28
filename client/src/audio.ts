@@ -554,12 +554,33 @@ export class Sound {
     this.voices.play(line, delay, { wet });
   }
 
+  /**
+   * Fala do modo história (vozes/historia/<id>.mp3). Resolve com quanto tempo
+   * (s) falta para ela acabar, ou null se não vai tocar (efeitos desligados,
+   * áudio ainda bloqueado ou arquivo que não carregou).
+   */
+  sayStory(id: string, radio = false): Promise<number | null> {
+    if (!this.ctx || !this.prefs.sfx) return Promise.resolve(null);
+    if (radio) fx.burst(this.kit, { delay: 0, dur: 0.06, type: "bandpass", freq: 2200, q: 0.8, gain: 0.15 });
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (value: number | null) => {
+        if (done) return;
+        done = true;
+        resolve(value);
+      };
+      this.voices.play(`historia/${id}`, radio ? 0.07 : 0, { wet: radio ? 0.05 : 0.12, gain: 1, onEnd: finish });
+      // Arquivo que não chegou a tempo: segue sem voz.
+      setTimeout(() => finish(null), 4000);
+    });
+  }
+
   /** Para as locuções (pulou a vinheta). */
   hush() {
     this.voices.stopAll();
   }
 
-  /** Baixa as locuções antes de precisar delas. */
+  /** Baixa as locuções antes de precisar delas (vale também "historia/<id>"). */
   preloadVoices(lines: VoiceLine[]) {
     this.voices.preload(lines);
   }

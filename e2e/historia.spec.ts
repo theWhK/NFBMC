@@ -121,3 +121,22 @@ test("modo história: fuga final do Cross-fit até a ponte, autuação, nova ten
 
   await context.close();
 });
+
+test("modo história: derrota do rival (chave, nota fiscal e Cross-fit) com voz em cada fala", async ({ page }) => {
+  // Sem WebGL, a cena vira quadrinhos; as vozes (MP3 pequenos) baixam do mesmo jeito.
+  const voice = page.waitForResponse(/vozes\/historia\/r10-perde-1\.mp3/);
+  await page.goto("/?cena=r10-perde");
+  await page.getByTestId("story-menu").click();
+  const comic = page.getByTestId("comic");
+  await expect(comic).toContainText("Izzy Iogurte");
+  await expect(comic).toContainText("1/4");
+  expect((await voice).ok()).toBe(true);
+  // Próximo quadro: a nota fiscal do Gol.
+  await expect(async () => {
+    await page.getByTestId("comic-next").click();
+    await expect(comic).toContainText("2/4", { timeout: 300 });
+  }).toPass();
+  await expect(comic).toContainText("Gol Bolinha de Queijo agora é seu");
+  await page.getByTestId("comic-skip").click();
+  await expect(comic).toBeHidden();
+});
