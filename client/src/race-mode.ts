@@ -149,7 +149,8 @@ export class RaceMode {
     const laps = room.state.laps || RACES[this.raceId].laps;
 
     ui.count.textContent = String([...players.values()].filter((p) => !p.bot).length);
-    ctx.sound.song(current === "racing" ? "race" : current === "countdown" ? null : "lobby");
+    // Duelo da Lista Gorda tem a trilha de chefão.
+    ctx.sound.song(current === "racing" ? (room.state.challenge ? "duel" : "race") : current === "countdown" ? null : "lobby");
 
     // Lobby (corridas de evento largam sozinhas, sem lobby)
     // Corridas de evento e duelos largam sozinhos, sem lobby.
@@ -289,6 +290,8 @@ export class RaceMode {
 
     if (current === "countdown") {
       const count = Math.ceil(this.room.state.timer);
+      // A trilha da corrida começa a ser gravada na contagem (toca assim que largar).
+      if (previous.phase !== "countdown") ctx.sound.prefetchSong(this.room.state.challenge ? "duel" : "race");
       if (count !== previous.countdown && count > 0) ctx.sound.beep(false, count);
       previous.countdown = count;
     }
