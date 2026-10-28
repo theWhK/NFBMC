@@ -3454,3 +3454,43 @@ body:has(#finish-cam:not([hidden])) :is(#hud, #dash, #minimap, #topbar, #speedli
 body.cine-on .now-playing {
   display: none;
 }
+
+/* --- PWA: sem internet ------------------------------------------------------- */
+
+.offline-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46vw;
+  color: #16110d;
+  background: var(--mustard);
+}
+
+body.offline .offline-badge {
+  color: #fff;
+  background: #7a2e00;
+}
+
+/* Co-op e corrida com a galera precisam de internet: cartão apagado com o aviso. */
+#menu-list button:disabled,
+.mw-list.sub button:disabled {
+  opacity: 0.45;
+  filter: grayscale(0.8);
+  cursor: not-allowed;
+}
+
+#menu-list button:disabled::after {
+  content: "precisa de internet";
+  position: absolute;
+  bottom: -18px;
+  left: 0;
+  right: 0;
+  font: 0.6rem system-ui, sans-serif;
+  font-style: normal;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #f5ebe0;
+}

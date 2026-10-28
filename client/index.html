@@ -8,6 +8,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Need for Burgers: Most Calories</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- PWA: instala como app e joga sem internet (modo solo, história, corrida contra bots). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="NFBMC" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -114,6 +119,7 @@
           <input id="name" data-testid="name-input" maxlength="16" autocomplete="off" placeholder="seu apelido" />
         </label>
         <span id="profile-kcal" class="kcal"></span>
+        <span id="offline-badge" class="offline-badge" data-testid="offline-badge" hidden></span>
         <div class="ticker" aria-hidden="true"><span id="menu-ticker"></span></div>
         <span class="keys">←→ navegar · Enter selecionar · Esc voltar</span>
       </footer>

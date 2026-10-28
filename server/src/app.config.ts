@@ -7,7 +7,7 @@ import { RaceRoom } from "./rooms/RaceRoom.ts";
 import { WorldRoom } from "./rooms/WorldRoom.ts";
 import { checkDatabase } from "./db.ts";
 import { onlinePilots } from "./presence.ts";
-import { listaGorda, peekProfile } from "./profiles.ts";
+import { listaGorda, peekProfile, syncProfile } from "./profiles.ts";
 
 // Build do Vite (client/dist). Em produção o próprio servidor entrega o cliente,
 // então o jogo inteiro sai por uma porta só (a que o Cloudflare Tunnel aponta).
@@ -62,7 +62,32 @@ const server = defineServer({
       }
     });
 
-    app.use(express.static(clientDist));
+    // Progresso feito offline (PWA): o aparelho manda os lançamentos guardados
+    // quando a internet volta. Cada um tem id e só conta uma vez.
+    app.options("/api/sync", (_req, res) => {
+      res.set({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "POST" });
+      res.sendStatus(204);
+    });
+    app.post("/api/sync", express.json({ limit: "64kb" }), async (req, res) => {
+      res.set("Access-Control-Allow-Origin", "*");
+      try {
+        const name = typeof req.body?.name === "string" ? req.body.name.slice(0, 16) : "Piloto";
+        const result = await syncProfile(req.body?.token, name || "Piloto", req.body?.entries);
+        if (result) res.json(result);
+        else res.status(400).json(null);
+      } catch (err) {
+        console.error("sync: falha", err);
+        res.status(503).json(null);
+      }
+    });
+
+    // O service worker e a página não podem ficar presos em cache (senão a
+    // versão nova não chega); os arquivos com hash no nome podem.
+    app.use(express.static(clientDist, {
+      setHeaders: (res, path) => {
+        if (/(sw\.js|index\.html|manifest\.webmanifest)$/.test(path)) res.set("Cache-Control", "no-cache");
+      },
+    }));
   },
 });
 
