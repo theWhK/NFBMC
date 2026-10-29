@@ -13,6 +13,7 @@ import {
   type Track,
 } from "@nfbmc/shared";
 
+import type { GpsTarget } from "./gps.ts";
 import type { CarView } from "./scene.ts";
 
 export interface TachoData {
@@ -126,6 +127,46 @@ export interface MinimapView {
   race: RaceId | null;
   /** Comidas (para o mapa em tela cheia). */
   foods?: { x: number; z: number; active: boolean }[];
+  /** GPS: a rota até o destino marcado (do ponto `from` em diante) e o pino. */
+  gps?: { route: [number, number][]; from: number; target: GpsTarget };
+}
+
+/** Cor da rota do GPS (a mesma no minimapa, no mapa grande e no chão). */
+export const GPS_COLOR = "#3fd4ff";
+
+/** Rota do GPS: contorno escuro e a linha neon por cima. */
+function drawRoute(ctx: CanvasRenderingContext2D, gps: NonNullable<MinimapView["gps"]>, toMap: (x: number, z: number) => [number, number], width: number) {
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (const [color, w] of [["rgba(8, 20, 30, 0.85)", width + 3], [GPS_COLOR, width]] as const) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    for (let i = gps.from; i < gps.route.length; i++) ctx.lineTo(...toMap(gps.route[i][0], gps.route[i][1]));
+    ctx.stroke();
+  }
+}
+
+/** Pino do destino: gota com a ponta no lugar marcado. */
+function drawPin(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "#ff2e88";
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(-size * 0.2, -size * 0.45, -size * 0.6, -size * 0.6, -size * 0.6, -size);
+  ctx.arc(0, -size, size * 0.6, Math.PI, 0);
+  ctx.bezierCurveTo(size * 0.6, -size * 0.6, size * 0.2, -size * 0.45, 0, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(0, -size, size * 0.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 /** Minimapa redondo: ruas, traçado, pontos de encontro e carros. */
@@ -158,7 +199,7 @@ export function createMinimap(canvas: HTMLCanvasElement) {
     ctx.stroke();
   };
 
-  return ({ cars, myId, race }: MinimapView) => {
+  return ({ cars, myId, race, gps }: MinimapView) => {
     const me = cars.get(myId);
     const view = race ? raceBounds.get(race)! : { x: me?.x ?? 0, z: me?.z ?? 0, radius: 260 };
     const scale = (size / 2 - 6) / view.radius;
@@ -212,6 +253,21 @@ export function createMinimap(canvas: HTMLCanvasElement) {
       }
     }
 
+    // GPS: a rota e o pino (fora do círculo, o pino fica na borda, na direção dele).
+    if (gps && !race) {
+      drawRoute(ctx, gps, toMap, 4);
+      let [px, py] = toMap(gps.target.x, gps.target.z);
+      const dx = px - size / 2;
+      const dy = py - size / 2;
+      const max = size / 2 - 22;
+      if (Math.hypot(dx, dy) > max) {
+        const k = max / Math.hypot(dx, dy);
+        px = size / 2 + dx * k;
+        py = size / 2 + dy * k;
+      }
+      drawPin(ctx, px, py, 12);
+    }
+
     const drawCar = (car: CarView, radius: number) => {
       ctx.fillStyle = car.color;
       ctx.beginPath();
@@ -248,11 +304,21 @@ export function createMinimap(canvas: HTMLCanvasElement) {
 
 export type FullMapView = MinimapView;
 
+/** Toque/clique (sem arrastar) no mapa grande: o ponto do mundo e o que havia ali. */
+export interface MapPick {
+  x: number;
+  z: number;
+  /** Ponto de encontro de corrida tocado (o destino vira ele). */
+  race: RaceId | null;
+  /** Tocou no pino que já estava marcado (apaga o destino). */
+  onPin: boolean;
+}
+
 /**
  * Mapa da cidade em tela cheia: bairros com nome, ruas na largura certa, lago,
  * mar, corridas, comida e carros. Roda do mouse ou pinça dão zoom; arrastar move.
  */
-export function createFullMap(canvas: HTMLCanvasElement) {
+export function createFullMap(canvas: HTMLCanvasElement, onPick?: (pick: MapPick) => void) {
   const ctx = canvas.getContext("2d")!;
   const bounds = WORLD_BOUNDS;
   let center = { x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2 };
@@ -277,8 +343,10 @@ export function createFullMap(canvas: HTMLCanvasElement) {
     canvas.height = Math.round(height * ratio);
   };
 
-  // Zoom e arrasto (mouse e toque).
+  // Zoom e arrasto (mouse e toque); tocar sem arrastar marca o destino do GPS.
   const pointers = new Map<number, { x: number; y: number }>();
+  let tap: { x: number; y: number; moved: boolean } | null = null;
+  let lastView: FullMapView | null = null;
   let pinchStart = 0;
   let zoomStart = 1;
   const setZoom = (value: number) => {
@@ -293,6 +361,7 @@ export function createFullMap(canvas: HTMLCanvasElement) {
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    tap = pointers.size === 1 ? { x: e.clientX, y: e.clientY, moved: false } : null;
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinchStart = Math.hypot(a.x - b.x, a.y - b.y);
@@ -303,6 +372,7 @@ export function createFullMap(canvas: HTMLCanvasElement) {
     const previous = pointers.get(e.pointerId);
     if (!previous) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 6) tap.moved = true;
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       if (pinchStart > 0) setZoom(zoomStart * (Math.hypot(a.x - b.x, a.y - b.y) / pinchStart));
@@ -315,10 +385,32 @@ export function createFullMap(canvas: HTMLCanvasElement) {
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinchStart = 0;
   };
-  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointerup", (e) => {
+    const wasTap = tap && !tap.moved && pointers.size === 1;
+    release(e);
+    tap = null;
+    if (!wasTap || !onPick) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    // De volta da tela para o mundo (o inverso do toMap).
+    const x = center.x - (mx - width / 2) / scale();
+    const z = center.z - (my - height / 2) / scale();
+    const near = (wx: number, wz: number) => {
+      const [px, py] = toMap(wx, wz);
+      return Math.hypot(px - mx, py - my);
+    };
+    const target = lastView?.gps?.target;
+    // O pino fica acima da ponta: vale tocar na cabeça dele também.
+    const onPin = !!target && (near(target.x, target.z) < 16 || Math.hypot(toMap(target.x, target.z)[0] - mx, toMap(target.x, target.z)[1] - 22 - my) < 16);
+    const race = lastView?.race ? null : RACE_IDS.find((id) => near(raceMarker(id).x, raceMarker(id).z) < 16) ?? null;
+    onPick({ x, z, race, onPin });
+  });
   canvas.addEventListener("pointercancel", release);
 
-  const draw = ({ cars, myId, race, foods }: FullMapView) => {
+  const draw = (view: FullMapView) => {
+    lastView = view;
+    const { cars, myId, race, foods, gps } = view;
     if (canvas.width !== Math.round((canvas.clientWidth || window.innerWidth) * ratio)) resize();
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const s = scale();
@@ -405,6 +497,19 @@ export function createFullMap(canvas: HTMLCanvasElement) {
         ctx.fillStyle = "#ffc42e";
         ctx.fillText(RACES[id].name, mx, my - 20);
       }
+    }
+
+    // GPS: a rota e o pino do destino, com o nome.
+    if (gps && !race) {
+      drawRoute(ctx, gps, toMap, Math.max(4, 4 * s));
+      const [px, py] = toMap(gps.target.x, gps.target.z);
+      drawPin(ctx, px, py, 18);
+      ctx.font = "14px 'Russo One', sans-serif";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#16110d";
+      ctx.strokeText(gps.target.label, px, py - 40);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(gps.target.label, px, py - 40);
     }
 
     // Carros: trânsito (pontinhos), viaturas (piscando), outros pilotos e você (seta).

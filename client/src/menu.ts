@@ -276,8 +276,8 @@ export function createMenu(options: MenuOptions) {
     scene?.setQuality(currentQuality);
     refreshQuality();
   });
-  // Jukebox: a tela para ouvir a trilha (client/src/jukebox.ts).
-  document.getElementById("opt-jukebox")?.addEventListener("click", () => openJukebox());
+  // Jukebox: a tela para ouvir a trilha (client/src/jukebox.ts), item do menu principal.
+  document.getElementById("menu-jukebox")!.addEventListener("click", () => openJukebox());
   // Abertura (aviso, logos e trailer) ao abrir o jogo.
   const optIntro = document.getElementById("opt-intro") as HTMLButtonElement;
   const refreshIntro = () => (optIntro.textContent = `Abertura: ${introEnabled() ? "ligada" : "desligada"}`);
@@ -397,9 +397,17 @@ export function createMenu(options: MenuOptions) {
     }
   };
   ladder.addEventListener("click", pickCombo);
-  ladder.addEventListener("mouseover", (e) => {
-    if (matchMedia("(hover: hover)").matches) pickCombo(e);
+  // Só quando o mouse anda: o cardápio abre em tela cheia e, com o mouse parado
+  // em cima de outro combo (onde estava o cartão do menu), trocava o destaque.
+  let hovered: string | undefined;
+  ladder.addEventListener("mousemove", (e) => {
+    if (!matchMedia("(hover: hover)").matches) return;
+    const rival = (e.target as HTMLElement).closest<HTMLElement>("[data-rival]")?.dataset.rival;
+    if (!rival || rival === hovered) return;
+    hovered = rival;
+    pickCombo(e);
   });
+  ladder.addEventListener("mouseleave", () => (hovered = undefined));
   document.getElementById("board-close")!.addEventListener("click", () => back());
 
   // Volume da música e dos efeitos (0 a 100%).

@@ -438,7 +438,7 @@ export function closeJukebox() {
   sound?.jukeboxStop();
   sound?.jukebox(false);
   render();
-  document.getElementById("opt-jukebox")?.focus();
+  document.getElementById("menu-jukebox")?.focus();
 }
 
 /** Estado para os testes. */

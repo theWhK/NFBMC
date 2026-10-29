@@ -7,6 +7,7 @@ export * from "./cars.ts";
 export * from "./collision.ts";
 export * from "./story.ts";
 export * from "./world.ts";
+export * from "./barriers.ts";
 
 export const ROOM_NAME = "race";
 export const WORLD_ROOM_NAME = "world";

@@ -2,10 +2,9 @@ import { test, expect, type Page } from "@playwright/test";
 
 const jukebox = (page: Page) => page.evaluate(() => window.__nfbmcJukebox?.());
 
-test("jukebox: abre nas Opções, lista as 20 faixas, toca, passa de faixa e fecha com Esc", async ({ page }) => {
+test("jukebox: abre pelo menu principal, lista as 20 faixas, toca, passa de faixa e fecha com Esc", async ({ page }) => {
   await page.goto("/");
-  await page.getByTestId("options-menu").click();
-  await page.getByTestId("opt-jukebox").click();
+  await page.getByTestId("jukebox-menu").click();
   await expect(page.getByTestId("jukebox")).toBeVisible();
   await expect(page.getByTestId("jukebox-track")).toHaveCount(20);
   // Abre tocando a primeira faixa da lista.

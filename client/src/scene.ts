@@ -23,7 +23,7 @@ import { forgetFlags, waveFlags } from "./flag.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
 import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
 import { InkPass, toonify, type Quality } from "./toon.ts";
-import { buildTrackMesh } from "./track-mesh.ts";
+import { animateBarriers, buildBarriers, buildGpsRibbon, buildTrackMesh, gpsDrawFrom } from "./track-mesh.ts";
 
 /** O que a cena precisa saber de cada carro (vem do estado da sala). */
 export interface CarView {
@@ -271,6 +271,10 @@ export class GameScene {
   private sky: THREE.Object3D;
   private sun: THREE.Object3D;
   private raceOverlay: THREE.Object3D | null = null;
+  /** Barreiras translúcidas da corrida (e a textura das setas, que andam). */
+  private barriers: { mesh: THREE.Mesh; texture: THREE.Texture } | null = null;
+  /** Rota do GPS no chão (mundo aberto). */
+  private gpsRoute: THREE.Mesh | null = null;
   private markers: THREE.Group;
   private light: THREE.DirectionalLight;
   private clouds: THREE.Object3D;
@@ -438,6 +442,13 @@ export class GameScene {
       forgetFlags(this.raceOverlay);
     }
     this.raceOverlay = null;
+    if (this.barriers) {
+      this.scene.remove(this.barriers.mesh);
+      this.barriers.mesh.geometry.dispose();
+      (this.barriers.mesh.material as THREE.Material).dispose();
+      this.barriers.texture.dispose();
+      this.barriers = null;
+    }
     if (raceId && raceId !== "autodromo") {
       const race = RACES[raceId];
       this.raceOverlay = buildTrackMesh(race.track, { asphalt: false, bannerColor: race.kind === "radar" ? "#2a6bff" : "#ff7a00" });
@@ -449,11 +460,40 @@ export class GameScene {
       this.dress(this.raceOverlay);
       this.scene.add(this.raceOverlay);
     }
+    if (raceId) {
+      // Barreiras nas saídas e nas curvas (o autódromo também tem).
+      this.barriers = buildBarriers(RACES[raceId].track);
+      this.scene.add(this.barriers.mesh);
+    }
     this.markers.visible = raceId === null;
     this.clearFoods();
     // Troca de sala: os carros da sala anterior somem.
     for (const entry of this.cars.values()) this.scene.remove(entry.model.group);
     this.cars.clear();
+  }
+
+  /** Rota do GPS no chão (lista vazia apaga). */
+  setGpsRoute(route: [number, number][]) {
+    if (this.gpsRoute) {
+      this.scene.remove(this.gpsRoute);
+      this.gpsRoute.geometry.dispose();
+      const material = this.gpsRoute.material as THREE.MeshBasicMaterial;
+      material.map?.dispose();
+      material.dispose();
+      this.gpsRoute = null;
+    }
+    if (route.length < 2) return;
+    this.gpsRoute = buildGpsRibbon(route);
+    this.scene.add(this.gpsRoute);
+  }
+
+  /** O carro está no ponto `from` da rota; em corrida (`visible` falso), a rota some. */
+  setGpsProgress(from: number, visible: boolean) {
+    if (!this.gpsRoute) return;
+    this.gpsRoute.visible = visible;
+    gpsDrawFrom(this.gpsRoute, from);
+    const map = (this.gpsRoute.material as THREE.MeshBasicMaterial).map;
+    if (map) map.offset.x = (map.offset.x - 0.012) % 1;
   }
 
   /** Troca a câmera (atrás → longe → baixa → capô) e devolve o nome dela. */
@@ -575,6 +615,7 @@ export class GameScene {
     const dt = this.paused ? 0 : Math.min(rawDt, 0.1);
     this.time += dt;
     this.adaptResolution(rawDt);
+    if (this.barriers) animateBarriers(this.barriers.texture, dt);
 
     for (const [id, entry] of this.cars) {
       const car = cars.get(id);

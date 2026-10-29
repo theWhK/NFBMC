@@ -15,6 +15,8 @@ import {
   EVENT_JOIN_SECONDS,
   collideWorld,
   isOnRoad,
+  keepInCorridor,
+  trackCorridor,
   isRaceId,
   nearestSample,
   pointOnTrack,
@@ -191,6 +193,8 @@ export class RaceRoom extends Room<{ state: RaceState }> {
   onCreate(options?: CreateOptions & Partial<EventRaceOptions>) {
     const race = RACES[isRaceId(options?.raceId) ? options.raceId : "autodromo"];
     this.track = race.track;
+    // Barreiras: calcula o corredor já na criação (o rodoanel leva ~0,1 s).
+    trackCorridor(this.track);
     this.layout = foodLayout(this.track);
     this.state.raceId = race.id;
     this.state.laps = race.laps;
@@ -476,6 +480,8 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       stepCar(player, drive, spec, input, dt, onGrass, player.boost > 0, motion, gradeAt(player.x, player.z, player.heading));
       const size = carHalfSize(player.car);
       collideWorld(player, size.halfLength, size.halfWidth, motion);
+      // Barreiras da corrida: ninguém sai do traçado (shared/src/barriers.ts).
+      keepInCorridor(player, this.track, size.halfWidth, motion);
       player.rpm = Math.round(drive.rpm);
       player.gear = drive.gear;
 
