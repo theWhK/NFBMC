@@ -3494,3 +3494,544 @@ body.offline .offline-badge {
   text-transform: none;
   color: #f5ebe0;
 }
+
+/* --- Lista Gorda: o cardápio de Porto Gordo (tela cheia) ----------------------
+ * Painel de lanchonete: combos com número, nome, "preço" (as calorias exigidas)
+ * e selo; foto do combo (o rival e o carro, em 3D) e a "informação nutricional". */
+
+.mw-screen.menu-board {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: auto;
+  max-height: none;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+  padding: max(14px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) 10px max(22px, env(safe-area-inset-left));
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  /* Vidro escuro e quente: a vitrine 3D (o carro do combo) aparece por trás. */
+  background:
+    radial-gradient(ellipse at 70% 30%, rgba(255, 154, 31, 0.16), transparent 60%),
+    linear-gradient(rgba(22, 14, 8, 0.93), rgba(14, 9, 6, 0.88));
+  backdrop-filter: blur(3px);
+}
+
+.mw-screen.menu-board[hidden] {
+  display: none;
+}
+
+.board-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 8px;
+  border-bottom: 3px solid var(--mustard);
+}
+
+.board-logo {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.board-logo h2 {
+  margin: 0;
+  font: italic 2.6rem var(--hud);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mustard);
+  text-shadow: 0 3px 0 #7a2e00, 0 0 22px rgba(255, 154, 31, 0.45);
+}
+
+.board-logo small {
+  font: 0.8rem var(--hud);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #f5ebe0;
+  opacity: 0.75;
+}
+
+.board-progress {
+  margin-left: auto;
+  font: 1rem var(--hud);
+  color: #f5ebe0;
+}
+
+.board-close {
+  font-size: 0.95rem;
+}
+
+.board-body {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.05fr) minmax(320px, 1fr);
+  gap: 22px;
+  min-height: 0;
+}
+
+/* Combos: cada rival é um item do cardápio. */
+.board-list {
+  margin: 0;
+  padding: 0 6px 0 0;
+  list-style: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.board-list li {
+  display: block;
+}
+
+.board-list .rival,
+.mw-list.sub.board-list .rival {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 52px 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px;
+  text-align: left;
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #f5ebe0;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  border: 2px solid transparent;
+  border-radius: 10px;
+  box-shadow: none;
+  transform: none;
+}
+
+.board-list .rival .rank {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font: 1.35rem var(--hud);
+  color: #16110d;
+  background: var(--mustard);
+  box-shadow: 0 3px 0 #7a2e00;
+}
+
+.board-list .rival .combo strong {
+  display: block;
+  font: italic 1.15rem var(--hud);
+  letter-spacing: 0.02em;
+}
+
+.board-list .rival .combo small {
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+
+.board-list .rival .price {
+  font: 1.25rem var(--hud);
+  color: var(--mustard);
+  text-align: right;
+}
+
+.board-list .rival .price small {
+  margin-left: 3px;
+  font-size: 0.65rem;
+  opacity: 0.8;
+}
+
+.board-list .rival .badge {
+  min-width: 112px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font: 0.72rem var(--hud);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.board-list .rival.beaten {
+  opacity: 0.7;
+}
+
+.board-list .rival.beaten .rank {
+  background: #5cb83a;
+}
+
+.board-list .rival.beaten .badge {
+  color: #16110d;
+  background: #5cb83a;
+}
+
+.board-list .rival.current .badge {
+  color: #fff;
+  background: #c1121f;
+  animation: board-pulse 1.4s ease-in-out infinite;
+}
+
+.board-list .rival.locked {
+  filter: saturate(0.4);
+}
+
+.board-list .rival.locked .rank {
+  background: #6b6156;
+}
+
+/* Combo em destaque (mouse, toque ou setas). */
+.board-list .rival.shown,
+.board-list .rival.selected,
+.board-list .rival:focus-visible {
+  border-color: var(--mustard);
+  background: linear-gradient(90deg, rgba(255, 196, 46, 0.22), rgba(255, 154, 31, 0.06));
+  outline: none;
+}
+
+@keyframes board-pulse {
+  50% {
+    filter: brightness(1.35);
+  }
+}
+
+/* Foto do combo e a ficha. */
+.board-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.board-photo {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 4px solid #f5ebe0;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 0 0 3px #16110d;
+  background: linear-gradient(#c1442e, #ff9a1f);
+}
+
+.board-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  animation: board-photo 0.5s ease-out;
+}
+
+@keyframes board-photo {
+  from {
+    transform: scale(1.08);
+    filter: brightness(1.6);
+  }
+}
+
+.board-art {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 5rem;
+}
+
+.board-detail .story-target h3 {
+  margin: 0;
+  font: italic 1.6rem var(--hud);
+  color: #fff;
+}
+
+.board-detail .quote {
+  margin: 2px 0 8px;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* "Informação nutricional", como no rótulo da embalagem. */
+.nutrition {
+  width: 100%;
+  border-collapse: collapse;
+  color: #16110d;
+  background: #f5ebe0;
+  border: 3px solid #16110d;
+  font-size: 0.88rem;
+}
+
+.nutrition caption {
+  padding: 4px 8px;
+  text-align: left;
+  font: 1rem var(--hud);
+  color: #16110d;
+  background: #f5ebe0;
+  border: 3px solid #16110d;
+  border-bottom: 6px solid #16110d;
+}
+
+.nutrition th,
+.nutrition td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #16110d;
+  text-align: left;
+}
+
+.nutrition th {
+  width: 45%;
+  font-weight: 700;
+}
+
+.nutrition .meter {
+  display: block;
+  height: 10px;
+  background: #d9cdbd;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.nutrition .meter i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #f2b705, #c1121f);
+}
+
+.board-detail .story-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.board-detail .story-actions button {
+  width: auto;
+  flex: 1 1 auto;
+  font-size: 1rem;
+}
+
+/* Mais pedidos de todos os tempos. */
+.board-hall .hall {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.board-hall .hall ol {
+  display: flex;
+  gap: 18px;
+  margin: 0;
+  padding-left: 1.4em;
+}
+
+.board-hall .hall li strong {
+  margin-left: 6px;
+  color: var(--mustard);
+}
+
+/* Volume (Opções). */
+.volume {
+  display: grid;
+  grid-template-columns: 1fr 140px 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 18px;
+  font: italic 1rem var(--hud);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(245, 235, 224, 0.85);
+}
+
+.volume input {
+  accent-color: var(--mustard);
+}
+
+.volume output {
+  font-style: normal;
+  text-align: right;
+  color: var(--mustard);
+}
+
+/* Celular / tela baixa: cardápio numa coluna só, foto menor. */
+@media (max-width: 760px), (max-height: 520px) {
+  .board-logo h2 {
+    font-size: 1.6rem;
+  }
+
+  .board-logo small,
+  .board-progress {
+    display: none;
+  }
+
+  .board-body {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .board-list .rival,
+  .mw-list.sub.board-list .rival {
+    grid-template-columns: 34px 1fr auto;
+    gap: 8px;
+    padding: 4px 8px;
+  }
+
+  .board-list .rival .rank {
+    width: 30px;
+    height: 30px;
+    font-size: 0.95rem;
+  }
+
+  .board-list .rival .badge {
+    display: none;
+  }
+
+  .board-list .rival .combo strong {
+    font-size: 0.9rem;
+  }
+
+  .board-list .rival .combo small {
+    display: none;
+  }
+
+  .board-list .rival .price {
+    font-size: 0.9rem;
+  }
+
+  .board-detail .story-target h3 {
+    font-size: 1.1rem;
+  }
+
+  .nutrition {
+    font-size: 0.72rem;
+  }
+
+  .board-hall {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) and (orientation: portrait) {
+  .board-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+}
+
+/* Cardápio aberto: o resto do menu sai de trás (fica só a vitrine 3D do carro). */
+.mw-menu:has(.menu-board:not([hidden])) > :not(.menu-board) {
+  visibility: hidden;
+}
+
+.board-list,
+.mw-list.sub.board-list {
+  position: static;
+  max-height: none;
+  width: auto;
+  margin: 0;
+}
+
+/* Botões de pedido: "Desafiar" e companhia com cara de botão de totem de lanchonete. */
+.board-detail .story-actions button {
+  padding: 8px 14px;
+  font-style: normal;
+  text-align: center;
+  color: #16110d;
+  background: linear-gradient(#ffd23f, #f2a20c);
+  border-radius: 8px;
+  box-shadow: 0 3px 0 #7a2e00;
+  transform: none;
+}
+
+.board-detail .story-actions button:disabled {
+  color: rgba(245, 235, 224, 0.6);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.board-detail .story-actions button.selected,
+.board-detail .story-actions button:hover:not(:disabled) {
+  color: #16110d;
+  background: linear-gradient(#fff3b0, #ffc42e);
+  outline: 3px solid #fff;
+}
+
+/* Com o cardápio aberto, o aviso "tocando agora" não fica por cima dos combos. */
+body:has(.menu-board:not([hidden])) .now-playing {
+  display: none;
+}
+
+.board-photo {
+  flex: none;
+}
+
+/* Celular deitado: linhas baixas e foto com altura fixa. */
+@media (max-height: 520px) {
+  .mw-screen.menu-board {
+    gap: 6px;
+    padding-top: max(6px, env(safe-area-inset-top));
+  }
+
+  .board-head {
+    padding-bottom: 4px;
+  }
+
+  .board-logo h2 {
+    font-size: 1.3rem;
+  }
+
+  .board-list {
+    gap: 3px;
+  }
+
+  .board-list .rival,
+  .mw-list.sub.board-list .rival {
+    padding: 2px 8px;
+    min-height: 0;
+    line-height: 1.1;
+  }
+
+  .board-list .rival .rank {
+    width: 24px;
+    height: 24px;
+    font-size: 0.8rem;
+    box-shadow: 0 2px 0 #7a2e00;
+  }
+
+  .board-list .rival .combo strong,
+  .board-list .rival .price {
+    font-size: 0.8rem;
+  }
+
+  .board-list .rival .price small {
+    display: none;
+  }
+
+  .board-photo {
+    aspect-ratio: auto;
+    height: 34vh;
+    border-width: 3px;
+  }
+
+  .board-art {
+    font-size: 2.6rem;
+  }
+
+  .board-detail {
+    gap: 6px;
+  }
+
+  .board-detail .quote {
+    display: none;
+  }
+
+  .board-detail .story-actions button {
+    padding: 5px 8px;
+    font-size: 0.78rem;
+  }
+}

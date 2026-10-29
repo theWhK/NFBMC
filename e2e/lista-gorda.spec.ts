@@ -15,9 +15,13 @@ test("Lista Gorda: as calorias ficam na ficha e aparecem no menu, mesmo voltando
 
   // Voltando ao site no mesmo navegador: o menu mostra a Lista Gorda e a ficha continua.
   await page.goto("/");
-  await page.getByTestId("lista-menu").click();
+  // A Lista Gorda é o cardápio (tela cheia); na primeira vez o prólogo vem antes.
+  await page.getByTestId("story-menu").click();
+  await page.getByTestId("comic-skip").click();
   await expect(page.getByTestId("hall")).toContainText("Comilão");
   await expect(page.getByTestId("hall")).toContainText("98.765");
+  // Fecha o cardápio e entra na carreira.
+  await page.keyboard.press("Escape");
   await page.getByTestId("world-solo-button").click();
   await expect(page.getByTestId("world-calories")).toHaveText("98.765");
 
