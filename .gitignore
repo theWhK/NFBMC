@@ -7,3 +7,4 @@ playwright-report/
 !.env.example
 .DS_Store
 scripts/.cache/
+__pycache__/

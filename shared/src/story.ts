@@ -40,7 +40,19 @@ export interface ComicPanel {
   id?: string;
   /** Texto para a voz, quando for diferente do escrito (números por extenso...). */
   say?: string;
+  /** Como a fala é dita (a voz gravada segue isto). Ver VOICE_DIRECTION. */
+  emotion?: Emotion;
+  /** Trecho da fala antes do qual vem uma pausa dramática (o "tempo" da piada). */
+  beat?: string;
 }
+
+/**
+ * Intenção de cada fala gravada: o scripts/vozes.py usa para escolher a
+ * expressividade, o ritmo, as pausas e o tratamento da voz.
+ */
+export type Emotion =
+  | "neutro" | "calmo" | "bravo" | "debochado" | "comico" | "triste" | "assustado"
+  | "empolgado" | "sussurro" | "oficial" | "ameaca" | "triunfante" | "cansado" | "epico";
 
 export interface Rival {
   rank: number;
@@ -279,7 +291,7 @@ const RANK_WORDS = ["", "um", "dois", "três", "quatro", "cinco", "seis", "sete"
 export function rivalIntroPanel(rival: Rival): ComicPanel {
   return {
     id: `r${rival.rank}-apresenta`, art: "📋🔥", color: "#16110d", fx: "zoom", shot: "apresenta",
-    text: `Número ${RANK_WORDS[rival.rank]} da Lista Gorda: ${rival.name}. ${rival.title}.`,
+    text: `Número ${RANK_WORDS[rival.rank]} da Lista Gorda: ${rival.name}. ${rival.title}${/[.!?]$/.test(rival.title) ? "" : "."}`,
   };
 }
 
@@ -316,14 +328,113 @@ for (const r of RIVALS_LADDER) {
 }
 
 /** Todas as falas do modo história (o scripts/vozes.py grava uma voz para cada). */
-export function storyVoiceLines(): { id: string; speaker: string; text: string; radio: boolean }[] {
+/**
+ * Direção de voz: a intenção de cada fala (lida no contexto de quem fala e do
+ * que acabou de acontecer) e, nas piadas e nos momentos dramáticos, o trecho
+ * antes do qual vem a pausa. Apresentações saem "epico" e notas fiscais
+ * "triunfante"; o que não está aqui fica "neutro".
+ */
+const VOICE_DIRECTION: Record<string, [Emotion, string?]> = {
+  // Prólogo
+  "prologo-1": ["epico", "e de Vigilância"],
+  "prologo-2": ["empolgado", "Prata"],
+  "prologo-3": ["oficial", "Ninguém entra"],
+  "prologo-4": ["ameaca", "e o seu percentual"],
+  "prologo-5": ["comico", "O senhor quer"],
+  "prologo-6": ["debochado", "por enquanto"],
+  "prologo-7": ["epico", "E no topo dela"],
+  "prologo-8": ["debochado", "Vamos apostar"],
+  "prologo-9": ["comico", "Mentira"],
+  "prologo-10": ["debochado", "Mas vai treinando"],
+  "prologo-11": ["assustado", "Alguém colocou"],
+  "prologo-12": ["debochado", "Vou transformar"],
+  "prologo-13": ["bravo", "Eu sabia"],
+  "prologo-14": ["calmo", "Agora me prova"],
+  "prologo-15": ["triste", "Sobrou só"],
+  "prologo-16": ["ameaca", "Uma por uma"],
+  "prologo-17": ["epico", "Suba a Lista Gorda"],
+  // Depois do Bruno e a fuga final
+  "final-intro-1": ["triste", "Tá bom"],
+  "final-intro-2": ["comico", "na fila do pastel"],
+  "final-intro-3": ["triunfante", "O motor ronca"],
+  "final-intro-4": ["bravo", "Hoje é dia de perna"],
+  "final-intro-5": ["assustado", "quer dizer"],
+  "final-autuado-1": ["debochado", "Mais uma série"],
+  "final-fuga-1": ["empolgado", "e o pôr do sol"],
+  "final-fuga-2": ["epico", "Sem volta"],
+  "final-fuga-3": ["ameaca", "Contando as calorias"],
+  "epilogo-1": ["sussurro", "Seu segredo"],
+  "epilogo-2": ["oficial", "Cancelem o meu almoço"],
+  "epilogo-3": ["triunfante", "Ou será"],
+  // Rivais
+  "r10-provoca-1": ["debochado", "Você nem devia"],
+  "r10-provoca-2": ["comico", "Ele é sensível"],
+  "r10-perde-1": ["triste", "Vou fazer um detox"],
+  "r10-depois-1": ["oficial", "de frango grelhado"],
+  "r10-depois-2": ["comico", "Até o que"],
+  "r9-provoca-1": ["empolgado"],
+  "r9-perde-1": ["triste", "Virei papa"],
+  "r8-provoca-1": ["empolgado", "Quer de carne"],
+  "r8-perde-1": ["cansado", "Fica com o Golf"],
+  "r8-depois-1": ["ameaca", "Cinco estrelas"],
+  "r8-depois-2": ["calmo", "Persegue por proteína"],
+  "r7-provoca-1": ["calmo", "Depois eu cochilo"],
+  "r7-perde-1": ["cansado", "Só não me acorda"],
+  "r6-provoca-1": ["empolgado", "E o Mustang"],
+  "r6-perde-1": ["triste", "O show acabou"],
+  "r6-depois-1": ["oficial", "De quem é a culpa"],
+  "r6-depois-2": ["bravo", "Mas principalmente"],
+  "r5-provoca-1": ["debochado", "Fui eu"],
+  "r5-provoca-2": ["bravo"],
+  "r5-perde-1": ["assustado", "E de brinde"],
+  "r5-depois-1": ["comico", "E juros"],
+  "r5-depois-2": ["ameaca", "Lei é lei"],
+  "r4-provoca-1": ["calmo", "Relaxa"],
+  "r4-perde-1": ["comico", "eu nunca soube"],
+  "r3-provoca-1": ["debochado", "Dezesseis cilindros"],
+  "r3-perde-1": ["triste", "Que deselegante"],
+  "r3-depois-1": ["ameaca", "Vou te fazer suar"],
+  "r2-provoca-1": ["bravo", "Eu frito"],
+  "r2-perde-1": ["cansado", "E ele não tá sozinho"],
+  "r2-depois-1": ["calmo", "Se você ganhar"],
+  "r2-depois-2": ["ameaca", "Te espero lá fora"],
+  "r1-provoca-1": ["debochado", "Veio buscar"],
+  "r1-provoca-2": ["debochado", "Boa sorte"],
+  "r1-provoca-3": ["bravo"],
+};
+/** Recados do rádio: a intenção por momento da perseguição. */
+const RADIO_DIRECTION: Record<RadioEvent, Emotion> = { start: "oficial", crossfit: "ameaca", escaped: "cansado", busted: "triunfante" };
+
+const directionOf = (id: string): [Emotion, string?] =>
+  VOICE_DIRECTION[id] ?? [id.endsWith("-apresenta") ? "epico" : id.endsWith("-nota") ? "triunfante" : "neutro"];
+
+// Cada quadro do roteiro fica com a sua direção de voz.
+for (const panel of [PROLOGUE, FINALE_INTRO, FINALE_BUSTED, FINALE_ESCAPE, EPILOGUE, ...RIVALS_LADDER.flatMap((r) => [r.taunt, r.defeat, r.interlude ?? []])].flat()) {
+  [panel.emotion, panel.beat] = directionOf(panel.id!);
+}
+
+/** Uma fala gravada: quem fala, o texto para a voz e a direção. */
+export interface VoiceLineSpec {
+  id: string;
+  speaker: string;
+  text: string;
+  radio: boolean;
+  emotion: Emotion;
+  beat?: string;
+}
+
+export function storyVoiceLines(): VoiceLineSpec[] {
   const scenes = [
     PROLOGUE, FINALE_INTRO, FINALE_BUSTED, FINALE_ESCAPE, EPILOGUE,
     ...RIVALS_LADDER.flatMap((r) => [rivalTauntScene(r), rivalDefeatScene(r)]),
   ];
-  const lines = scenes.flat().map((p) => ({ id: p.id!, speaker: p.speaker ?? "", text: p.say ?? p.text, radio: false }));
+  const lines: VoiceLineSpec[] = scenes.flat().map((p) => {
+    const [emotion, beat] = p.emotion ? [p.emotion, p.beat] : directionOf(p.id!);
+
+    return { id: p.id!, speaker: p.speaker ?? "", text: p.say ?? p.text, radio: false, emotion, beat };
+  });
   for (const event of Object.keys(CROSSFIT_RADIO) as RadioEvent[]) {
-    CROSSFIT_RADIO[event].forEach((text, i) => lines.push({ id: radioLineId(event, i), speaker: CROSSFIT, text, radio: true }));
+    CROSSFIT_RADIO[event].forEach((text, i) => lines.push({ id: radioLineId(event, i), speaker: CROSSFIT, text, radio: true, emotion: RADIO_DIRECTION[event] }));
   }
   // (Os interlúdios aparecem nas duas listas: sem repetir.)
   return [...new Map(lines.map((l) => [l.id, l])).values()];

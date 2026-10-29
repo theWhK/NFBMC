@@ -943,6 +943,31 @@ function overlay() {
   return el;
 }
 
+/**
+ * Tempo de cada frase das falas gravadas (vozes/historia/tempos.json, feito pelo
+ * scripts/vozes.py): [onde a frase começa no texto, quando a voz começa a dizê-la,
+ * quando acaba] (s).
+ */
+type VoiceMarks = [number, number, number][];
+let marksCache: Promise<Record<string, VoiceMarks>> | null = null;
+const voiceMarks = (): Promise<Record<string, VoiceMarks>> =>
+  (marksCache ??= fetch(`${import.meta.env.BASE_URL}vozes/historia/tempos.json`)
+    .then((r) => (r.ok ? (r.json() as Promise<Record<string, VoiceMarks>>) : {}))
+    .catch(() => ({})));
+
+/** Quantas letras da legenda já foram ditas `t` segundos depois de a voz começar. */
+function charsSpoken(marks: VoiceMarks, length: number, t: number) {
+  let shown = 0;
+  for (let k = 0; k < marks.length; k++) {
+    const [from, start, end] = marks[k];
+    const to = marks[k + 1]?.[0] ?? length;
+    if (t >= end) shown = to;
+    else if (t >= start) return Math.round(from + ((to - from) * (t - start)) / Math.max(0.05, end - start));
+    else return Math.max(shown, from);
+  }
+  return shown;
+}
+
 /** Plano de um quadro: o que veio no roteiro ou, sem nada, pelo personagem que fala. */
 export function shotFor(panel: ComicPanel): CineShot {
   if (panel.shot) return panel.shot;
@@ -984,6 +1009,8 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
     let msPerLetter = 22;
     let typedAt = 0;
     let typedLetters = 0;
+    /** Legenda presa à voz: o tempo de cada frase e quando a voz começou. */
+    let synced: { marks: VoiceMarks; at: number } | null = null;
     const cam: CamPose = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, shake: 0 };
 
     const finishTyping = () => {
@@ -1046,20 +1073,34 @@ function playCinematic(panels: ComicPanel[], scene: GameScene, cast: Cast, hooks
       msPerLetter = 22;
       typedAt = performance.now();
       typedLetters = 0;
-      // Pelo relógio (com a máquina lenta, o intervalo atrasa).
+      synced = null;
+      let shownChars = 0;
+      // Pelo relógio (com a máquina lenta, o intervalo atrasa). Com a voz e o tempo
+      // de cada frase (tempos.json), a legenda acompanha a fala, parando nas pausas.
       typing = setInterval(() => {
+        if (synced) {
+          shownChars = Math.max(shownChars, charsSpoken(synced.marks, full.length, (performance.now() - synced.at) / 1000));
+          textEl.textContent = full.slice(0, shownChars);
+          if (shownChars >= full.length) finishTyping();
+          return;
+        }
         const shown = typedLetters + Math.floor((performance.now() - typedAt) / msPerLetter);
         textEl.textContent = letters.slice(0, shown).join("");
         if (shown >= letters.length) finishTyping();
       }, 30);
+      const marksReady = p.id ? voiceMarks() : Promise.resolve({} as Record<string, VoiceMarks>);
 
       // A voz do personagem: quando chega, a legenda passa a acompanhar a fala e o
       // plano dura pelo menos até ela acabar.
-      void hooks.speak?.(p).then((seconds) => {
+      void hooks.speak?.(p).then(async (seconds) => {
         if (seconds === null || done || index !== panelIndex || !shot) return;
+        const startedAt = performance.now();
         voiceUntil = elapsed + seconds;
         duration = Math.max(shot.min, seconds + 0.8);
-        if (typing) {
+        const marks = p.id ? (await marksReady)[p.id] : undefined;
+        if (marks?.length && typing && index === panelIndex) {
+          synced = { marks, at: startedAt };
+        } else if (typing) {
           typedLetters += Math.floor((performance.now() - typedAt) / msPerLetter);
           typedAt = performance.now();
           const left = Math.max(1, letters.length - typedLetters);
