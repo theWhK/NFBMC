@@ -20,6 +20,12 @@ import {
   currentRival,
   finalePending,
   isRaceId,
+  DISTRICTS,
+  RACES,
+  ROADS,
+  districtAt,
+  nearestRoad,
+  raceMarker,
   type GoRaceMessage,
   type InputMessage,
   type Phase,
@@ -34,7 +40,8 @@ import type { CueName } from "./music.ts";
 import { showNowPlaying } from "./now-playing.ts";
 import { jukeboxState, setupJukebox } from "./jukebox.ts";
 import { makeBridge, playStory, showRadio, type Cast } from "./cinematic.ts";
-import { createFullMap, createMinimap, createTacho, type MinimapView } from "./hud.ts";
+import { createGps, type GpsGuidance, type GpsTarget } from "./gps.ts";
+import { createFullMap, createMinimap, createTacho, type MapPick, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
 import { LOGO_SVG } from "./logo.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
@@ -174,13 +181,85 @@ setInterval(() => {
 
 const drawTacho = createTacho(ui.tacho);
 const minimap = createMinimap(ui.minimap);
-const fullMap = createFullMap($<HTMLCanvasElement>("fullmap-canvas"));
+const fullMap = createFullMap($<HTMLCanvasElement>("fullmap-canvas"), pickDestination);
 /** Último quadro do minimapa: o mapa grande desenha a mesma coisa. */
 let lastMapView: MinimapView | null = null;
 const drawMinimap = (view: MinimapView) => {
+  const me = view.cars.get(view.myId);
+  // GPS: só no mundo aberto (na corrida, quem guia é o traçado).
+  if (!view.race && me && !mode?.paused() && gps.update(me.x, me.z, me.heading, performance.now())) {
+    showPopup(`📍 Você chegou: ${arrivedAt}`);
+    sound.lap();
+  }
+  const target = gps.target();
+  if (target) arrivedAt = target.label;
+  if (target && !view.race) view = { ...view, gps: { route: gps.route(), from: gps.progress(), target } };
+  scene?.setGpsProgress(gps.progress(), !view.race);
+  renderGps(view.race ? null : gps.guidance());
   lastMapView = view;
   minimap(view);
 };
+
+// --- GPS ---------------------------------------------------------------------
+
+const gps = createGps(() => {
+  scene?.setGpsRoute(gps.route());
+  $("gps-clear").hidden = !gps.target();
+});
+/** Nome do último destino (para o aviso de chegada, que vem depois de apagar o pino). */
+let arrivedAt = "";
+const gpsEl = $("gps");
+const GPS_ARROWS: Record<GpsGuidance["turn"], string> = { left: "⬅", right: "➡", straight: "⬆", back: "↩", arrive: "📍" };
+
+function formatDistance(meters: number) {
+  if (meters >= 1000) return `${(meters / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km`;
+  return `${Math.max(10, Math.round(meters / 10) * 10)} m`;
+}
+
+function renderGps(guidance: GpsGuidance | null) {
+  const target = gps.target();
+  gpsEl.hidden = !guidance || !target;
+  if (!guidance || !target) return;
+  $("gps-arrow").textContent = GPS_ARROWS[guidance.turn];
+  const action = { left: "vire à esquerda", right: "vire à direita", straight: "siga em frente", back: "faça o retorno", arrive: "chegando" }[guidance.turn];
+  $("gps-distance").textContent = guidance.turn === "straight" ? formatDistance(guidance.remaining) : guidance.turn === "back" ? "Faça o retorno" : `${formatDistance(guidance.distance)} · ${action}`;
+  $("gps-label").textContent = guidance.turn === "straight" ? `${action} · ${target.label}` : `${target.label} · ${formatDistance(guidance.remaining)}`;
+}
+
+/** Ponto da rua mais perto (o destino fica sempre numa rua, não no meio do quarteirão ou do lago). */
+function snapToRoad(x: number, z: number) {
+  const { road, index } = nearestRoad(x, z);
+  const [rx, rz] = ROADS[road].points[index];
+  return { x: rx, z: rz };
+}
+
+/** Toque no mapa grande: marca o destino (ponto de encontro ou rua), ou tira, tocando no pino. */
+function pickDestination(pick: MapPick) {
+  const me = lastMapView?.cars.get(lastMapView.myId);
+  if (!(mode instanceof WorldMode) || lastMapView?.race || !me) return;
+  sound.click();
+  if (pick.onPin) {
+    gps.setTarget(null);
+    showPopup("Destino apagado");
+    return;
+  }
+  let target: GpsTarget;
+  if (pick.race) {
+    const marker = raceMarker(pick.race);
+    target = { x: marker.x, z: marker.z, label: RACES[pick.race].name };
+  } else {
+    const spot = snapToRoad(pick.x, pick.z);
+    const district = DISTRICTS.find((d) => d.id === districtAt(spot.x, spot.z));
+    target = { ...spot, label: district?.name ?? "Porto Gordo" };
+  }
+  gps.setTarget(target, me);
+  showPopup(`📍 Destino: ${target.label}`);
+}
+
+$("gps-clear").addEventListener("click", () => {
+  sound.click();
+  gps.setTarget(null);
+});
 
 const ctx: ModeContext = {
   scene,
@@ -854,6 +933,7 @@ function frame() {
   document.body.classList.toggle("playing", !!mode);
   if (mode) mode.frame();
   else scene?.render(new Map(), undefined);
+  if (!mode) gpsEl.hidden = true;
   if (!fullMapEl.hidden && mapNeedsFocus) focusMapOnMe();
   if (!fullMapEl.hidden && lastMapView) fullMap.draw(lastMapView);
   requestAnimationFrame(frame);
@@ -1046,6 +1126,11 @@ function publishTestHook() {
     paused: () => current.paused(),
     players: () => current.snapshot(),
     police: () => (current instanceof WorldMode ? current.policeSnapshot() : null),
+    gps: () => {
+      const target = gps.target();
+      return target ? { target, points: gps.route().length, guidance: gps.guidance() } : null;
+    },
+    setDestination: (x: number, z: number) => pickDestination({ x, z, race: null, onPin: false }),
     send: (type: string, message: unknown) => {
       if (current instanceof WorldMode) current.send(type, message);
       else (current.room as unknown as { send: (type: string, message: unknown) => void }).send(type, message);
@@ -1070,6 +1155,9 @@ declare global {
         cops: { x: number; z: number; target: string; car: string }[];
         traffic: { x: number; z: number; speed: number; kind: string }[];
       } | null;
+      gps: () => { target: GpsTarget; points: number; guidance: GpsGuidance | null } | null;
+      /** Marca o destino do GPS como um toque no mapa (para os testes). */
+      setDestination: (x: number, z: number) => void;
       send: (type: string, message: unknown) => void;
     };
   }

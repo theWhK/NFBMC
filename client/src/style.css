@@ -460,6 +460,61 @@ h2 {
   border-radius: 50%;
 }
 
+/* GPS: a próxima conversão, em cima do minimapa. */
+.gps {
+  position: fixed;
+  left: 16px;
+  bottom: 212px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 6px 12px 6px 8px;
+  background: rgba(8, 20, 30, 0.82);
+  border: 2px solid #3fd4ff;
+  border-radius: 10px;
+  box-shadow: 0 0 14px rgba(63, 212, 255, 0.4);
+  color: #e8f8ff;
+  pointer-events: none;
+}
+
+.gps-arrow {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  font: 2rem/40px var(--hud);
+  text-align: center;
+  color: #3fd4ff;
+  text-shadow: 0 0 8px rgba(63, 212, 255, 0.8);
+}
+
+.gps-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gps-text strong {
+  font: italic 1.25rem var(--hud);
+  color: #ffffff;
+}
+
+.gps-text span {
+  overflow: hidden;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+
+body.touch .gps {
+  left: auto;
+  right: max(12px, env(safe-area-inset-right));
+  top: 238px;
+  bottom: auto;
+}
+
 .hint {
   opacity: 0.75;
   font-size: 0.85rem;
@@ -1166,6 +1221,27 @@ body.touch .panel.side {
 
   body.touch #minimap {
     top: 34px;
+  }
+
+  .gps {
+    bottom: 136px;
+    min-width: 0;
+    padding: 4px 10px 4px 6px;
+  }
+
+  body.touch .gps {
+    top: 152px;
+  }
+
+  .gps-arrow {
+    width: 30px;
+    height: 30px;
+    font-size: 1.5rem;
+    line-height: 30px;
+  }
+
+  .gps-text strong {
+    font-size: 1rem;
   }
 
   #wanted {
@@ -2781,6 +2857,7 @@ kbd {
 body.overlay-open #touch,
 body.overlay-open #dash,
 body.overlay-open #minimap,
+body.overlay-open #gps,
 body.overlay-open #hud,
 body.overlay-open #world-hud,
 body.overlay-open #leaderboard,
@@ -3044,7 +3121,9 @@ body.touch:has(#marker-panel:not([hidden])) #dash {
   justify-content: center;
   align-items: flex-end;
   gap: 12px;
-  padding: 18px 24px 8px;
+  /* Folga em cima para o cartão selecionado (sobe, cresce e brilha): com o
+     overflow-x da rolagem, o que passa da caixa é cortado. */
+  padding: 46px 32px 8px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -3249,7 +3328,7 @@ body.touch:has(#marker-panel:not([hidden])) #dash {
   #menu-list {
     bottom: 42px;
     gap: 8px;
-    padding-top: 12px;
+    padding-top: 34px;
   }
 
   #menu-list button {

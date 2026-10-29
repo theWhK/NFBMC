@@ -39,6 +39,7 @@
         <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida direto na largada, sem passar pela cidade: escolha a pista."><span class="icon" aria-hidden="true">⏱️</span><span class="label">Corrida rápida</span></button>
         <button type="button" data-screen="story" data-testid="story-menu" data-hint="O cardápio de Porto Gordo: os 10 combos da Lista Gorda, o que falta para cada desafio e os mais pedidos de todos os tempos."><span class="icon" aria-hidden="true">🍔</span><span class="label">Lista Gorda</span></button>
         <button type="button" data-screen="garage" data-testid="garage-menu" data-hint="Escolha a cor do seu carrinho de lanche."><span class="icon" aria-hidden="true">🔧</span><span class="label">Garagem</span></button>
+        <button type="button" id="menu-jukebox" data-testid="jukebox-menu" data-hint="As 20 faixas da rádio de Porto Gordo, por álbum: toque, pule, embaralhe e veja o visualizador."><span class="icon" aria-hidden="true">🎵</span><span class="label">Jukebox</span></button>
         <button type="button" data-screen="options" data-testid="options-menu" data-hint="Volume da música e dos efeitos, câmbio, gráficos e abertura."><span class="icon" aria-hidden="true">⚙️</span><span class="label">Opções</span></button>
         <button type="button" data-screen="credits" data-hint="Quem fez esta bagunça."><span class="icon" aria-hidden="true">🎬</span><span class="label">Créditos</span></button>
       </nav>
@@ -104,7 +105,6 @@
           <button type="button" id="opt-gearbox" data-testid="opt-gearbox">Câmbio: automático</button>
           <button type="button" id="opt-quality" data-testid="opt-quality">Gráficos: automático</button>
           <button type="button" id="opt-intro" data-testid="opt-intro">Abertura: ligada</button>
-          <button type="button" id="opt-jukebox" data-testid="opt-jukebox">Jukebox</button>
         </div>
         <p class="hint">Todos os comandos: F1 dentro do jogo (ou "Controles" na pausa).</p>
       </section>
@@ -271,6 +271,7 @@
         <tr><td><kbd>C</kbd></td><td>Trocar câmera (perseguição, perto, longe, baixa, capô, primeira pessoa)</td></tr>
         <tr><td><kbd>R</kbd></td><td>Voltar para a rua (quando empacar)</td></tr>
         <tr><td><kbd>M</kbd> <kbd>Tab</kbd></td><td>Mapa da cidade e pilotos online (desafiar para um pega)</td></tr>
+        <tr><td>Clique no mapa</td><td>Marca o destino do GPS (a rota aparece no chão e no minimapa; clique no pino para tirar)</td></tr>
         <tr><td><kbd>Y</kbd> / <kbd>X</kbd></td><td>Aceitar / amarelar um desafio</td></tr>
         <tr><td><kbd>Enter</kbd></td><td>Começar a corrida (no ponto de encontro)</td></tr>
         <tr><td><kbd>Esc</kbd> <kbd>P</kbd></td><td>Pausa</td></tr>
@@ -301,6 +302,8 @@
         <span>🍔 Comida</span>
         <span><i class="cop"></i>Vigilância</span>
         <span id="map-paused" class="paused" data-testid="map-paused" hidden>⏸ Jogo pausado</span>
+        <span class="hint" id="map-gps-hint">Toque num lugar (ou numa 🏁) para marcar o destino do GPS</span>
+        <button type="button" class="link" id="gps-clear" data-testid="gps-clear" hidden>Tirar o destino</button>
         <span class="hint">M / Esc fecha · roda do mouse ou pinça dá zoom · arraste para mover</span>
       </div>
       <!-- Co-op: quem está online e o desafio para um pega (client/src/coop.ts). -->
@@ -361,6 +364,15 @@
     </div>
 
     <canvas id="minimap" width="180" height="180" hidden></canvas>
+
+    <!-- GPS: a próxima conversão até o destino marcado no mapa (client/src/gps.ts). -->
+    <div id="gps" class="gps" data-testid="gps" hidden>
+      <span class="gps-arrow" id="gps-arrow" aria-hidden="true"></span>
+      <div class="gps-text">
+        <strong id="gps-distance" data-testid="gps-distance"></strong>
+        <span id="gps-label"></span>
+      </div>
+    </div>
 
     <!-- Controles de toque (celular/tablet). -->
     <div id="touch" data-testid="touch-controls" hidden>
