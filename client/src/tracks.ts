@@ -8,96 +8,10 @@
 // que toca a banda (band.ts) compasso a compasso; `v` é a variação (o segundo
 // refrão ganha solo, o último ganha bumbo duplo etc.).
 import type { Band, BandOptions } from "./band.ts";
+import { drums, fill, riff, roll, type CueName, type Groove, type Line, type Riff, type Section, type TrackDef } from "./compose.ts";
+import { SYNTHWAVE_TRACKS } from "./tracks-synthwave.ts";
 
-export type Mood = "lobby" | "race" | "pursuit" | "duel" | "trailer";
-export type CueName =
-  | "chegada" | "cerco" | "sabotagem" | "rival" | "nota" | "radio" | "tv"
-  | "fuga" | "ponte" | "fim" | "mia" | "sozinho";
-
-export interface Section {
-  bars: number;
-  play: (b: Band, v: number) => void;
-}
-
-export interface TrackDef {
-  id: string;
-  artist: string;
-  title: string;
-  mood: Mood | "cue";
-  bpm: number;
-  band: Omit<BandOptions, "bpm">;
-  sections: Record<string, Section>;
-  /** Ordem das seções ("refrao:1" = seção "refrao", variação 1). */
-  form: string[];
-  /** Ao chegar no fim, volta para esta posição da forma (temas de cinemática, abertura). */
-  loopFrom?: number;
-}
-
-// --- Ajudantes de escrita -------------------------------------------------------------
-
-/** Posições marcadas numa linha de 16 semicolcheias: "x" normal, "X" forte, "g" fantasma. */
-function hits(line: string) {
-  const out: { step: number; vel: number }[] = [];
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === "x") out.push({ step: i, vel: 0.85 });
-    else if (c === "X") out.push({ step: i, vel: 1 });
-    else if (c === "g") out.push({ step: i, vel: 0.35 });
-  }
-  return out;
-}
-
-interface Groove {
-  k?: string;
-  s?: string;
-  c?: string;
-  h?: string;
-  o?: string;
-  r?: string;
-  t?: string;
-}
-
-/** Toca um compasso de bateria (k bumbo, s caixa, c palma, h chimbal, o chimbal aberto, r condução, t taiko). */
-function drums(b: Band, bar: number, g: Groove, vel = 1) {
-  for (const { step, vel: v } of hits(g.k ?? "")) b.kick(b.at(bar, step), v * vel);
-  for (const { step, vel: v } of hits(g.s ?? "")) b.snare(b.at(bar, step), v * vel);
-  for (const { step, vel: v } of hits(g.c ?? "")) b.clap(b.at(bar, step), v * vel);
-  for (const { step, vel: v } of hits(g.h ?? "")) b.hat(b.at(bar, step), v * vel);
-  for (const { step, vel: v } of hits(g.o ?? "")) b.hat(b.at(bar, step), v * vel, true);
-  for (const { step, vel: v } of hits(g.r ?? "")) b.ride(b.at(bar, step), v * vel);
-  for (const { step, vel: v } of hits(g.t ?? "")) b.taiko(b.at(bar, step), 36, v * vel);
-}
-
-/** Virada de caixa e tons nas últimas `steps` semicolcheias do compasso. */
-function fill(b: Band, bar: number, steps = 8, toms = [50, 47, 43, 40]) {
-  for (let i = 16 - steps; i < 16; i++) {
-    const k = i - (16 - steps);
-    if (k < steps / 2) b.snare(b.at(bar, i), 0.5 + (k / steps) * 0.6);
-    else b.tom(b.at(bar, i), toms[Math.min(toms.length - 1, Math.floor(((k - steps / 2) / (steps / 2)) * toms.length))], 0.9);
-  }
-}
-
-/** Rufo de caixa acelerando (antes do refrão / drop). */
-function roll(b: Band, fromBar: number, bars: number) {
-  for (let bar = 0; bar < bars; bar++) {
-    const per = bar < bars - 1 ? 4 : 8;
-    for (let i = 0; i < 16; i += 16 / (per * 2)) {
-      b.snare(b.at(fromBar + bar, 0) + b.len(i), 0.3 + ((bar * 16 + i) / (bars * 16)) * 0.7);
-    }
-  }
-}
-
-/** Riff de guitarra: [semicolcheia, nota (raiz), duração em semicolcheias, abafado?]. */
-type Riff = [number, number, number, boolean?][];
-function riff(b: Band, bar: number, notes: Riff, vel = 1, withBass = true) {
-  for (const [step, root, steps, mute] of notes) {
-    b.chord(b.at(bar, step), root, b.len(steps) * 0.95, !!mute, vel);
-    if (withBass) b.bass(b.at(bar, step), root - 12, b.len(steps) * 0.9, 0.9, !!mute);
-  }
-}
-
-/** Melodia: [semicolcheia, nota, duração em semicolcheias]. */
-type Line = [number, number, number][];
+export { MOOD_LABELS, type CueName, type Mood, type Section, type TrackDef } from "./compose.ts";
 
 // =====================================================================================
 // PERSEGUIÇÃO 1: Coxinha Mecânica – "Fritura Total" (metal alternativo, 168 bpm, Mi)
@@ -134,6 +48,7 @@ function ftChorusBar(b: Band, bar: number, i: number, v: number) {
 
 const FRITURA_TOTAL: TrackDef = {
   id: "fritura-total", artist: "Coxinha Mecânica", title: "Fritura Total", mood: "pursuit", bpm: 168,
+  key: "Mi menor → Fá menor", style: "metal alternativo",
   band: { kit: "rock", drive: 22, trim: 0.69 },
   sections: {
     intro: {
@@ -231,7 +146,7 @@ const FRITURA_TOTAL: TrackDef = {
       },
     },
   },
-  form: ["intro", "verso", "verso:1", "pre", "refrao", "verso", "pre", "refrao:1", "queda", "solo", "pre", "refrao:1", "refrao:2", "final"],
+  form: ["intro", "verso", "verso:1", "pre", "refrao", "verso", "pre", "refrao:1", "queda", "solo", "pre", "refrao:1", "refrao:2+1", "final+1"],
 };
 
 // =====================================================================================
@@ -251,6 +166,7 @@ const BE_HOOK: Line[] = [
 
 const BANHA_ELETRICA: TrackDef = {
   id: "banha-eletrica", artist: "Os Torresmos", title: "Banha Elétrica", mood: "pursuit", bpm: 152,
+  key: "Ré menor (afinação baixa) → Mi menor", style: "nu-metal com eletrônica",
   band: { kit: "rock", drive: 26, trim: 0.69 },
   sections: {
     intro: {
@@ -332,7 +248,7 @@ const BANHA_ELETRICA: TrackDef = {
       },
     },
   },
-  form: ["intro", "verso", "verso:1", "refrao", "verso:1", "refrao:1", "ponte", "subida", "refrao:1", "refrao:2", "final"],
+  form: ["intro", "verso", "verso:1", "refrao", "verso:1", "refrao:1", "ponte", "subida", "refrao:1", "refrao:2+2", "final+2"],
 };
 
 // =====================================================================================
@@ -361,6 +277,7 @@ function moStabs(b: Band, bar: number, vel = 1) {
 
 const MOLHO_ESPECIAL: TrackDef = {
   id: "molho-especial", artist: "DJ Maionese", title: "Molho Especial", mood: "race", bpm: 134,
+  key: "Lá menor → Dó menor", style: "big beat",
   band: { kit: "break", pump: 0.55, drive: 16, trim: 0.64 },
   sections: {
     intro: {
@@ -426,7 +343,7 @@ const MOLHO_ESPECIAL: TrackDef = {
       },
     },
   },
-  form: ["intro", "subida", "drop", "drop:1", "respiro", "subida:1", "drop:2", "drop:1", "respiro", "subida:1", "drop:2", "final"],
+  form: ["intro", "subida", "drop", "drop:1", "respiro", "subida:1", "drop:2", "drop:1", "respiro", "subida:1+3", "drop:2+3", "final+3"],
 };
 
 // =====================================================================================
@@ -440,6 +357,7 @@ const KK_ROOTS = [42, 38, 40, 37];
 
 const ESPETO_CORRIDO: TrackDef = {
   id: "espeto-corrido", artist: "Kebab Kollective", title: "Espeto Corrido", mood: "race", bpm: 142,
+  key: "Fá# menor → Sol# menor", style: "breakbeat",
   band: { kit: "break", pump: 0.4, drive: 20, trim: 0.72 },
   sections: {
     intro: {
@@ -507,7 +425,7 @@ const ESPETO_CORRIDO: TrackDef = {
       },
     },
   },
-  form: ["intro", "batida", "batida:1", "drop", "drop:1", "meio", "batida:1", "drop", "drop:1", "meio", "drop:1", "final"],
+  form: ["intro", "batida", "batida:1", "drop", "drop:1", "meio", "batida:1", "drop", "drop:1", "meio+2", "drop:1+2", "final+2"],
 };
 
 // =====================================================================================
@@ -541,6 +459,7 @@ function rpBass(b: Band, bar: number, busy: boolean) {
 
 const RECHEIO_PESADO: TrackDef = {
   id: "recheio-pesado", artist: "MC Pastel de Feira", title: "Recheio Pesado", mood: "lobby", bpm: 88,
+  key: "Dó menor → Dó# menor", style: "boom bap",
   band: { kit: "boom", swing: 0.45, trim: 0.72 },
   sections: {
     intro: {
@@ -607,7 +526,7 @@ const RECHEIO_PESADO: TrackDef = {
       },
     },
   },
-  form: ["intro", "verso", "verso:1", "refrao", "verso:1", "refrao:1", "ponte", "refrao:1", "verso", "final"],
+  form: ["intro", "verso", "verso:1", "refrao", "verso:1", "refrao:1", "ponte", "refrao:1+1", "verso+1", "final+1"],
 };
 
 // =====================================================================================
@@ -625,6 +544,7 @@ function bcHatRoll(b: Band, bar: number) {
 
 const BARRIGA_CHEIA: TrackDef = {
   id: "barriga-cheia", artist: "Sindicato do Torresmo", title: "Barriga Cheia", mood: "lobby", bpm: 96,
+  key: "Sol menor → Lá menor", style: "hip-hop de 808",
   band: { kit: "crunk", swing: 0.15, trim: 0.76 },
   sections: {
     intro: {
@@ -685,7 +605,7 @@ const BARRIGA_CHEIA: TrackDef = {
       },
     },
   },
-  form: ["intro", "verso", "verso:1", "refrao", "verso:1", "refrao:1", "queda", "refrao", "refrao:1", "final"],
+  form: ["intro", "verso", "verso:1", "refrao", "verso:1", "refrao:1", "queda", "refrao", "refrao:1+2", "final+2"],
 };
 
 // =====================================================================================
@@ -708,6 +628,7 @@ function ppOstinato(b: Band, bar: number, vel = 1) {
 
 const PRATO_PRINCIPAL: TrackDef = {
   id: "prato-principal", artist: "Orquestra do Rodízio", title: "Prato Principal", mood: "duel", bpm: 130,
+  key: "Ré menor → Mib menor", style: "orquestral de chefão",
   band: { kit: "cine", drive: 24, trim: 0.69 },
   sections: {
     intro: {
@@ -787,7 +708,7 @@ const PRATO_PRINCIPAL: TrackDef = {
       },
     },
   },
-  form: ["intro", "a", "b", "climax", "respiro", "a:1", "b:1", "climax:1", "a:1", "climax:1", "final"],
+  form: ["intro", "a", "b", "climax", "respiro", "a:1", "b:1", "climax:1", "a:1+1", "climax:1+1", "final+1"],
 };
 
 // =====================================================================================
@@ -795,6 +716,7 @@ const PRATO_PRINCIPAL: TrackDef = {
 // =====================================================================================
 const ABERTURA: TrackDef = {
   id: "abertura", artist: "NFBMC", title: "Abertura", mood: "trailer", bpm: 140,
+  key: "Ré menor", style: "trailer",
   band: { kit: "rock", drive: 22, trim: 0.71 },
   sections: {
     coracao: {
@@ -829,7 +751,10 @@ const ABERTURA: TrackDef = {
 };
 
 /** As faixas do "rádio" do jogo, por clima. */
-export const TRACKS: TrackDef[] = [FRITURA_TOTAL, BANHA_ELETRICA, MOLHO_ESPECIAL, ESPETO_CORRIDO, RECHEIO_PESADO, BARRIGA_CHEIA, PRATO_PRINCIPAL, ABERTURA];
+const byMood = (mood: TrackDef["mood"], list: TrackDef[]) => list.filter((t) => t.mood === mood);
+const ALL = [FRITURA_TOTAL, BANHA_ELETRICA, MOLHO_ESPECIAL, ESPETO_CORRIDO, RECHEIO_PESADO, BARRIGA_CHEIA, PRATO_PRINCIPAL, ...SYNTHWAVE_TRACKS];
+/** As faixas do "rádio" do jogo (e do jukebox), agrupadas por clima (o "álbum"); a abertura por último. */
+export const TRACKS: TrackDef[] = [...byMood("lobby", ALL), ...byMood("race", ALL), ...byMood("pursuit", ALL), ...byMood("duel", ALL), ABERTURA];
 
 // =====================================================================================
 // TEMAS DAS CINEMÁTICAS (modo história)

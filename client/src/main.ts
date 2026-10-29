@@ -32,6 +32,7 @@ import {
 import { Sound, type OtherCarSound } from "./audio.ts";
 import type { CueName } from "./music.ts";
 import { showNowPlaying } from "./now-playing.ts";
+import { jukeboxState, setupJukebox } from "./jukebox.ts";
 import { makeBridge, playStory, showRadio, type Cast } from "./cinematic.ts";
 import { createFullMap, createMinimap, createTacho, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
@@ -91,6 +92,7 @@ ui.toggleSfx.addEventListener("click", () => {
   ui.toggleSfx.blur();
 });
 sound.onTrack = showNowPlaying;
+setupJukebox(sound);
 sound.song("lobby");
 
 // --- Cena 3D ---------------------------------------------------------------
@@ -1016,6 +1018,7 @@ $("story-car").addEventListener("click", () => {
 /** Deixa os testes (Playwright) lerem o estado sem depender do canvas. */
 // A trilha (clima, faixa e tema da cinemática) fica visível para os testes desde o menu.
 window.__nfbmcAudio = () => sound.audioState();
+window.__nfbmcJukebox = jukeboxState;
 
 function publishTestHook() {
   const current = mode;
@@ -1037,7 +1040,8 @@ function publishTestHook() {
 
 declare global {
   interface Window {
-    __nfbmcAudio?: () => { mood: string | null; cue: string | null; track: string | null; enabled: boolean; cinematic: boolean };
+    __nfbmcJukebox?: typeof jukeboxState;
+    __nfbmcAudio?: () => { mood: string | null; cue: string | null; track: string | null; enabled: boolean; cinematic: boolean; jukebox?: boolean };
     __nfbmc?: {
       sessionId: string;
       mode: () => "world" | "race";
