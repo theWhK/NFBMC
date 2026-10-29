@@ -21,6 +21,7 @@ import type { Sound } from "./audio.ts";
 import { introEnabled, setIntroEnabled } from "./intro.ts";
 import { whereLabel } from "./coop.ts";
 import { fetchListaGorda, fetchOnline, fetchProfile } from "./net.ts";
+import { localProfile, pendingEntries, rememberCloudProfile } from "./sync.ts";
 import type { GameScene } from "./scene.ts";
 import { escapeHtml, kcal, setHtml, ui } from "./ui.ts";
 
@@ -317,8 +318,11 @@ export function createMenu(options: MenuOptions) {
   // Ficha do jogador no rodapé.
   const token = options.token();
   if (token) {
-    fetchProfile(token).then((profile) => {
-      if (!profile) return;
+    fetchProfile(token).then((cloud) => {
+      if (cloud) rememberCloudProfile(cloud);
+      // Com progresso offline ainda não sincronizado (ou sem internet), mostra a ficha local.
+      const profile = cloud && pendingEntries().length === 0 ? cloud : localProfile(token, "");
+      if (!cloud && profile.races === 0 && profile.calories === 0) return;
       profileKcal.textContent = `${kcal(profile.calories)} kcal · ${profile.races} ${profile.races === 1 ? "corrida" : "corridas"} · ${profile.wins} ${profile.wins === 1 ? "vitória" : "vitórias"}`;
     });
   }

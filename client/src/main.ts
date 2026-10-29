@@ -38,7 +38,8 @@ import { introEnabled, playIntro } from "./intro.ts";
 import { LOGO_SVG } from "./logo.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import { createMenu, type MenuEntry } from "./menu.ts";
-import { joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
+import { OfflineError, joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
+import { setupPwa, syncProgress } from "./pwa.ts";
 import { RaceMode, type RaceFinish } from "./race-mode.ts";
 import { StoryTracker, loadStory, renderObjective, renderStoryScreen, showRivalIntro } from "./story.ts";
 import { bindTouchControls, isPortrait, isTouchDevice, requestLandscape } from "./touch.ts";
@@ -472,6 +473,8 @@ async function returnToMenu() {
   menu.show();
   sound.song("lobby");
   ui.status.textContent = "Digite seu apelido";
+  // Jogou offline? Se a internet voltou, o progresso sobe agora.
+  void syncProgress(playerName);
 }
 
 function setLoading(text: string | null) {
@@ -920,7 +923,8 @@ function enter(entry: MenuEntry) {
   start(entry)
     .catch((err) => {
       console.error(err);
-      ui.status.textContent = "Não foi possível conectar ao servidor.";
+      ui.status.textContent = err instanceof OfflineError ? err.message : "Não foi possível conectar ao servidor.";
+      if (err instanceof OfflineError) showPopup("📴 Sem internet: este modo precisa de conexão");
       menu.show();
     })
     .finally(() => (entering = false));
@@ -928,6 +932,9 @@ function enter(entry: MenuEntry) {
 let entering = false;
 
 ui.name.value = storage.get("nfbmc:name");
+
+// PWA: service worker, aviso de offline e sincronização do progresso feito sem internet.
+setupPwa(() => playerName || ui.name.value.trim());
 
 const menu = createMenu({
   sound,

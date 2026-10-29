@@ -32,5 +32,11 @@ export async function ensureSchema() {
       updated_at timestamptz not null default now()
     );
     create index if not exists players_calories_idx on players (calories desc);
+    -- Progresso feito offline e enviado depois (/api/sync): cada lançamento uma vez só.
+    create table if not exists synced_entries (
+      id uuid primary key,
+      token uuid not null,
+      created_at timestamptz not null default now()
+    );
   `);
 }

@@ -134,6 +134,56 @@ export async function flushProfiles() {
 
 setInterval(() => void flushProfiles(), FLUSH_EVERY_MS).unref();
 
+/** Um lançamento feito offline: o que o jogador ganhou numa corrida ou no mundo. */
+export interface SyncEntry {
+  /** Id único (UUID) gerado no aparelho: o mesmo lançamento nunca conta duas vezes. */
+  id: string;
+  calories: number;
+  races: number;
+  wins: number;
+  best: number;
+}
+
+/** Ids já aplicados (sem banco, a proteção contra repetição vale enquanto o servidor estiver de pé). */
+const appliedEntries = new Set<string>();
+const MAX_ENTRY_CALORIES = 5_000_000;
+
+/** Marca o lançamento como aplicado; false se ele já tinha sido (reenvio). */
+async function claimEntry(id: string, token: string) {
+  if (appliedEntries.has(id)) return false;
+  if (pool) {
+    const { rowCount } = await pool.query("insert into synced_entries (id, token) values ($1, $2) on conflict do nothing", [id, token]);
+    if (!rowCount) return false;
+  }
+  appliedEntries.add(id);
+  return true;
+}
+
+/**
+ * Sincroniza o progresso feito offline (modo solo, história, corrida contra
+ * bots): soma cada lançamento na ficha do token, uma vez só. Devolve a ficha.
+ */
+export async function syncProfile(token: unknown, name: string, entries: unknown) {
+  if (!isToken(token) || !Array.isArray(entries)) return null;
+  const profile = await loadProfile(token, name);
+  let applied = 0;
+  for (const raw of entries.slice(0, 500)) {
+    const e = raw as Partial<SyncEntry>;
+    if (typeof e?.id !== "string" || !UUID.test(e.id)) continue;
+    const num = (v: unknown, max: number) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(max, Math.round(v))) : 0);
+    // Calorias podem ser negativas? Não: no jogo elas só sobem.
+    const entry = { calories: num(e.calories, MAX_ENTRY_CALORIES), races: num(e.races, 1), wins: num(e.wins, 1), best: num(e.best, MAX_ENTRY_CALORIES) };
+    if (!(await claimEntry(e.id, profile.token))) continue;
+    profile.calories += entry.calories;
+    profile.races += entry.races;
+    profile.wins += Math.min(entry.wins, entry.races);
+    profile.bestRace = Math.max(profile.bestRace, entry.best);
+    applied++;
+  }
+  if (applied) touch(profile);
+  return { applied, name: profile.name, calories: profile.calories, races: profile.races, wins: profile.wins };
+}
+
 /** Ficha do token para mostrar no menu (memória ou banco), sem criar uma nova. */
 export async function peekProfile(token: unknown) {
   if (!isToken(token)) return null;
