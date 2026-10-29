@@ -17,13 +17,18 @@ const PREFS_KEY = "nfbmc:audio";
 interface Prefs {
   music: boolean;
   sfx: boolean;
+  /** Volume (0 a 1) da música e dos efeitos (inclui as vozes), nas Opções. */
+  musicVolume: number;
+  sfxVolume: number;
 }
+
+const DEFAULT_PREFS: Prefs = { music: true, sfx: true, musicVolume: 1, sfxVolume: 1 };
 
 function loadPrefs(): Prefs {
   try {
-    return { music: true, sfx: true, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
+    return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
   } catch {
-    return { music: true, sfx: true };
+    return { ...DEFAULT_PREFS };
   }
 }
 
@@ -339,8 +344,18 @@ export class Sound {
     }
   }
 
-  toggle(kind: keyof Prefs) {
+  toggle(kind: "music" | "sfx") {
     this.prefs[kind] = !this.prefs[kind];
+    this.savePrefs();
+  }
+
+  /** Volume da música ou dos efeitos (0 a 1). */
+  setVolume(kind: "music" | "sfx", value: number) {
+    this.prefs[kind === "music" ? "musicVolume" : "sfxVolume"] = Math.max(0, Math.min(1, value));
+    this.savePrefs();
+  }
+
+  private savePrefs() {
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs));
     } catch {
@@ -352,8 +367,9 @@ export class Sound {
   private applyPrefs() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.musicBus.gain.setTargetAtTime(this.prefs.music ? 0.3 : 0, t, 0.1);
-    this.sfxBus.gain.setTargetAtTime(this.prefs.sfx ? 0.9 : 0, t, 0.1);
+    // Curva ao quadrado: o controle "soa" linear para o ouvido.
+    this.musicBus.gain.setTargetAtTime(this.prefs.music ? 0.3 * this.prefs.musicVolume ** 2 : 0, t, 0.1);
+    this.sfxBus.gain.setTargetAtTime(this.prefs.sfx ? 0.9 * this.prefs.sfxVolume ** 2 : 0, t, 0.1);
     this.music?.setEnabled(this.prefs.music);
   }
 
