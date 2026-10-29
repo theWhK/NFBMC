@@ -6,7 +6,18 @@
 // de amplificador (resposta ao impulso gerada no código), baixo, sintetizadores,
 // orquestra de cinema, mais compressão e limitador no fim.
 
-export const SR = 44100;
+export let SR = 44100;
+/** Modo leve (celular): taxa menor, menos vozes por acorde, menos superamostragem. */
+export let LITE = false;
+
+/**
+ * Liga o modo leve. Pode ser no meio do caminho (o aparelho se mostrou lento):
+ * as amostras já feitas continuam valendo (cada buffer sabe a própria taxa).
+ */
+export function useLiteRendering() {
+  SR = 24000;
+  LITE = true;
+}
 
 export const freqOf = (note: number) => 440 * 2 ** ((note - 69) / 12);
 
@@ -67,7 +78,10 @@ function toBuffer(channels: Float32Array[]) {
 
 /** Amostras já fabricadas (valem para todas as gravações). */
 const samples = new Map<string, AudioBuffer>();
-function sample(key: string, make: () => Float32Array | Float32Array[]) {
+function sample(name: string, make: () => Float32Array | Float32Array[]) {
+  // A taxa entra na chave: no modo leve as amostras são refeitas em 24 kHz
+  // (a resposta ao impulso de uma reverberação precisa ter a taxa do gravador).
+  const key = `${name}@${SR}`;
   let buffer = samples.get(key);
   if (!buffer) {
     const data = make();
@@ -79,7 +93,7 @@ function sample(key: string, make: () => Float32Array | Float32Array[]) {
 
 // --- Bateria -------------------------------------------------------------------
 
-export type Kit = "rock" | "break" | "boom" | "crunk" | "cine";
+export type Kit = "rock" | "break" | "boom" | "crunk" | "cine" | "synth";
 
 interface KickVoice { from: number; to: number; bend: number; decay: number; click: number; drive: number; crush?: number }
 const KICKS: Record<Kit, KickVoice> = {
@@ -88,6 +102,8 @@ const KICKS: Record<Kit, KickVoice> = {
   boom: { from: 105, to: 46, bend: 0.04, decay: 0.42, click: 0.35, drive: 2.4 },
   crunk: { from: 95, to: 44, bend: 0.05, decay: 0.7, click: 0.3, drive: 1.6 },
   cine: { from: 80, to: 36, bend: 0.06, decay: 0.9, click: 0.2, drive: 1.4 },
+  // Bateria eletrônica dos anos 80: bumbo curto e gordo, com ataque marcado.
+  synth: { from: 140, to: 48, bend: 0.028, decay: 0.26, click: 0.65, drive: 2.4 },
 };
 
 function kickSample(kit: Kit, variant: number) {
@@ -112,12 +128,12 @@ function kickSample(kit: Kit, variant: number) {
 
 function snareSample(kit: Kit, variant: number) {
   const rand = seeded(23 + variant * 13 + kit.length * 3);
-  const wires = kit === "rock" ? 0.2 : kit === "break" ? 0.14 : kit === "cine" ? 0.3 : 0.16;
+  const wires = kit === "rock" ? 0.2 : kit === "break" ? 0.14 : kit === "cine" ? 0.3 : kit === "synth" ? 0.12 : 0.16;
   const len = Math.floor(SR * (wires * 4 + 0.05));
   const out = new Float32Array(len);
   const band = new Filter("bandpass", kit === "break" ? 2400 : 3600, 0.6);
   const high = new Filter("highpass", 1200, 0.7);
-  const tone = kit === "boom" ? [200, 340] : kit === "break" ? [230, 400] : [185, 330];
+  const tone = kit === "boom" ? [200, 340] : kit === "break" ? [230, 400] : kit === "synth" ? [210, 290] : [185, 330];
   for (let i = 0; i < len; i++) {
     const t = i / SR;
     const shell = (Math.sin(2 * Math.PI * tone[0] * t) * 0.8 + Math.sin(2 * Math.PI * tone[1] * t) * 0.5) * Math.exp(-t / 0.06);
@@ -344,6 +360,26 @@ function reverbIR(seconds: number, decay: number) {
   return channels;
 }
 
+/**
+ * Reverberação com portão: uma sala grande que corta seca em ~0,24 s (a caixa
+ * dos anos 80). Ruído denso e quase plano, com a queda brusca no fim.
+ */
+function gatedIR() {
+  const rand = seeded(77);
+  const len = Math.floor(SR * 0.26);
+  const channels = [new Float32Array(len), new Float32Array(len)];
+  for (const data of channels) {
+    let low = 0;
+    for (let i = 0; i < len; i++) {
+      const t = i / SR;
+      low += (rand() * 2 - 1 - low) * 0.5;
+      const env = Math.min(1, t / 0.006) * (t < 0.2 ? 1 - t * 1.2 : Math.max(0, 0.76 * (1 - (t - 0.2) / 0.06)));
+      data[i] = low * env * 0.5;
+    }
+  }
+  return channels;
+}
+
 function distortionCurve(drive: number, asym = 0.1) {
   const curve = new Float32Array(2048);
   for (let i = 0; i < curve.length; i++) {
@@ -377,9 +413,18 @@ export interface BandOptions {
   drive?: number;
   /** Ganho final (acerta a altura de cada faixa: todas soam igualmente altas). */
   trim?: number;
+  /** "Fita": saturação leve e agudos arredondados no mestre (o calor do synthwave). */
+  tape?: number;
 }
 
 type Out = AudioNode;
+
+/** Instrumentos (todos recebem o instante como primeiro argumento). */
+const DEFERRED = [
+  "kick", "snare", "clap", "hat", "ride", "crash", "tom", "taiko", "crackle", "chord", "guitarLead", "bass", "sub",
+  "acid", "reese", "saws", "lead", "stab", "strings", "spiccato", "brass", "braam", "choir", "piano", "pizz", "bell",
+  "riser", "hit", "scratch", "arp", "ep", "simmons", "pad",
+] as const;
 
 export class Band {
   readonly ctx: OfflineAudioContext;
@@ -394,13 +439,28 @@ export class Band {
   private bassBus: GainNode;
   private keys: GainNode;
   private pumped: GainNode;
-  private guitarL: GainNode;
-  private guitarR: GainNode;
+  /** Amplificadores, coro e portão só existem se a faixa usar (convolvers custam CPU mesmo em silêncio). */
+  private amps: [GainNode, GainNode] | null = null;
+  private chorusBus: GainNode | null = null;
+  private gateBus: GainNode | null = null;
+  private drive: number;
   private clean: GainNode;
   private reverb: GainNode;
   private delay: GainNode;
   private noise: AudioBuffer;
   private variant = 0;
+  /** Coro/ensemble analógico (teclados, metais e solos do synthwave). */
+
+  /** Envio para a reverberação com portão. */
+
+  /** Transposição em semitons (troca de tom no último refrão, por exemplo). */
+  shift = 0;
+  /**
+   * Com uma fila, os instrumentos não criam os nós na hora: só anotam o que
+   * tocar e quando. O gravador cria os nós compasso a compasso (music.ts), para
+   * não travar a tela montando milhares de nós de uma vez.
+   */
+  queue: { t: number; run: () => void }[] | null = null;
 
   constructor(ctx: OfflineAudioContext, o: BandOptions) {
     this.ctx = ctx;
@@ -433,14 +493,26 @@ export class Band {
     clip.oversample = "none";
     // (O WaveShaper lê a entrada de -1 a 1: metade antes, e a curva cobre de -2 a 2.)
     trim.gain.value = (o.trim ?? 1) * 0.5;
-    this.master.connect(glue).connect(limiter).connect(trim).connect(clip).connect(ctx.destination);
+    const chain: AudioNode[] = [glue, limiter, trim, clip, ctx.destination];
+    if (o.tape) {
+      // Fita: um pouco de saturação e o agudo caindo devagar acima de ~13 kHz.
+      const warm = ctx.createWaveShaper();
+      warm.curve = distortionCurve(1 + o.tape, 0.04);
+      const roll = ctx.createBiquadFilter();
+      roll.type = "lowpass";
+      roll.frequency.value = 13500;
+      roll.Q.value = 0.5;
+      chain.unshift(warm, roll);
+    }
+    chain.reduce((from, to) => from.connect(to), this.master as AudioNode);
 
     this.reverb = ctx.createGain();
     const conv = ctx.createConvolver();
-    conv.buffer = sample("reverb", () => reverbIR(2.2, 2.6));
+    conv.buffer = sample("reverb", () => reverbIR(LITE ? 1.1 : 2.2, LITE ? 3.2 : 2.6));
     const reverbReturn = ctx.createGain();
     reverbReturn.gain.value = 0.55;
     this.reverb.connect(conv).connect(reverbReturn).connect(this.master);
+
 
     // Eco pingue-pongue em colcheia pontuada.
     this.delay = ctx.createGain();
@@ -482,8 +554,71 @@ export class Band {
     this.clean = ctx.createGain();
     this.clean.connect(this.master);
 
+    this.drive = o.drive ?? 18;
+    this.noise = sample("noise", () => {
+      const rand = seeded(5);
+      const data = new Float32Array(SR * 2);
+      for (let i = 0; i < data.length; i++) data[i] = rand() * 2 - 1;
+      return data;
+    });
+
+    // Todos os instrumentos passam pela fila (ver `queue`).
+    for (const name of DEFERRED) {
+      const original = (this as unknown as Record<string, (...a: unknown[]) => void>)[name];
+      (this as unknown as Record<string, unknown>)[name] = (t: number, ...rest: unknown[]) => {
+        if (this.queue) this.queue.push({ t, run: () => original.call(this, t, ...rest) });
+        else original.call(this, t, ...rest);
+      };
+    }
+  }
+
+  private get chorus(): GainNode {
+    if (this.chorusBus) return this.chorusBus;
+    const ctx = this.ctx;
+    // Coro analógico: o som seco mais duas cópias com atraso curto oscilando
+    // devagar (uma de cada lado). Sai pelo "pumped" (respira com o bumbo).
+    const chorus = ctx.createGain();
+    chorus.connect(this.pumped);
+    for (const [pan, base, rate] of (LITE ? [[0, 0.013, 0.6]] : [[-0.8, 0.011, 0.53], [0.8, 0.016, 0.71]]) as [number, number, number][]) {
+      const delay = ctx.createDelay(0.05);
+      delay.delayTime.value = base;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = rate;
+      const depth = ctx.createGain();
+      depth.gain.value = 0.0028;
+      lfo.connect(depth).connect(delay.delayTime);
+      lfo.start(0);
+      const p = ctx.createStereoPanner();
+      p.pan.value = pan;
+      const g = ctx.createGain();
+      g.gain.value = 0.8;
+      chorus.connect(delay).connect(g).connect(p).connect(this.pumped);
+    }
+
+    return (this.chorusBus = chorus);
+  }
+
+  private get gate(): GainNode {
+    if (this.gateBus) return this.gateBus;
+    const gate = this.ctx.createGain();
+    const gated = this.ctx.createConvolver();
+    gated.buffer = sample("gated", gatedIR);
+    gate.connect(gated).connect(this.master);
+    return (this.gateBus = gate);
+  }
+
+  private get guitarL(): GainNode {
+    return (this.amps ??= this.buildAmps())[0];
+  }
+
+  private get guitarR(): GainNode {
+    return (this.amps ??= this.buildAmps())[1];
+  }
+
+  private buildAmps(): [GainNode, GainNode] {
+    const ctx = this.ctx;
     // Duas guitarras (esquerda e direita), cada uma com amplificador e caixa.
-    const drive = o.drive ?? 18;
+    const drive = this.drive;
     const cab = sample("cabinet", cabinetIR);
     const makeAmp = (pan: number) => {
       const input = ctx.createGain();
@@ -496,7 +631,7 @@ export class Band {
       pre.gain.value = 6;
       const shaper = ctx.createWaveShaper();
       shaper.curve = distortionCurve(drive);
-      shaper.oversample = "4x";
+      shaper.oversample = LITE ? "none" : "4x";
       const scoop = ctx.createBiquadFilter();
       scoop.type = "peaking";
       scoop.frequency.value = 650;
@@ -518,14 +653,12 @@ export class Band {
       panner.connect(send).connect(this.reverb);
       return input;
     };
-    this.guitarL = makeAmp(-0.8);
-    this.guitarR = makeAmp(0.8);
-    this.noise = sample("noise", () => {
-      const rand = seeded(5);
-      const data = new Float32Array(SR * 2);
-      for (let i = 0; i < data.length; i++) data[i] = rand() * 2 - 1;
-      return data;
-    });
+    return [makeAmp(-0.8), makeAmp(0.8)] as [GainNode, GainNode];
+  }
+
+  /** Nota com a transposição do momento. */
+  private p(note: number) {
+    return note + this.shift;
   }
 
   /** Instante (s) da semicolcheia `step` (0-15) do compasso `bar`, com suingue. */
@@ -588,7 +721,8 @@ export class Band {
 
   snare(t: number, vel = 1) {
     const v = this.next() % 3;
-    this.play(sample(`snare:${this.kit}:${v}`, () => snareSample(this.kit, v)), t, 0.75 * vel, this.drums, { send: this.kit === "boom" ? 0.35 : 0.2 });
+    this.play(sample(`snare:${this.kit}:${v}`, () => snareSample(this.kit, v)), t, 0.75 * vel, this.drums, { send: this.kit === "boom" ? 0.35 : this.kit === "synth" ? 0.05 : 0.2 });
+    if (this.kit === "synth") this.play(sample(`snare:${this.kit}:${v}`, () => snareSample(this.kit, v)), t, 0.6 * vel, this.gate);
   }
 
   clap(t: number, vel = 1) {
@@ -631,6 +765,7 @@ export class Band {
    * `mute`: abafado com a palma (o "tchug"). `dur` em segundos.
    */
   chord(t: number, root: number, dur: number, mute = false, vel = 1, intervals = [0, 7, 12]) {
+    root = this.p(root);
     const notes = mute ? intervals.slice(0, 2) : intervals;
     for (const [side, out] of [[0, this.guitarL], [1, this.guitarR]] as const) {
       const v = (this.next() + side * 2) % 4;
@@ -642,6 +777,7 @@ export class Band {
 
   /** Nota única de guitarra solo (lado `pan`), com eco e sala. */
   guitarLead(t: number, note: number, dur: number, vel = 1) {
+    note = this.p(note);
     const key = `lead:${note}`;
     const buffer = sample(key, () => pluck(note, 2.5, false, note * 17, 0.8));
     // O solo passa pela guitarra da esquerda e da direita, mais o eco.
@@ -658,6 +794,7 @@ export class Band {
   // --- Baixos ---
   /** Baixo elétrico de palheta (corda dedilhada grave, saturada). */
   bass(t: number, note: number, dur: number, vel = 1, mute = false) {
+    note = this.p(note);
     const v = this.next() % 2;
     const buffer = sample(`bass:${note}:${mute}:${v}`, () => {
       const raw = pluck(note, mute ? 0.4 : 2, mute, note * 7 + v, 0.85);
@@ -669,6 +806,8 @@ export class Band {
 
   /** 808: senoide grave longa, com deslizada opcional desde `from`. */
   sub(t: number, note: number, dur: number, vel = 1, from?: number) {
+    note = this.p(note);
+    if (from !== undefined) from = this.p(from);
     const osc = this.ctx.createOscillator();
     const f = freqOf(note);
     osc.frequency.setValueAtTime(from !== undefined ? freqOf(from) : f * 1.6, t);
@@ -688,6 +827,8 @@ export class Band {
 
   /** Baixo ácido (303): serra no passa-baixa ressonante, com envelope e acento. */
   acid(t: number, note: number, dur: number, accent = false, cutoff = 900, slideTo?: number) {
+    note = this.p(note);
+    if (slideTo !== undefined) slideTo = this.p(slideTo);
     const osc = this.ctx.createOscillator();
     osc.type = "sawtooth";
     osc.frequency.setValueAtTime(freqOf(note), t);
@@ -731,7 +872,7 @@ export class Band {
     for (const cents of [-14, 14]) {
       const o = this.ctx.createOscillator();
       o.type = "sawtooth";
-      o.frequency.value = freqOf(note);
+      o.frequency.value = freqOf(this.p(note));
       o.detune.value = cents;
       o.connect(f);
       o.start(t);
@@ -742,14 +883,15 @@ export class Band {
 
   // --- Teclados e sintetizadores ---
   /** Serras empilhadas e desafinadas (supersaw), abertas em estéreo. */
-  saws(t: number, notes: number[], dur: number, o: { vel?: number; cutoff?: number; attack?: number; release?: number; voices?: number; detune?: number; send?: number; echo?: number; pump?: boolean; sweep?: number } = {}) {
+  saws(t: number, notes: number[], dur: number, o: { vel?: number; cutoff?: number; attack?: number; release?: number; voices?: number; detune?: number; send?: number; echo?: number; pump?: boolean; sweep?: number; chorus?: boolean; q?: number } = {}) {
     const vel = o.vel ?? 1;
     const attack = o.attack ?? 0.01;
     const release = o.release ?? 0.2;
-    const voices = o.voices ?? 4;
+    const voices = LITE ? Math.min(2, o.voices ?? 4) : o.voices ?? 4;
+    notes = notes.map((n) => this.p(n));
     const f = this.ctx.createBiquadFilter();
     f.type = "lowpass";
-    f.Q.value = 0.8;
+    f.Q.value = o.q ?? 0.8;
     f.frequency.setValueAtTime(o.cutoff ?? 3000, t);
     if (o.sweep) f.frequency.exponentialRampToValueAtTime(o.sweep, t + dur);
     const g = this.ctx.createGain();
@@ -757,7 +899,7 @@ export class Band {
     g.gain.linearRampToValueAtTime((0.2 * vel) / Math.sqrt(notes.length), t + attack);
     g.gain.setValueAtTime((0.2 * vel) / Math.sqrt(notes.length), t + dur);
     g.gain.linearRampToValueAtTime(0, t + dur + release);
-    f.connect(g).connect(o.pump === false ? this.clean : this.keys);
+    f.connect(g).connect(o.chorus ? this.chorus : o.pump === false ? this.clean : this.keys);
     if (o.send) {
       const s = this.ctx.createGain();
       s.gain.value = o.send;
@@ -784,7 +926,9 @@ export class Band {
   }
 
   /** Solo de sintetizador: quadrada + serra, vibrato, eco. */
-  lead(t: number, note: number, dur: number, o: { vel?: number; glideFrom?: number; cutoff?: number; echo?: number; type?: OscillatorType } = {}) {
+  lead(t: number, note: number, dur: number, o: { vel?: number; glideFrom?: number; cutoff?: number; echo?: number; type?: OscillatorType; porta?: number; chorus?: boolean } = {}) {
+    note = this.p(note);
+    const glideFrom = o.glideFrom !== undefined ? this.p(o.glideFrom) : undefined;
     const vel = o.vel ?? 1;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0, t);
@@ -794,7 +938,7 @@ export class Band {
     const f = this.ctx.createBiquadFilter();
     f.type = "lowpass";
     f.frequency.value = o.cutoff ?? 3500;
-    f.connect(g).connect(this.clean);
+    f.connect(g).connect(o.chorus ? this.chorus : this.clean);
     const echo = this.ctx.createGain();
     echo.gain.value = o.echo ?? 0.3;
     g.connect(echo).connect(this.delay);
@@ -812,8 +956,9 @@ export class Band {
     for (const [type, cents] of [[o.type ?? "square", -6], ["sawtooth", 6]] as const) {
       const osc = this.ctx.createOscillator();
       osc.type = type;
-      osc.frequency.setValueAtTime(freqOf(o.glideFrom ?? note), t);
-      if (o.glideFrom !== undefined) osc.frequency.setTargetAtTime(freqOf(note), t, 0.03);
+      // Portamento: a nota escorrega desde a anterior (o solo "cantado" dos anos 80).
+      osc.frequency.setValueAtTime(freqOf(glideFrom ?? note), t);
+      if (glideFrom !== undefined) osc.frequency.setTargetAtTime(freqOf(note), t, o.porta ?? 0.03);
       osc.detune.value = cents;
       depth.connect(osc.frequency);
       osc.connect(f);
@@ -838,7 +983,8 @@ export class Band {
   }
 
   /** Metais: serras com o filtro abrindo no ataque e fechando. */
-  brass(t: number, notes: number[], dur: number, vel = 1) {
+  brass(t: number, notes: number[], dur: number, vel = 1, chorus = false) {
+    notes = notes.map((n) => this.p(n));
     const g = this.ctx.createGain();
     const peak = 0.17 * vel / Math.sqrt(notes.length);
     g.gain.setValueAtTime(0, t);
@@ -851,7 +997,7 @@ export class Band {
     f.frequency.setValueAtTime(400, t);
     f.frequency.exponentialRampToValueAtTime(2800, t + 0.07);
     f.frequency.exponentialRampToValueAtTime(1300, t + Math.max(0.1, dur));
-    f.connect(g).connect(this.clean);
+    f.connect(g).connect(chorus ? this.chorus : this.clean);
     const s = this.ctx.createGain();
     s.gain.value = 0.45;
     g.connect(s).connect(this.reverb);
@@ -870,6 +1016,7 @@ export class Band {
 
   /** "Braam" de trailer: metais graves saturados abrindo devagar. */
   braam(t: number, notes: number[], dur: number, vel = 1) {
+    notes = notes.map((n) => this.p(n));
     const f = this.ctx.createBiquadFilter();
     f.type = "lowpass";
     f.Q.value = 3;
@@ -902,6 +1049,7 @@ export class Band {
 
   /** Coro sem letra ("aaah"): pulso estreito passando por três formantes de vogal. */
   choir(t: number, notes: number[], dur: number, vel = 1) {
+    notes = notes.map((n) => this.p(n));
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(0.8 * vel / Math.sqrt(notes.length), t + 0.6);
@@ -924,7 +1072,7 @@ export class Band {
       mix.connect(bp).connect(a).connect(g);
     }
     for (const note of notes) {
-      for (const cents of [-9, 0, 9]) {
+      for (const cents of LITE ? [-9, 9] : [-9, 0, 9]) {
         const osc = this.ctx.createOscillator();
         osc.type = "sawtooth";
         osc.frequency.value = freqOf(note);
@@ -946,7 +1094,7 @@ export class Band {
   }
 
   piano(t: number, notes: number[], dur: number, vel = 1, send = 0.35) {
-    for (const note of notes) {
+    for (const note of notes.map((n) => this.p(n))) {
       const buffer = sample(`piano:${note}`, () => pianoSample(note));
       this.play(buffer, t, 0.55 * vel, this.clean, { dur: Math.min(dur, buffer.duration - 0.05), send, pan: (note - 60) / 40 });
     }
@@ -954,12 +1102,14 @@ export class Band {
 
   /** Pizzicato: corda curta e limpa (o "plim" de comédia). */
   pizz(t: number, note: number, vel = 1) {
+    note = this.p(note);
     const buffer = sample(`pizz:${note}`, () => pluck(note, 0.6, false, note * 3 + 1, 0.9).map((x, i) => x * Math.exp(-i / (SR * 0.12))));
     this.play(buffer, t, 2.5 * vel, this.clean, { send: 0.35, pan: (note - 60) / 30 });
   }
 
   /** Sino FM (glockenspiel). */
   bell(t: number, note: number, dur = 1.2, vel = 1) {
+    note = this.p(note);
     const carrier = this.ctx.createOscillator();
     carrier.frequency.value = freqOf(note);
     const mod = this.ctx.createOscillator();
@@ -980,6 +1130,97 @@ export class Band {
       o.start(t);
       o.stop(t + dur + 0.05);
     }
+  }
+
+  // --- Synthwave ---
+  /**
+   * Baixo de sintetizador (o "pulso" do synthwave): serra e quadrada juntas,
+   * filtro ressonante fechando a cada nota. Tocado em semicolcheias vira arpejo.
+   */
+  arp(t: number, note: number, dur: number, o: { vel?: number; cutoff?: number; res?: number; decay?: number } = {}) {
+    note = this.p(note);
+    const vel = o.vel ?? 1;
+    const f = this.ctx.createBiquadFilter();
+    f.type = "lowpass";
+    f.Q.value = o.res ?? 6;
+    const cutoff = o.cutoff ?? 900;
+    f.frequency.setValueAtTime(cutoff * 3, t);
+    f.frequency.exponentialRampToValueAtTime(Math.max(100, cutoff * 0.5), t + (o.decay ?? 0.12));
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.24 * vel, t + 0.003);
+    g.gain.setValueAtTime(0.2 * vel, t + dur);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.02);
+    f.connect(g).connect(this.bassBus);
+    for (const [type, cents] of [["sawtooth", 0], ["square", -8]] as const) {
+      const osc = this.ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.value = freqOf(note);
+      osc.detune.value = cents;
+      osc.connect(f);
+      osc.start(t);
+      osc.stop(t + dur + 0.05);
+    }
+  }
+
+  /** Piano elétrico FM (o teclado "de vidro" dos anos 80): portadora e moduladora, mais o "tine" agudo. */
+  ep(t: number, notes: number[], dur: number, vel = 1) {
+    for (const raw of notes) {
+      const note = this.p(raw);
+      const f = freqOf(note);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime((0.16 * vel) / Math.sqrt(notes.length), t + 0.004);
+      g.gain.exponentialRampToValueAtTime((0.05 * vel) / Math.sqrt(notes.length), t + Math.min(dur, 1.2));
+      g.gain.setValueAtTime((0.05 * vel) / Math.sqrt(notes.length), t + dur);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.3);
+      g.connect(this.chorus);
+      const send = this.ctx.createGain();
+      send.gain.value = 0.3;
+      g.connect(send).connect(this.reverb);
+      const carrier = this.ctx.createOscillator();
+      carrier.frequency.value = f;
+      const mod = this.ctx.createOscillator();
+      mod.frequency.value = f;
+      const index = this.ctx.createGain();
+      index.gain.setValueAtTime(f * 1.6, t);
+      index.gain.exponentialRampToValueAtTime(f * 0.15, t + 0.6);
+      mod.connect(index).connect(carrier.frequency);
+      carrier.connect(g);
+      const tine = this.ctx.createOscillator();
+      tine.frequency.value = f * 14;
+      const tg = this.ctx.createGain();
+      tg.gain.setValueAtTime(0.25, t);
+      tg.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      tine.connect(tg).connect(g);
+      for (const o of [carrier, mod, tine]) {
+        o.start(t);
+        o.stop(t + dur + 0.35);
+      }
+    }
+  }
+
+  /** Teclado de fundo analógico: serras largas com o coro, ataque lento. */
+  pad(t: number, notes: number[], dur: number, vel = 1, cutoff = 2200) {
+    this.saws(t, notes, dur, { vel: vel * 0.85, cutoff, attack: Math.min(0.6, dur * 0.3), release: 0.8, voices: 3, detune: 16, send: 0.45, chorus: true });
+  }
+
+  /** Tom eletrônico (o "piu" dos anos 80): senoide caindo de altura, com a sala de portão. */
+  simmons(t: number, note: number, vel = 1) {
+    const osc = this.ctx.createOscillator();
+    const f = freqOf(note);
+    osc.frequency.setValueAtTime(f * 2.2, t);
+    osc.frequency.exponentialRampToValueAtTime(f, t + 0.16);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5 * vel, t + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    osc.connect(g).connect(this.drums);
+    const s = this.ctx.createGain();
+    s.gain.value = 0.5;
+    g.connect(s).connect(this.gate);
+    osc.start(t);
+    osc.stop(t + 0.55);
   }
 
   // --- Efeitos de produção ---
@@ -1037,6 +1278,7 @@ export class Band {
 
   /** "Arranhado" de toca-discos: um trecho de som indo e voltando. */
   scratch(t: number, note: number, pattern: number[]) {
+    note = this.p(note);
     const buffer = sample(`scratch:${note}`, () => {
       // Um "aah" de sintetizador gravado (o disco que o DJ arranha).
       const len = SR;

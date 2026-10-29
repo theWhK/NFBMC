@@ -19,6 +19,7 @@ import {
 
 import type { Sound } from "./audio.ts";
 import { introEnabled, setIntroEnabled } from "./intro.ts";
+import { openJukebox } from "./jukebox.ts";
 import { whereLabel } from "./coop.ts";
 import { fetchListaGorda, fetchOnline, fetchProfile } from "./net.ts";
 import { localProfile, pendingEntries, rememberCloudProfile } from "./sync.ts";
@@ -275,6 +276,8 @@ export function createMenu(options: MenuOptions) {
     scene?.setQuality(currentQuality);
     refreshQuality();
   });
+  // Jukebox: a tela para ouvir a trilha (client/src/jukebox.ts).
+  document.getElementById("opt-jukebox")?.addEventListener("click", () => openJukebox());
   // Abertura (aviso, logos e trailer) ao abrir o jogo.
   const optIntro = document.getElementById("opt-intro") as HTMLButtonElement;
   const refreshIntro = () => (optIntro.textContent = `Abertura: ${introEnabled() ? "ligada" : "desligada"}`);

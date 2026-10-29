@@ -254,6 +254,7 @@ export class Sound {
   private gameBus!: GainNode;
   private gameSend!: GainNode;
   private cine = false;
+  private jukeboxOn = false;
   private musicBus!: GainNode;
   private engine: PlayerEngine | null = null;
   private engineKey = "";
@@ -367,8 +368,9 @@ export class Sound {
   private applyPrefs() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    // Curva ao quadrado: o controle "soa" linear para o ouvido.
-    this.musicBus.gain.setTargetAtTime(this.prefs.music ? 0.3 * this.prefs.musicVolume ** 2 : 0, t, 0.1);
+    // Curva ao quadrado: o controle "soa" linear para o ouvido. No jukebox a música
+    // toca mesmo com ela desligada nas opções (é para ouvir), no volume escolhido.
+    this.musicBus.gain.setTargetAtTime(this.prefs.music || this.jukeboxOn ? 0.3 * this.prefs.musicVolume ** 2 : 0, t, 0.1);
     this.sfxBus.gain.setTargetAtTime(this.prefs.sfx ? 0.9 * this.prefs.sfxVolume ** 2 : 0, t, 0.1);
     this.music?.setEnabled(this.prefs.music);
   }
@@ -400,6 +402,46 @@ export class Sound {
       for (const g of [this.gameBus.gain, this.gameSend.gain]) g.setTargetAtTime(on ? 0 : 1, t, on ? 0.15 : 0.5);
     }
     this.cine = on;
+  }
+
+  /** Liga ou desliga o jukebox: a música do jogo sai, os sons do jogo calam (como na cinemática). */
+  jukebox(on: boolean) {
+    this.jukeboxOn = on;
+    if (!this.ctx || !this.music) return;
+    if (!on) this.jukeboxPause(false);
+    this.music.setJukebox(on);
+    const t = this.ctx.currentTime;
+    const mute = on || this.cine;
+    for (const g of [this.gameBus.gain, this.gameSend.gain]) g.setTargetAtTime(mute ? 0 : 1, t, 0.2);
+    this.applyPrefs();
+  }
+
+  jukeboxPlay(id: string, from = 0, onEnd?: () => void) {
+    this.music?.playTrack(id, from, onEnd);
+  }
+
+  jukeboxStop() {
+    this.music?.stopTrack();
+  }
+
+  jukeboxPrefetch(id: string) {
+    this.music?.prefetchTrack(id);
+  }
+
+  /** Pausa de verdade: o relógio do áudio para (no jukebox não toca mais nada). */
+  jukeboxPause(paused: boolean) {
+    if (!this.ctx) return;
+    if (paused) void this.ctx.suspend().catch(() => {});
+    else void this.ctx.resume().catch(() => {});
+  }
+
+  jukeboxPosition() {
+    return this.music?.position() ?? null;
+  }
+
+  /** O analisador da música (o visualizador do jukebox). */
+  musicAnalyser() {
+    return this.music?.analyser ?? null;
   }
 
   /** Corte de plano dentro do mesmo tema: uma pancada leve (na trilha, não nos efeitos). */
