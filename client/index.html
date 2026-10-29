@@ -34,29 +34,42 @@
 
       <!-- Lista principal, à esquerda (como no menu do Most Wanted de 2005). -->
       <nav id="menu-list" class="mw-list" aria-label="Menu principal">
-        <button type="button" data-screen="story" data-testid="story-menu" data-hint="Recupere o seu M3 Gorgonzola: suba a Lista Gorda do #10 ao #1 e derrote o Bruno."><span class="icon" aria-hidden="true">📋</span><span class="label">Modo história</span></button>
+        <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="Sua carreira em Porto Gordo: suba a Lista Gorda do #10 ao #1, coma tudo e fuja da Vigilância Sanitária. Tudo o que você faz conta."><span class="icon" aria-hidden="true">🏁</span><span class="label">Carreira</span></button>
         <button type="button" id="world" data-testid="world-button" data-hint="Porto Gordo com a galera: veja no mapa (M) quem está online e desafie para um pega, coma tudo e corra nos pontos de encontro."><span class="icon" aria-hidden="true">👥</span><span class="label">Co-op</span> <span class="online-badge" id="online-badge" data-testid="online-badge" hidden></span></button>
-        <button type="button" id="world-solo" data-testid="world-solo-button" data-hint="A cidade inteira só para você (e para a Vigilância Sanitária)."><span class="icon" aria-hidden="true">🚗</span><span class="label">Modo solo</span></button>
-        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida direto na largada, sem passar pela cidade: escolha a pista."><span class="icon" aria-hidden="true">🏁</span><span class="label">Corrida rápida</span></button>
-        <button type="button" data-screen="lista" data-testid="lista-menu" data-hint="Os rivais mais calóricos de Porto Gordo e o placar de todos os tempos."><span class="icon" aria-hidden="true">🏆</span><span class="label">Lista Gorda</span></button>
+        <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida direto na largada, sem passar pela cidade: escolha a pista."><span class="icon" aria-hidden="true">⏱️</span><span class="label">Corrida rápida</span></button>
+        <button type="button" data-screen="story" data-testid="story-menu" data-hint="O cardápio de Porto Gordo: os 10 combos da Lista Gorda, o que falta para cada desafio e os mais pedidos de todos os tempos."><span class="icon" aria-hidden="true">🍔</span><span class="label">Lista Gorda</span></button>
         <button type="button" data-screen="garage" data-testid="garage-menu" data-hint="Escolha a cor do seu carrinho de lanche."><span class="icon" aria-hidden="true">🔧</span><span class="label">Garagem</span></button>
-        <button type="button" data-screen="options" data-testid="options-menu" data-hint="Som, música e seu apelido de piloto."><span class="icon" aria-hidden="true">⚙️</span><span class="label">Opções</span></button>
+        <button type="button" data-screen="options" data-testid="options-menu" data-hint="Volume da música e dos efeitos, câmbio, gráficos e abertura."><span class="icon" aria-hidden="true">⚙️</span><span class="label">Opções</span></button>
         <button type="button" data-screen="credits" data-hint="Quem fez esta bagunça."><span class="icon" aria-hidden="true">🎬</span><span class="label">Créditos</span></button>
       </nav>
 
       <!-- Telas que abrem ao lado da lista. -->
-      <section class="mw-screen wide story-screen" data-screen-id="story" hidden>
-        <h2>Lista Gorda</h2>
-        <div class="story-board">
-          <ol class="ladder" id="ladder" data-testid="ladder"></ol>
-          <div class="story-target" id="story-target" data-testid="story-target"></div>
+      <!-- Lista Gorda: o cardápio de Porto Gordo, em tela cheia (é o painel da carreira). -->
+      <section class="mw-screen menu-board" data-screen-id="story" data-testid="menu-board" hidden>
+        <header class="board-head">
+          <div class="board-logo"><span class="burger-flag small" aria-hidden="true"></span><h2>Lista Gorda</h2><small>cardápio oficial de Porto Gordo</small></div>
+          <div class="board-progress" id="board-progress" data-testid="board-progress"></div>
+          <button type="button" class="link board-close" id="board-close" data-testid="board-close">Voltar (Esc)</button>
+        </header>
+        <div class="board-body">
+          <ol class="ladder board-list mw-list sub" id="ladder" data-testid="ladder"></ol>
+          <article class="board-detail" id="board-detail">
+            <div class="board-photo" id="board-photo" data-testid="board-photo"></div>
+            <div class="story-target" id="story-target" data-testid="story-target"></div>
+            <div class="mw-list sub story-actions">
+              <button type="button" id="story-go" data-testid="story-go">Ir para Porto Gordo</button>
+              <button type="button" id="story-challenge" data-testid="story-challenge">Desafiar</button>
+              <button type="button" id="story-car" data-testid="story-car">Carro: Uno Coxinha</button>
+              <button type="button" id="story-prologue">Rever o prólogo</button>
+            </div>
+          </article>
         </div>
-        <div class="mw-list sub story-actions">
-          <button type="button" id="story-go" data-testid="story-go">Ir para Porto Gordo</button>
-          <button type="button" id="story-challenge" data-testid="story-challenge">Desafiar</button>
-          <button type="button" id="story-car" data-testid="story-car">Carro: Uno Coxinha</button>
-          <button type="button" id="story-prologue">Rever o prólogo</button>
-        </div>
+        <footer class="board-hall">
+          <div id="hall" class="hall" data-testid="hall" hidden>
+            <p class="stamp small">Mais pedidos · todos os tempos</p>
+            <ol id="hall-list"></ol>
+          </div>
+        </footer>
       </section>
 
       <section class="mw-screen" data-screen-id="quick" hidden>
@@ -68,15 +81,6 @@
         <div class="mw-list sub">
           <button type="button" id="quick" data-testid="join-button">Com a galera</button>
           <button type="button" id="solo" data-testid="solo-button">Sozinho contra bots</button>
-        </div>
-      </section>
-
-      <section class="mw-screen wide" data-screen-id="lista" hidden>
-        <h2>Lista Gorda</h2>
-        <div class="rivals" id="rivals"></div>
-        <div id="hall" class="hall" data-testid="hall" hidden>
-          <p class="stamp small">Pilotos · todos os tempos</p>
-          <ol id="hall-list"></ol>
         </div>
       </section>
 
@@ -95,6 +99,8 @@
         <div class="mw-list sub">
           <button type="button" id="opt-music" data-testid="opt-music">Música: ligada</button>
           <button type="button" id="opt-sfx" data-testid="opt-sfx">Efeitos: ligados</button>
+          <label class="volume">Volume da música <input type="range" id="vol-music" data-testid="vol-music" min="0" max="100" step="5" /><output id="vol-music-out"></output></label>
+          <label class="volume">Volume dos efeitos e vozes <input type="range" id="vol-sfx" data-testid="vol-sfx" min="0" max="100" step="5" /><output id="vol-sfx-out"></output></label>
           <button type="button" id="opt-gearbox" data-testid="opt-gearbox">Câmbio: automático</button>
           <button type="button" id="opt-quality" data-testid="opt-quality">Gráficos: automático</button>
           <button type="button" id="opt-intro" data-testid="opt-intro">Abertura: ligada</button>

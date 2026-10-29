@@ -21,7 +21,7 @@ test("offline: abre sem internet, joga modo solo e corrida contra bots e sincron
   await expect(page.getByTestId("offline-badge")).toContainText("Sem internet");
   await expect(page.getByTestId("world-button")).toBeDisabled();
 
-  // Modo solo numa sala local: o carro anda.
+  // Carreira numa sala local: o carro anda.
   await page.getByTestId("name-input").fill("Offline");
   await page.getByTestId("world-solo-button").click();
   await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");

@@ -102,7 +102,7 @@ window.addEventListener("offline", () => void checkServer());
 /** Erro de quem tenta um modo que precisa de internet sem ter. */
 export class OfflineError extends Error {
   constructor() {
-    super("Sem internet: este modo precisa de conexão. Modo solo, história e corrida contra bots funcionam offline.");
+    super("Sem internet: este modo precisa de conexão. Carreira e corrida contra bots funcionam offline.");
   }
 }
 

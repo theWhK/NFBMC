@@ -13,7 +13,8 @@ test("3D: menu, garagem e cidade desenham sem erros", async ({ page }) => {
   await page.getByTestId("garage-menu").click();
   await page.getByTestId("car-list").locator('[data-car="a3bruno"]').click();
   await page.getByTestId("name-input").fill("Will");
-  await page.getByTestId("world-solo-button").click();
+  // Pelo Co-op: o carro da garagem vale ali (na carreira, vale o carro conquistado).
+  await page.getByTestId("world-button").click();
   // Com WebGL, o status não tem o aviso "sem 3D".
   await expect(page.getByTestId("status")).toHaveText("Conectado");
   await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
@@ -21,9 +22,17 @@ test("3D: menu, garagem e cidade desenham sem erros", async ({ page }) => {
   await page.waitForTimeout(1500);
   await page.keyboard.up("ArrowUp");
   // C troca a câmera (só existe com o 3D ligado), passando por todas até voltar.
+  // Os avisos duram 1,2 s; com o 3D desenhado na CPU um quadro pode levar quase isso,
+  // então o teste anota cada aviso no instante em que aparece (em vez de tentar vê-lo na tela).
+  await page.evaluate(() => {
+    const seen: string[] = ((window as unknown as { __popups: string[] }).__popups = []);
+    new MutationObserver((changes) => {
+      for (const change of changes) for (const node of change.addedNodes) seen.push((node as HTMLElement).textContent ?? "");
+    }).observe(document.getElementById("popups")!, { childList: true });
+  });
   for (const name of ["Perto", "Longe", "Baixa", "Capô", "Primeira pessoa", "Perseguição"]) {
     await page.keyboard.press("KeyC");
-    await expect(page.locator(".popup").last()).toContainText(`Câmera: ${name}`);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __popups: string[] }).__popups)).toContain(`Câmera: ${name}`);
   }
 
   expect(errors).toEqual([]);

@@ -12,7 +12,8 @@ test("garagem: escolher um carro e entrar com ele; o câmbio automático troca d
   await expect(page.getByTestId("car-info")).toContainText("Toyota Supra");
 
   await page.getByTestId("name-input").fill("Will");
-  await page.getByTestId("world-solo-button").click();
+  // O carro da garagem vale no Co-op e na corrida rápida (na carreira, vale o carro conquistado).
+  await page.getByTestId("world-button").click();
   await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
   expect((await me(page)).car).toBe("supra");
 
@@ -31,7 +32,8 @@ test("câmbio manual: segura a marcha até o limitador e troca com a tecla E", a
   await page.getByTestId("opt-gearbox").click();
   await expect(page.getByTestId("opt-gearbox")).toContainText("manual");
   await page.getByTestId("name-input").fill("Will");
-  await page.getByTestId("world-solo-button").click();
+  // O carro da garagem vale no Co-op e na corrida rápida (na carreira, vale o carro conquistado).
+  await page.getByTestId("world-button").click();
   await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
 
   await page.keyboard.down("ArrowUp");
