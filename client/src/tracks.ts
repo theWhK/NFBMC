@@ -9,6 +9,7 @@
 // refrão ganha solo, o último ganha bumbo duplo etc.).
 import type { Band, BandOptions } from "./band.ts";
 import { drums, fill, riff, roll, type CueName, type Groove, type Line, type Riff, type Section, type TrackDef } from "./compose.ts";
+import { BAILE_TRACKS } from "./tracks-baile.ts";
 import { SYNTHWAVE_TRACKS } from "./tracks-synthwave.ts";
 
 export { MOOD_LABELS, type CueName, type Mood, type Section, type TrackDef } from "./compose.ts";
@@ -753,8 +754,11 @@ const ABERTURA: TrackDef = {
 /** As faixas do "rádio" do jogo, por clima. */
 const byMood = (mood: TrackDef["mood"], list: TrackDef[]) => list.filter((t) => t.mood === mood);
 const ALL = [FRITURA_TOTAL, BANHA_ELETRICA, MOLHO_ESPECIAL, ESPETO_CORRIDO, RECHEIO_PESADO, BARRIGA_CHEIA, PRATO_PRINCIPAL, ...SYNTHWAVE_TRACKS];
-/** As faixas do "rádio" do jogo (e do jukebox), agrupadas por clima (o "álbum"); a abertura por último. */
-export const TRACKS: TrackDef[] = [...byMood("lobby", ALL), ...byMood("race", ALL), ...byMood("pursuit", ALL), ...byMood("duel", ALL), ABERTURA];
+/**
+ * As faixas do "rádio" do jogo (e do jukebox), agrupadas por clima (o "álbum");
+ * depois o Lado E (o baile, que também toca nos climas dele) e a abertura por último.
+ */
+export const TRACKS: TrackDef[] = [...byMood("lobby", ALL), ...byMood("race", ALL), ...byMood("pursuit", ALL), ...byMood("duel", ALL), ...BAILE_TRACKS, ABERTURA];
 
 // =====================================================================================
 // TEMAS DAS CINEMÁTICAS (modo história)
