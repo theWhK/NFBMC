@@ -5,13 +5,27 @@ test("menu: navega pelo teclado, mostra os rivais e guarda a cor da garagem", as
   const page = await context.newPage();
   await page.goto("/");
 
-  // ↓ quatro vezes chega na Lista Gorda; Enter abre a tela com os rivais.
-  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
-  await expect(page.getByTestId("lista-menu")).toHaveClass(/selected/);
+  // ↓ três vezes chega na Lista Gorda; Enter abre o cardápio (tela cheia).
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowDown");
+  await expect(page.getByTestId("story-menu")).toHaveClass(/selected/);
   await page.keyboard.press("Enter");
-  // Os 10 da Lista Gorda do modo história, com o Bruno no topo.
+  // Primeira vez: o prólogo antes.
+  await page.getByTestId("comic-skip").click();
+  await expect(page.getByTestId("menu-board")).toBeVisible();
+  // Os 10 combos da Lista Gorda, com o Bruno no topo; o cardápio abre no combo atual (#10).
   await expect(page.locator(".rival")).toHaveCount(10);
   await expect(page.locator(".rival").first()).toContainText("Bruno");
+  await expect(page.locator(".rival.current")).toContainText("Izzy Iogurte");
+  await expect(page.getByTestId("story-target")).toContainText("Izzy Iogurte");
+  // Setas destacam outro combo: a ficha troca, o botão de desafiar continua sendo do atual.
+  await page.keyboard.press("ArrowUp");
+  await expect(page.getByTestId("story-target")).toContainText("Ming Miojo");
+  await expect(page.getByTestId("story-target")).toContainText("Derrote o #10 primeiro");
+  await expect(page.getByTestId("story-target")).toContainText("Informação nutricional");
+  // Esc fecha o cardápio.
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("menu-board")).toBeHidden();
+  await expect(page.getByTestId("story-menu")).toBeVisible();
 
   // Garagem: escolher a terceira cor e conferir que ela fica guardada ao voltar.
   await page.getByTestId("garage-menu").click();
@@ -43,8 +57,9 @@ test("abertura: aviso, vinhetas de mentira, trailer e título; Esc pula tudo", a
   await expect(intro).toContainText("Aperte Enter");
   await page.keyboard.press("Enter");
   await expect(intro).toBeHidden();
-  // O Enter do título não "vazou" para o menu (abriria o modo história e o prólogo).
-  await expect(page.getByTestId("story-menu")).toHaveClass(/selected/);
+  // O Enter do título não "vazou" para o menu (entraria na carreira).
+  await expect(page.getByTestId("world-solo-button")).toHaveClass(/selected/);
+  expect(await page.evaluate(() => window.__nfbmc?.mode())).toBeUndefined();
   await expect(page.getByTestId("comic")).toBeHidden();
 
   // Créditos → "Ver a abertura"; Esc pula direto para o menu.
@@ -75,8 +90,11 @@ test("menu: carrossel anda com ←→ e o seletor de gráficos vale na hora, sem
   await page.keyboard.press("ArrowRight");
   await expect(page.getByTestId("world-button")).toHaveClass(/selected/);
   await expect(page.locator("#menu-hint strong")).toHaveText("Co-op");
+  // Single-player unificado: o primeiro item é a Carreira, e não há mais "Modo solo".
+  await expect(page.getByTestId("world-solo-button")).toContainText("Carreira");
+  await expect(page.locator("#menu-list")).not.toContainText("Modo solo");
   await page.keyboard.press("ArrowLeft");
-  await expect(page.getByTestId("story-menu")).toHaveClass(/selected/);
+  await expect(page.getByTestId("world-solo-button")).toHaveClass(/selected/);
 
   // Marca a página: se ela recarregar, a marca some.
   await page.evaluate(() => ((window as unknown as { marca: number }).marca = 1));
@@ -88,4 +106,18 @@ test("menu: carrossel anda com ←→ e o seletor de gráficos vale na hora, sem
   await quality.click();
   expect(await page.evaluate(() => (window as unknown as { marca?: number }).marca)).toBe(1);
   await expect(page.getByTestId("intro")).toBeHidden();
+});
+
+test("opções: volume da música e dos efeitos ficam guardados", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("options-menu").click();
+  await page.getByTestId("vol-music").fill("40");
+  await page.getByTestId("vol-sfx").fill("75");
+  await expect(page.locator("#vol-music-out")).toHaveText("40%");
+  const prefs = await page.evaluate(() => JSON.parse(localStorage.getItem("nfbmc:audio") ?? "{}"));
+  expect(prefs.musicVolume).toBeCloseTo(0.4);
+  expect(prefs.sfxVolume).toBeCloseTo(0.75);
+  await page.reload();
+  await page.getByTestId("options-menu").click();
+  await expect(page.getByTestId("vol-music")).toHaveValue("40");
 });

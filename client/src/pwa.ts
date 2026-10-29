@@ -28,7 +28,7 @@ export function refreshBadge() {
   const offline = isOffline();
   badge.hidden = !offline && pending === 0;
   badge.textContent = offline
-    ? `📴 Sem internet: modo solo, história e corrida contra bots funcionam${pending ? ` · ⏳ ${pending} para sincronizar` : ""}`
+    ? `📴 Sem internet: carreira e corrida contra bots funcionam${pending ? ` · ⏳ ${pending} para sincronizar` : ""}`
     : `⏳ Sincronizando ${pending} ${pending === 1 ? "partida" : "partidas"} com a nuvem…`;
 }
 

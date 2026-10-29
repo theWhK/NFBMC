@@ -42,7 +42,7 @@ import { createMenu, type MenuEntry } from "./menu.ts";
 import { OfflineError, joinEventRace, joinQuickRace, joinWorld } from "./net.ts";
 import { setupPwa, syncProgress } from "./pwa.ts";
 import { RaceMode, type RaceFinish } from "./race-mode.ts";
-import { StoryTracker, loadStory, renderObjective, renderStoryScreen, showRivalIntro } from "./story.ts";
+import { StoryTracker, loadStory, previewRival, renderObjective, renderStoryScreen, resetPreview, setPreviewHook, showRivalIntro } from "./story.ts";
 import { bindTouchControls, isPortrait, isTouchDevice, requestLandscape } from "./touch.ts";
 import { GameScene } from "./scene.ts";
 import { $, escapeHtml, hideModeUi, kcal, showPopup, ui } from "./ui.ts";
@@ -361,7 +361,8 @@ async function finaleOver(escaped: boolean) {
   } else {
     await playStoryScene(FINALE_BUSTED, heroCast());
   }
-  renderStoryScreen(story.story);
+  // De volta ao cardápio da Lista Gorda (autuado, o mesmo botão tenta a fuga de novo).
+  menu.openBoard();
 }
 
 /** Desafio liberado: avisa com destaque. */
@@ -448,8 +449,9 @@ function duelFinished(result: RaceFinish) {
       }
       // A chave, a nota fiscal e, entre um rival e outro, o Cross-fit no rádio, a Mia...
       await playStoryScene(rivalDefeatScene(rival), cast);
-      renderStoryScreen(story.story);
     }
+    // Ganhando ou perdendo, volta ao cardápio: o próximo combo (ou a revanche) está ali.
+    menu.openBoard();
   };
 }
 
@@ -649,7 +651,7 @@ function refreshPauseLabels() {
 function renderPauseCard() {
   const me = lastMapView?.cars.get(lastMapView.myId);
   const snapshot = mode?.snapshot()[mode.room.sessionId];
-  const where = storyMode ? "Modo história" : mode instanceof RaceMode ? (mode.pausable() ? "Corrida solo" : "Corrida") : mode?.pausable() ? "Modo solo" : "Co-op";
+  const where = storyMode ? "Carreira" : mode instanceof RaceMode ? (mode.pausable() ? "Corrida solo" : "Corrida") : mode?.pausable() ? "Carreira" : "Co-op";
   const car = snapshot ? carSpec(snapshot.car) : undefined;
   const rows = [
     `<p class="stamp small">${where}</p>`,
@@ -863,7 +865,9 @@ frame();
 async function start(entry: MenuEntry) {
   // Saiu do menu: a vitrine sai de cena (no duelo, só depois da apresentação do rival).
   if (entry !== "challenge") scene?.setShowcase(null);
-  storyMode = entry === "story" || entry === "challenge" || entry === "finale";
+  // Carreira: o single-player é um só. A cidade solo é sempre a da carreira
+  // (objetivos, rivais e duelos), e o progresso conta sempre.
+  storyMode = entry === "story" || entry === "world-solo" || entry === "challenge" || entry === "finale";
   finaleRun = entry === "finale";
   if (entry === "finale") {
     // Fuga final: Porto Gordo só seu, nível máximo, Cross-fit e todas as viaturas atrás.
@@ -894,8 +898,13 @@ async function start(entry: MenuEntry) {
     duelDone = false;
     setMode(new RaceMode(room, ctx, undefined, duelFinished));
   } else if (entry === "world" || entry === "world-solo" || entry === "story") {
-    // O modo história acontece num Porto Gordo só seu.
+    // A carreira acontece num Porto Gordo só seu.
     soloWorld = entry !== "world";
+    // Primeira vez na carreira: o prólogo antes (nos testes automáticos, não, como a abertura).
+    if (storyMode && !story.story.seenPrologue && !navigator.webdriver) {
+      await playStoryScene(PROLOGUE, heroCast());
+      story.markPrologueSeen();
+    }
     // ?spawn=centro na URL nasce direto num ponto de encontro (atalho para testes).
     const spawn = new URLSearchParams(location.search).get("spawn");
     await enterWorld(isRaceId(spawn) ? spawn : undefined);
@@ -945,8 +954,11 @@ const menu = createMenu({
   token: () => token,
   onEnter: enter,
   onAudioChange: refreshAudioButtons,
+  onPreviewRival: (index) => previewRival(story.story, index),
+  onBoardClosed: () => resetPreview(),
   onScreen: (id) => {
     if (id !== "story") return;
+    resetPreview();
     renderStoryScreen(story.story);
     const named = new URLSearchParams(location.search).get("cena");
     if (named && namedScene(named)) void playNamedScene(named);
@@ -976,6 +988,9 @@ async function playNamedScene(name: string) {
   const found = namedScene(name);
   if (found) await playStoryScene(found.panels, found.cast);
 }
+
+// No cardápio da Lista Gorda, a vitrine 3D gira o carro do combo em destaque.
+setPreviewHook((car, color) => scene?.setShowcase(color, car));
 
 // --- Abertura ----------------------------------------------------------------
 

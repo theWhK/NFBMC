@@ -1,6 +1,7 @@
 // Modo história no cliente: progresso salvo neste navegador, quadrinhos,
 // apresentação do rival, quadro da Lista Gorda no menu e o objetivo no HUD.
 import {
+  RACES,
   RIVALS_LADDER,
   cachedTopSpeed,
   canChallenge,
@@ -15,6 +16,7 @@ import {
   type StoryProgress,
 } from "@nfbmc/shared";
 
+import { cachedPortrait, portraitLater } from "./portraits.ts";
 import { $, escapeHtml, kcal, setHtml } from "./ui.ts";
 
 const STORY_KEY = "nfbmc:story";
@@ -234,39 +236,106 @@ function requirements(story: StoryProgress, rival: Rival) {
   return rows;
 }
 
+/** Combo da Lista Gorda em destaque no cardápio (índice em RIVALS_LADDER); null = o rival atual. */
+let previewed: number | null = null;
+/** A tela avisa quem está em destaque (a vitrine 3D mostra o carro dele por trás). */
+let onPreview: ((car: string, color: string) => void) | null = null;
+export const setPreviewHook = (hook: (car: string, color: string) => void) => (onPreview = hook);
+
+/** Destaca um combo do cardápio (passar o mouse, tocar ou andar com as setas). */
+export function previewRival(story: StoryProgress, index: number) {
+  previewed = index;
+  renderStoryScreen(story);
+}
+
+/** Foto do combo: o rival na frente do carro (3D), ou a arte de emoji sem WebGL. */
+function photo(rival: Rival) {
+  const spec = carSpec(rival.car);
+  const image = (url: string) => `<img src="${url}" alt="${escapeHtml(rival.name)} e o ${escapeHtml(spec.name)}" />`;
+  const cached = cachedPortrait(rival.name);
+  if (cached) return image(cached);
+  // Renderiza depois de a tela aparecer (sem travar o clique); até lá, a arte de emoji.
+  portraitLater(rival.name, rival.name, rival.car, spec.color, (url) => {
+    const frame = $("board-photo");
+    if (url && frame.dataset.rival === rival.name) setHtml(frame, image(url));
+  });
+  return `<div class="board-art">${escapeHtml(rival.taunt[0]?.art ?? "🍔")}</div>`;
+}
+
 export function renderStoryScreen(story: StoryProgress) {
   const rival = currentRival(story);
+  const current = Math.min(story.stage, RIVALS_LADDER.length - 1);
+  const shown = previewed ?? current;
+  // Cardápio: do combo #1 (o Bruno) para baixo, cada um com o "preço" (as calorias exigidas).
   setHtml($("ladder"), RIVALS_LADDER.map((r, i) => {
     const state = i < story.stage ? "beaten" : i === story.stage ? "current" : "locked";
-    return `<li class="${state}"><span class="rank">#${r.rank}</span><span>${escapeHtml(r.name)}<small>${escapeHtml(carSpec(r.car).name)}</small></span></li>`;
+    const badge = state === "beaten" ? "✔ comido" : state === "current" ? "🔥 pedido agora" : "🔒 em breve";
+    return `<li><button type="button" class="rival ${state}${i === shown ? " shown" : ""}" data-rival="${i}">` +
+      `<span class="rank">${r.rank}</span>` +
+      `<span class="combo"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.title)}</small></span>` +
+      `<span class="price">${kcal(r.bounty)}<small>kcal</small></span><span class="badge">${badge}</span></button></li>`;
   }).reverse().join(""));
+  $("board-progress").textContent = storyFinished(story)
+    ? "Lista Gorda zerada 👑"
+    : `${story.stage} de ${RIVALS_LADDER.length} combos comidos · ${kcal(story.bounty)} kcal na carreira`;
 
   const target = $("story-target");
   const challenge = $<HTMLButtonElement>("story-challenge");
-  if (finalePending(story)) {
+  const highlighted = RIVALS_LADDER[shown];
+  if (highlighted && !(finalePending(story) && previewed === null)) {
+    onPreview?.(highlighted.car, carSpec(highlighted.car).color);
+    $("board-photo").dataset.rival = highlighted.name;
+    setHtml($("board-photo"), photo(highlighted));
+  } else {
+    setHtml($("board-photo"), `<div class="board-art">🚨🌉</div>`);
+  }
+
+  if (finalePending(story) && previewed === null) {
     // Venceu o Bruno: falta a fuga final, com o Cross-fit e a cidade inteira atrás.
     setHtml(target, `
       <h3>Fuga final: Sargento Cross-fit</h3>
       <p class="quote">Você recuperou o M3 Gorgonzola, mas a Vigilância Sanitária inteira fechou a cidade. A única saída é a ponte inacabada do Cais.</p>
       <div class="req"><span>Chegue na ponte do Cais sem ser autuado</span><strong>🌉</strong></div>`);
+  } else if (!rival && previewed === null) {
+    setHtml(target, `<h3>Você é o Número 1!</h3><p class="quote">O M3 Gorgonzola voltou para casa, o A3 do Bruno está na sua garagem e o Cross-fit ficou na beira do cais. Porto Gordo é sua.</p>`);
+  } else if (highlighted) {
+    // Ficha do combo: "informação nutricional" (carro, pista, ritmo) e o que falta para pedir.
+    const spec = carSpec(highlighted.car);
+    const state = shown < story.stage ? "beaten" : shown === story.stage ? "current" : "locked";
+    const rows = state === "current" ? requirements(story, highlighted) : [];
+    const race = RACES[highlighted.race]?.name ?? highlighted.race;
+    setHtml(target, `
+      <h3>#${highlighted.rank} ${escapeHtml(highlighted.name)}</h3>
+      <p class="quote">“${escapeHtml(highlighted.taunt[0]?.text ?? highlighted.title)}”</p>
+      <table class="nutrition">
+        <caption>Informação nutricional</caption>
+        <tr><th>Carro</th><td>${escapeHtml(spec.name)}</td></tr>
+        <tr><th>Pista do duelo</th><td>${escapeHtml(race)}</td></tr>
+        <tr><th>Gordura no volante</th><td><span class="meter"><i style="width:${Math.round(highlighted.skill * 100)}%"></i></span></td></tr>
+        <tr><th>Preço</th><td>${kcal(highlighted.bounty)} kcal · ${highlighted.wins} ${highlighted.wins === 1 ? "vitória" : "vitórias"}${highlighted.escapes ? ` · ${highlighted.escapes} ${highlighted.escapes === 1 ? "fuga" : "fugas"} ${highlighted.escapeStars}★` : ""}</td></tr>
+      </table>
+      ${state === "beaten" ? `<p class="stamp small">Nota fiscal na mão: ${escapeHtml(spec.name)} é seu</p>` : ""}
+      ${state === "locked" ? `<p class="hint">🔒 Derrote o #${RIVALS_LADDER[story.stage]?.rank ?? ""} primeiro.</p>` : ""}
+      ${rows.map((r) => `<div class="req ${r.have >= r.need ? "done" : ""}"><span>${r.label}</span><strong>${r.text}</strong></div>`).join("")}`);
+  }
+
+  // O botão de desafiar é sempre do combo atual (ou da fuga final).
+  if (finalePending(story)) {
     challenge.disabled = false;
     challenge.textContent = "Fugir pela ponte 🚨";
   } else if (!rival) {
-    setHtml(target, `<h3>Você é o Número 1!</h3><p class="quote">O M3 Gorgonzola voltou para casa, o A3 do Bruno está na sua garagem e o Cross-fit ficou na beira do cais. Porto Gordo é sua.</p>`);
     challenge.disabled = true;
     challenge.textContent = "Lista Gorda zerada 👑";
   } else {
-    const rows = requirements(story, rival);
-    setHtml(target, `
-      <h3>#${rival.rank} ${escapeHtml(rival.name)}</h3>
-      <p class="quote">${escapeHtml(rival.title)} · ${escapeHtml(carSpec(rival.car).name)} · ${rival.race === "autodromo" ? "Autódromo" : "corrida de rua"}</p>
-      ${rows.map((r) => `<div class="req ${r.have >= r.need ? "done" : ""}"><span>${r.label}</span><strong>${r.text}</strong></div>`).join("")}`);
     challenge.disabled = !canChallenge(story);
     challenge.textContent = canChallenge(story) ? `Desafiar ${rival.name}` : "Desafiar (cumpra os requisitos)";
   }
   $("story-car").textContent = `Carro: ${carSpec(story.car).name}`;
   $("story-go").textContent = storyFinished(story) ? "Passear por Porto Gordo" : "Ir para Porto Gordo";
 }
+
+/** Ao fechar e abrir o cardápio de novo, ele volta para o combo atual. */
+export const resetPreview = () => (previewed = null);
 
 export function renderObjective(story: StoryProgress, finaleDistance?: number) {
   const el = $("story-objective");

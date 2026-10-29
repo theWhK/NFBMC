@@ -25,7 +25,7 @@ test("pausa e mapa: no modo solo Esc e o mapa pausam o jogo de verdade, Tab abre
   expect([later.x, later.z, later.speed]).toEqual([atPause.x, atPause.z, atPause.speed]);
 
   // Resumo ao lado da pausa.
-  await expect(page.getByTestId("pause-card")).toContainText("Modo solo");
+  await expect(page.getByTestId("pause-card")).toContainText("Carreira");
 
   // Continuar: 3, 2, 1 (ainda parado) e o jogo volta; freando, o carro perde velocidade
   // (só soltar o acelerador não basta: numa descida o carro embala).

@@ -47,8 +47,12 @@ interface MenuOptions {
   token: () => string | undefined;
   onEnter: (entry: MenuEntry) => void;
   onAudioChange: () => void;
-  /** Uma tela do menu foi aberta (ex.: a do modo história, para atualizar o quadro). */
+  /** Uma tela do menu foi aberta (ex.: a Lista Gorda, para atualizar o cardápio). */
   onScreen?: (id: string) => void;
+  /** Combo do cardápio em destaque (setas, mouse ou toque). */
+  onPreviewRival?: (index: number) => void;
+  /** O cardápio (tela cheia) fechou. */
+  onBoardClosed?: () => void;
 }
 
 /** Manchetes da faixa de notícias do menu. */
@@ -71,7 +75,6 @@ export function createMenu(options: MenuOptions) {
   const screens = [...document.querySelectorAll<HTMLElement>(".mw-screen")];
   const hint = document.getElementById("menu-hint")!;
   const swatches = document.getElementById("swatches")!;
-  const rivals = document.getElementById("rivals")!;
   const optMusic = document.getElementById("opt-music") as HTMLButtonElement;
   const optSfx = document.getElementById("opt-sfx") as HTMLButtonElement;
   const profileKcal = document.getElementById("profile-kcal")!;
@@ -117,7 +120,13 @@ export function createMenu(options: MenuOptions) {
     showcase();
     for (const b of active) b.classList.remove("selected");
     active = items;
-    select(items.indexOf(items.find((b) => b.dataset.screen === openScreen?.dataset.screenId) ?? items[0]));
+    const from = openScreen;
+    select(items.indexOf(items.find((b) => b.dataset.screen === from?.dataset.screenId) ?? items[0]));
+    // O cardápio da Lista Gorda é tela cheia: Esc fecha de vez.
+    if (from?.classList.contains("menu-board")) {
+      showScreen(null);
+      options.onBoardClosed?.();
+    }
   };
 
   const activate = (button: HTMLButtonElement) => {
@@ -130,7 +139,11 @@ export function createMenu(options: MenuOptions) {
       const sub = [...(openScreen?.querySelectorAll<HTMLButtonElement>(".mw-list.sub button, .swatches button") ?? [])];
       if (sub.length) {
         active = sub;
-        select(button.dataset.screen === "garage" ? Math.max(0, sub.findIndex((b) => b.dataset.car === car)) : 0, sub);
+        // Garagem: no carro escolhido. Lista Gorda: no combo atual.
+        const start = button.dataset.screen === "garage"
+          ? sub.findIndex((b) => b.dataset.car === car)
+          : button.dataset.screen === "story" ? sub.findIndex((b) => b.classList.contains("current")) : 0;
+        select(Math.max(0, start), sub);
       }
       return;
     }
@@ -290,11 +303,7 @@ export function createMenu(options: MenuOptions) {
     options.onAudioChange();
   });
 
-  // Lista Gorda: os rivais (bots) e o placar de todos os tempos.
-  // A Lista Gorda do modo história, do #1 (o Bruno) para baixo.
-  setHtml(rivals, [...RIVALS_LADDER].reverse().map((r) => `
-    <div class="rival"><span class="rank">${r.rank}</span><strong>${escapeHtml(r.name)}</strong>
-    <span class="title">${escapeHtml(r.title)} · ${escapeHtml(carSpec(r.car).name)}</span><span class="quote">“${escapeHtml(r.taunt[0].text)}”</span></div>`).join(""));
+  // Mais pedidos de todos os tempos (o rodapé do cardápio da Lista Gorda).
   fetchListaGorda().then((entries) => {
     if (!entries.length) return;
     setHtml(ui.hallList, entries.map((e) => `<li>${escapeHtml(e.name)} <strong>${kcal(e.calories)}</strong></li>`).join(""));
@@ -370,7 +379,43 @@ export function createMenu(options: MenuOptions) {
       showCarInfo(current.dataset.car);
       showcase(color, current.dataset.car);
     }
+    // No cardápio, andar pelos combos troca a foto e a ficha.
+    if (current?.dataset.rival && (e.code.startsWith("Arrow"))) options.onPreviewRival?.(Number(current.dataset.rival));
   });
+
+  // Cardápio: passar o mouse ou tocar num combo destaca ele; "Voltar" fecha.
+  const ladder = document.getElementById("ladder")!;
+  const pickCombo = (e: Event) => {
+    const button = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-rival]");
+    if (!button) return;
+    options.onPreviewRival?.(Number(button.dataset.rival));
+    // Mantém a seleção do teclado no combo tocado (a lista foi redesenhada).
+    if (active !== items) {
+      const sub = [...(openScreen?.querySelectorAll<HTMLButtonElement>(".mw-list.sub button") ?? [])];
+      active = sub;
+      select(Math.max(0, sub.findIndex((b) => b.dataset.rival === button.dataset.rival)), sub);
+    }
+  };
+  ladder.addEventListener("click", pickCombo);
+  ladder.addEventListener("mouseover", (e) => {
+    if (matchMedia("(hover: hover)").matches) pickCombo(e);
+  });
+  document.getElementById("board-close")!.addEventListener("click", () => back());
+
+  // Volume da música e dos efeitos (0 a 100%).
+  for (const kind of ["music", "sfx"] as const) {
+    const slider = document.getElementById(`vol-${kind}`) as HTMLInputElement;
+    const out = document.getElementById(`vol-${kind}-out`)!;
+    const value = kind === "music" ? sound.prefs.musicVolume : sound.prefs.sfxVolume;
+    slider.value = String(Math.round(value * 100));
+    out.textContent = `${slider.value}%`;
+    slider.addEventListener("input", () => {
+      sound.setVolume(kind, Number(slider.value) / 100);
+      out.textContent = `${slider.value}%`;
+    });
+    // Ao soltar, um clique no volume novo (só nos efeitos: a música já está tocando).
+    if (kind === "sfx") slider.addEventListener("change", () => sound.click());
+  }
 
   select(0);
   return {
@@ -379,8 +424,21 @@ export function createMenu(options: MenuOptions) {
     manual: () => manual,
     /** Pista escolhida na corrida rápida. */
     quickTrack: () => trackSelect.value as RaceId,
+    /** Abre o cardápio da Lista Gorda (depois de um duelo ou da fuga final: mostra como ficou a carreira). */
+    openBoard: () => {
+      const item = items.find((b) => b.dataset.screen === "story");
+      if (item) activate(item);
+    },
     /** Volta a mostrar a vitrine (ex.: ao sair do jogo) e atualiza quem está online. */
     show: () => {
+      // Voltando de uma partida, o menu reaparece sem o cardápio (tela cheia) aberto.
+      if (openScreen?.classList.contains("menu-board")) {
+        if (active !== items) back();
+        else {
+          showScreen(null);
+          options.onBoardClosed?.();
+        }
+      }
       showcase();
       void refreshOnline();
     },
