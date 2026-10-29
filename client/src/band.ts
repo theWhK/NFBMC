@@ -93,7 +93,7 @@ function sample(name: string, make: () => Float32Array | Float32Array[]) {
 
 // --- Bateria -------------------------------------------------------------------
 
-export type Kit = "rock" | "break" | "boom" | "crunk" | "cine" | "synth";
+export type Kit = "rock" | "break" | "boom" | "crunk" | "cine" | "synth" | "baile";
 
 interface KickVoice { from: number; to: number; bend: number; decay: number; click: number; drive: number; crush?: number }
 const KICKS: Record<Kit, KickVoice> = {
@@ -104,6 +104,8 @@ const KICKS: Record<Kit, KickVoice> = {
   cine: { from: 80, to: 36, bend: 0.06, decay: 0.9, click: 0.2, drive: 1.4 },
   // Bateria eletrônica dos anos 80: bumbo curto e gordo, com ataque marcado.
   synth: { from: 140, to: 48, bend: 0.028, decay: 0.26, click: 0.65, drive: 2.4 },
+  // Baile (funk, brega funk, phonk): bumbo curto, seco e estalado; o grave fica com o 808.
+  baile: { from: 210, to: 64, bend: 0.014, decay: 0.085, click: 1, drive: 3.5 },
 };
 
 function kickSample(kit: Kit, variant: number) {
@@ -128,12 +130,12 @@ function kickSample(kit: Kit, variant: number) {
 
 function snareSample(kit: Kit, variant: number) {
   const rand = seeded(23 + variant * 13 + kit.length * 3);
-  const wires = kit === "rock" ? 0.2 : kit === "break" ? 0.14 : kit === "cine" ? 0.3 : kit === "synth" ? 0.12 : 0.16;
+  const wires = kit === "rock" ? 0.2 : kit === "break" ? 0.14 : kit === "cine" ? 0.3 : kit === "synth" ? 0.12 : kit === "baile" ? 0.09 : 0.16;
   const len = Math.floor(SR * (wires * 4 + 0.05));
   const out = new Float32Array(len);
   const band = new Filter("bandpass", kit === "break" ? 2400 : 3600, 0.6);
   const high = new Filter("highpass", 1200, 0.7);
-  const tone = kit === "boom" ? [200, 340] : kit === "break" ? [230, 400] : kit === "synth" ? [210, 290] : [185, 330];
+  const tone = kit === "boom" ? [200, 340] : kit === "break" ? [230, 400] : kit === "synth" ? [210, 290] : kit === "baile" ? [250, 440] : [185, 330];
   for (let i = 0; i < len; i++) {
     const t = i / SR;
     const shell = (Math.sin(2 * Math.PI * tone[0] * t) * 0.8 + Math.sin(2 * Math.PI * tone[1] * t) * 0.5) * Math.exp(-t / 0.06);
@@ -186,6 +188,42 @@ function metalSample(kind: "hat" | "open" | "ride" | "crash", variant: number) {
     const ping = kind === "ride" ? Math.sin(2 * Math.PI * 2900 * t) * Math.exp(-t / 0.25) * 0.15 : 0;
     const x = hp2.run(hp.run(metal * metalMix + noiseHp.run(rand() * 2 - 1) * (1 - metalMix)));
     out[i] = (peak.run(x) * env + ping) * (kind === "hat" ? 1.3 : 1);
+  }
+  return out;
+}
+
+/** Atabaque do tamborzão: couro grave com o tapa (ruído na região do estalo) no ataque. */
+function tamborSample(note: number, slap: boolean, variant: number) {
+  const rand = seeded(61 + variant * 3 + note * 7 + (slap ? 1 : 0));
+  const len = Math.floor(SR * (slap ? 0.25 : 0.45));
+  const out = new Float32Array(len);
+  const f0 = freqOf(note);
+  const crack = new Filter("bandpass", slap ? 1900 : 900, 1.2);
+  let phase = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / SR;
+    phase += (2 * Math.PI * f0 * (1 + 0.35 * Math.exp(-t / 0.012))) / SR;
+    const skin = Math.sin(phase) * Math.exp(-t / (slap ? 0.06 : 0.16));
+    const hit = crack.run(rand() * 2 - 1) * Math.exp(-t / (slap ? 0.018 : 0.008)) * (slap ? 2.6 : 1.2);
+    out[i] = Math.tanh((skin + hit) * 1.8) * 0.85;
+  }
+  return out;
+}
+
+/** Cowbell de bateria eletrônica (o do phonk): duas quadradas na razão ~1,48, filtradas e saturadas. */
+function cowbellSample(note: number) {
+  const len = Math.floor(SR * 0.6);
+  const out = new Float32Array(len);
+  const f = freqOf(note);
+  const band = new Filter("bandpass", f * 1.9, 1.4);
+  const low = new Filter("lowpass", 6500, 0.7);
+  for (let i = 0; i < len; i++) {
+    const t = i / SR;
+    const a = ((f * i) / SR) % 1 < 0.5 ? 1 : -1;
+    const b = ((f * 1.48 * i) / SR) % 1 < 0.5 ? 1 : -1;
+    // Ataque estalado e a "cauda" curta do metal.
+    const env = Math.exp(-t / 0.035) * 0.65 + Math.exp(-t / 0.18) * 0.35;
+    out[i] = Math.tanh(low.run(band.run((a + b) * 0.5)) * env * 3.2) * 0.8;
   }
   return out;
 }
@@ -415,6 +453,8 @@ export interface BandOptions {
   trim?: number;
   /** "Fita": saturação leve e agudos arredondados no mestre (o calor do synthwave). */
   tape?: number;
+  /** Mestre escuro (Hz): corta o agudo de tudo, como o som abafado do phonk e do funk de paredão. */
+  lowpass?: number;
 }
 
 type Out = AudioNode;
@@ -423,7 +463,7 @@ type Out = AudioNode;
 const DEFERRED = [
   "kick", "snare", "clap", "hat", "ride", "crash", "tom", "taiko", "crackle", "chord", "guitarLead", "bass", "sub",
   "acid", "reese", "saws", "lead", "stab", "strings", "spiccato", "brass", "braam", "choir", "piano", "pizz", "bell",
-  "riser", "hit", "scratch", "arp", "ep", "simmons", "pad",
+  "riser", "hit", "scratch", "arp", "ep", "simmons", "pad", "tambor", "cowbell", "boom", "vox",
 ] as const;
 
 export class Band {
@@ -503,6 +543,13 @@ export class Band {
       roll.frequency.value = 13500;
       roll.Q.value = 0.5;
       chain.unshift(warm, roll);
+    }
+    if (o.lowpass) {
+      const dark = ctx.createBiquadFilter();
+      dark.type = "lowpass";
+      dark.frequency.value = o.lowpass;
+      dark.Q.value = 0.6;
+      chain.unshift(dark);
     }
     chain.reduce((from, to) => from.connect(to), this.master as AudioNode);
 
@@ -926,7 +973,7 @@ export class Band {
   }
 
   /** Solo de sintetizador: quadrada + serra, vibrato, eco. */
-  lead(t: number, note: number, dur: number, o: { vel?: number; glideFrom?: number; cutoff?: number; echo?: number; type?: OscillatorType; porta?: number; chorus?: boolean } = {}) {
+  lead(t: number, note: number, dur: number, o: { vel?: number; glideFrom?: number; cutoff?: number; echo?: number; type?: OscillatorType; porta?: number; chorus?: boolean; vibrato?: number; vibratoRate?: number } = {}) {
     note = this.p(note);
     const glideFrom = o.glideFrom !== undefined ? this.p(o.glideFrom) : undefined;
     const vel = o.vel ?? 1;
@@ -946,10 +993,10 @@ export class Band {
     rev.gain.value = 0.2;
     g.connect(rev).connect(this.reverb);
     const vib = this.ctx.createOscillator();
-    vib.frequency.value = 5.6;
+    vib.frequency.value = o.vibratoRate ?? 5.6;
     const depth = this.ctx.createGain();
     depth.gain.setValueAtTime(0, t);
-    depth.gain.linearRampToValueAtTime(freqOf(note) * 0.007, t + Math.min(0.35, dur));
+    depth.gain.linearRampToValueAtTime(freqOf(note) * 0.007 * (o.vibrato ?? 1), t + Math.min(0.35, dur));
     vib.connect(depth);
     vib.start(t);
     vib.stop(t + dur + 0.1);
@@ -1105,6 +1152,100 @@ export class Band {
     note = this.p(note);
     const buffer = sample(`pizz:${note}`, () => pluck(note, 0.6, false, note * 3 + 1, 0.9).map((x, i) => x * Math.exp(-i / (SR * 0.12))));
     this.play(buffer, t, 2.5 * vel, this.clean, { send: 0.35, pan: (note - 60) / 30 });
+  }
+
+  // --- Baile (funk, brega funk e phonk) ---
+  /** Atabaque do tamborzão: `slap` é o tapa (agudo e estalado). */
+  tambor(t: number, note: number, vel = 1, slap = false) {
+    const v = this.next() % 2;
+    this.play(sample(`tambor:${note}:${slap}:${v}`, () => tamborSample(note, slap, v)), t, 0.8 * vel, this.drums, { pan: slap ? -0.2 : 0.15, send: 0.08 });
+  }
+
+  /** Cowbell afinado (a melodia do phonk), com um pouco de eco. */
+  cowbell(t: number, note: number, dur = 0.25, vel = 1) {
+    note = this.p(note);
+    this.play(sample(`cowbell:${note}`, () => cowbellSample(note)), t, 0.8 * vel, this.clean, { dur: Math.min(dur, 0.55), send: 0.12, pan: 0.1 });
+  }
+
+  /**
+   * 808 de paredão: senoide bem grave com a saturação que dá os harmônicos (o
+   * grave "aparece" até no alto-falante do celular), soco no ataque e deslize
+   * de nota: desde `from` no começo e/ou para `to` no fim.
+   */
+  boom(t: number, note: number, dur: number, o: { vel?: number; from?: number; to?: number; drive?: number } = {}) {
+    note = this.p(note);
+    const vel = o.vel ?? 1;
+    const f = freqOf(note);
+    const osc = this.ctx.createOscillator();
+    osc.frequency.setValueAtTime(o.from !== undefined ? freqOf(this.p(o.from)) : f * 1.25, t);
+    osc.frequency.exponentialRampToValueAtTime(f, t + (o.from !== undefined ? 0.12 : 0.025));
+    if (o.to !== undefined) {
+      osc.frequency.setValueAtTime(f, t + dur * 0.55);
+      osc.frequency.exponentialRampToValueAtTime(freqOf(this.p(o.to)), t + dur * 0.95);
+    }
+    const shaper = this.ctx.createWaveShaper();
+    shaper.curve = distortionCurve(o.drive ?? 4, 0);
+    shaper.oversample = LITE ? "none" : "2x";
+    // O que sobra de agudo da saturação é cortado: fica grave e encorpado, sem chiado.
+    const low = this.ctx.createBiquadFilter();
+    low.type = "lowpass";
+    low.frequency.value = 1200;
+    low.Q.value = 0.8;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.32 * vel, t + 0.004);
+    g.gain.setTargetAtTime(0.22 * vel, t + 0.03, 0.18);
+    g.gain.setValueAtTime(0.22 * vel, t + dur);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.05);
+    osc.connect(shaper).connect(low).connect(g).connect(this.bassBus);
+    osc.start(t);
+    osc.stop(t + dur + 0.08);
+  }
+
+  /**
+   * Voz sintética (sem palavra): serra passando por três formantes de vogal, o
+   * "ô", "ê", "ai" do baile; grave e com eco, como as vozes de fundo do phonk.
+   */
+  vox(t: number, note: number, dur: number, vowel: "a" | "e" | "o" | "u" | "ai" = "o", vel = 1) {
+    note = this.p(note);
+    const FORMANTS: Record<string, [number, number, number]> = { a: [800, 1150, 2900], e: [420, 1900, 2600], o: [460, 820, 2800], u: [330, 720, 2500] };
+    const from = FORMANTS[vowel === "ai" ? "a" : vowel];
+    const to = vowel === "ai" ? [320, 2200, 2900] : from;
+    const src = this.ctx.createOscillator();
+    src.type = "sawtooth";
+    src.frequency.setValueAtTime(freqOf(note) * 0.97, t);
+    src.frequency.exponentialRampToValueAtTime(freqOf(note), t + 0.06);
+    const vib = this.ctx.createOscillator();
+    vib.frequency.value = 5;
+    const depth = this.ctx.createGain();
+    depth.gain.value = freqOf(note) * 0.012;
+    vib.connect(depth).connect(src.frequency);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.34 * vel, t + 0.03);
+    g.gain.setValueAtTime(0.3 * vel, t + dur * 0.8);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    from.forEach((freq, k) => {
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.Q.value = 9;
+      bp.frequency.setValueAtTime(freq, t);
+      if (to !== from) bp.frequency.linearRampToValueAtTime(to[k], t + dur * 0.8);
+      const level = this.ctx.createGain();
+      level.gain.value = [1, 0.6, 0.25][k];
+      src.connect(bp).connect(level).connect(g);
+    });
+    g.connect(this.clean);
+    const echo = this.ctx.createGain();
+    echo.gain.value = 0.3;
+    g.connect(echo).connect(this.delay);
+    const rev = this.ctx.createGain();
+    rev.gain.value = 0.35;
+    g.connect(rev).connect(this.reverb);
+    for (const o of [src, vib]) {
+      o.start(t);
+      o.stop(t + dur + 0.05);
+    }
   }
 
   /** Sino FM (glockenspiel). */

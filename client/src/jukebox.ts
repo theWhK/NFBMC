@@ -57,9 +57,14 @@ function build() {
   el.hidden = true;
   el.setAttribute("role", "dialog");
   el.setAttribute("aria-label", "Jukebox");
-  const albums = ALBUM_ORDER.map((mood) => {
-    const items = JUKEBOX_TRACKS.map((t, i) => ({ t, i })).filter(({ t }) => t.mood === mood);
-    return `<li class="jb-album"><h3>${ALBUM_NAMES[mood]} <small>${MOOD_LABELS[mood]}</small></h3><ol>` +
+  // Um álbum por clima (Lados A a D) e o Lado E, do baile, que mistura climas.
+  const groups = [
+    ...ALBUM_ORDER.map((mood) => ({ name: ALBUM_NAMES[mood], label: MOOD_LABELS[mood], match: (t: TrackDef) => t.mood === mood && !t.album })),
+    { name: "Lado E: Baile de Porto Gordo", label: "Funk, brega e phonk", match: (t: TrackDef) => t.album === "baile" },
+  ];
+  const albums = groups.map((group) => {
+    const items = JUKEBOX_TRACKS.map((t, i) => ({ t, i })).filter(({ t }) => group.match(t));
+    return `<li class="jb-album"><h3>${group.name} <small>${group.label}</small></h3><ol>` +
       items.map(({ t, i }) => `<li><button type="button" class="jb-track" data-testid="jukebox-track" data-index="${i}">` +
         `<span class="jb-n">${String(i + 1).padStart(2, "0")}</span>` +
         `<span class="jb-t"><strong>${t.title}</strong><small>${t.artist}</small></span>` +

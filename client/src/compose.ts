@@ -28,6 +28,8 @@ export interface TrackDef {
   key?: string;
   /** Estilo (para o jukebox): "darksynth", "boom bap"... */
   style?: string;
+  /** Álbum próprio no jukebox (o Lado E, do baile); sem isso, o álbum é o clima. */
+  album?: "baile";
 }
 
 export const MOOD_LABELS: Record<Mood, string> = {
