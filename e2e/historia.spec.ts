@@ -131,6 +131,10 @@ test("modo história: derrota do rival (chave, nota fiscal e Cross-fit) com voz 
   await expect(comic).toContainText("Izzy Iogurte");
   await expect(comic).toContainText("1/4");
   expect((await voice).ok()).toBe(true);
+  // O tempo de cada frase da fala (a legenda das cinemáticas acompanha a voz por ele).
+  const tempos = await page.evaluate(() => fetch("/vozes/historia/tempos.json").then((r) => r.json()));
+  expect(tempos["r10-perde-1"].length).toBeGreaterThan(1);
+  expect(tempos["r10-perde-1"][1][1]).toBeGreaterThan(tempos["r10-perde-1"][0][2]);
   // Próximo quadro: a nota fiscal do Gol.
   await expect(async () => {
     await page.getByTestId("comic-next").click();

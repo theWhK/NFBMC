@@ -4,8 +4,10 @@
 # ///
 """Confere as vozes do modo história com o Whisper (reconhecimento de fala).
 
-Para cada fala gravada em client/public/vozes/historia/, transcreve o áudio e
-compara com o texto do roteiro. Mostra a nota (0 a 1) de cada uma e lista as
+Para cada fala gravada (as do modo história, em client/public/vozes/historia/,
+e as da abertura e da corrida), transcreve o áudio e compara com o texto do
+roteiro (ou com o texto como a voz fala, pela tabela de pronúncia, o que der
+mais). Mostra a nota (0 a 1) de cada uma e lista as
 que ficaram abaixo do mínimo, para regravar com outra voz ou outro texto.
 
     uv run scripts/conferir-vozes.py            # todas
@@ -29,14 +31,18 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 ROOT = Path(__file__).resolve().parent.parent
-VOZES = ROOT / "client" / "public" / "vozes" / "historia"
+VOZES = ROOT / "client" / "public" / "vozes"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from elenco import LINHAS, PRONUNCIA  # noqa: E402
 MINIMO = 0.8
 
 
 def words(text: str) -> list[str]:
     text = unicodedata.normalize("NFKD", text.lower())
     text = "".join(c for c in text if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9 ]", " ", text).split()
+    # (Formas faladas que o Whisper escreve por extenso: tá → está, pra → para.)
+    eq = {"ta": "esta", "to": "estou", "pra": "para", "pro": "para", "tava": "estava", **{"1": "um", "2": "dois", "3": "tres", "4": "quatro", "5": "cinco", "6": "seis", "7": "sete", "8": "oito", "9": "nove", "10": "dez", "12": "doze"}}
+    return [eq.get(w, w) for w in re.sub(r"[^a-z0-9 ]", " ", text).split()]
 
 
 def audio(path: Path) -> np.ndarray:
@@ -50,19 +56,25 @@ def audio(path: Path) -> np.ndarray:
 
 def main() -> None:
     lines = json.loads(subprocess.run(["node", str(ROOT / "scripts" / "falas.ts")], check=True, capture_output=True, text=True).stdout)
+    for line in lines:
+        line["file"] = VOZES / "historia" / f"{line['id']}.mp3"
+    lines += [{"id": k, "speaker": voz, "text": t, "file": VOZES / f"{k}.mp3"} for k, (t, voz, _) in LINHAS.items()]
     asked = set(sys.argv[1:])
     model = WhisperModel("small", device="cpu", compute_type="int8")
     bad = []
     for line in lines:
         if asked and line["id"] not in asked:
             continue
-        path = VOZES / f"{line['id']}.mp3"
+        path = line["file"]
         if not path.exists():
             bad.append((line["id"], 0.0, "(sem arquivo)"))
             continue
         segments, _ = model.transcribe(audio(path), language="pt")
         heard = " ".join(s.text for s in segments).strip()
-        score = difflib.SequenceMatcher(None, words(line["text"]), words(heard)).ratio()
+        spoken = line["text"]
+        for word, said in PRONUNCIA.items():
+            spoken = re.sub(rf"(?<!\w){re.escape(word)}(?!\w)", said, spoken)
+        score = max(difflib.SequenceMatcher(None, words(t), words(heard)).ratio() for t in (line["text"], spoken))
         print(f"{score:.2f}  {line['id']:22s} [{line['speaker'] or 'narrador'}] {heard}")
         if score < MINIMO:
             bad.append((line["id"], score, heard))
