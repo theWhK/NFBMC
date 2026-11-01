@@ -24,7 +24,7 @@ import { makeCar, makeFood, type CarModel } from "./models.ts";
 import { LOD_CHUNKS } from "./chunks.ts";
 import { applyLook, type Look } from "./look.ts";
 import { RealPass, skyEnvironment } from "./realism.ts";
-import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
+import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture, waterNormal } from "./scenery.ts";
 import { InkPass, type Quality } from "./toon.ts";
 import { animateBarriers, buildBarriers, buildGpsRibbon, buildTrackMesh, gpsDrawFrom } from "./track-mesh.ts";
 
@@ -701,7 +701,12 @@ export class GameScene {
       }
       if (chunk.near && distance > range + 260) {
         chunk.group.remove(chunk.near);
-        chunk.near.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+        // Geometria marcada com `userData.keep` é compartilhada (as formas das árvores): fica.
+        chunk.near.traverse((o) => {
+          if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose();
+          const geometry = (o as THREE.Mesh).geometry;
+          if (geometry && !geometry.userData.keep) geometry.dispose();
+        });
         chunk.near = null;
       }
       if (chunk.near) chunk.near.visible = wantNear;
@@ -801,6 +806,8 @@ export class GameScene {
     }
     this.effects.update(dt);
     waveFlags(this.time);
+    // A água corre devagar (o relevo das ondas desliza).
+    waterNormal.offset.set(this.time * 0.004, this.time * 0.011);
 
     this.foods.forEach((food, i) => {
       food.rotation.y = this.time * 2 + i;

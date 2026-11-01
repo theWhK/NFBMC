@@ -33,7 +33,9 @@ import { buildTrackMesh } from "./track-mesh.ts";
 import { TILE, addChunk, byTile } from "./chunks.ts";
 import { buildBuildings, buildingMaterial } from "./buildings.ts";
 import { buildStreets } from "./streets.ts";
-import { paintedTexture } from "./textures.ts";
+import { buildTrees } from "./trees.ts";
+import { surface } from "./look.ts";
+import { normalTexture, paintedTexture } from "./textures.ts";
 
 export { CHUNKS, addChunk } from "./chunks.ts";
 
@@ -140,7 +142,9 @@ function buildSkyline(scene: THREE.Scene) {
  * pela cor de cada bairro. Vai um pouco além dos limites do mapa, sob a neblina.
  */
 function buildTerrain(scene: THREE.Scene) {
-  const material = new THREE.MeshLambertMaterial({ color: "#ffffff", map: groundTexture, vertexColors: true });
+  const material = surface(new THREE.MeshLambertMaterial({ color: "#ffffff", map: groundTexture, vertexColors: true }), {
+    roughness: 0.95, normalMap: grassNormal, normalScale: 1.4,
+  });
   const step = 20;
   const size = 500;
   const margin = 700;
@@ -207,6 +211,49 @@ const groundTexture = (() => {
   texture.repeat.set(1 / 24, 1 / 24);
   return texture;
 })();
+
+/** Relevo do chão (realista): tufos de grama e torrões, na mesma escala da textura. */
+const grassNormal = (() => {
+  const texture = normalTexture(256, (ctx, size, random) => {
+    ctx.fillStyle = "#808080";
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 2600; i++) {
+      const v = Math.floor(random() * 255);
+      ctx.strokeStyle = `rgba(${v},${v},${v},0.7)`;
+      ctx.lineWidth = 1 + random();
+      const x = random() * size;
+      const y = random() * size;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (random() - 0.5) * 3, y - 3 - random() * 5);
+      ctx.stroke();
+    }
+  }, 14, 2.5);
+  texture.repeat.set(1 / 6, 1 / 6);
+  return texture;
+})();
+
+/** Ondinhas da água (realista): o reflexo do céu fica quebrado, como água de verdade. */
+export const waterNormal = normalTexture(256, (ctx, size, random) => {
+  ctx.fillStyle = "#808080";
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 260; i++) {
+    const x = random() * size;
+    const y = random() * size;
+    const r = 6 + random() * 22;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const v = random() < 0.5 ? 255 : 0;
+    g.addColorStop(0, `rgba(${v},${v},${v},0.35)`);
+    g.addColorStop(1, `rgba(${v},${v},${v},0)`);
+    ctx.fillStyle = g;
+    // Ondas esticadas na horizontal (o vento sopra numa direção).
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(2.2, 0.6);
+    ctx.fillRect(-r, -r, r * 2, r * 2);
+    ctx.restore();
+  }
+}, 15, 3);
 
 /** Nuvens de desenho animado: bolhas brancas com contorno escuro, bem no alto. */
 function buildClouds() {
@@ -286,8 +333,12 @@ function buildGround(scene: THREE.Scene) {
   // O mar, ao sul do cais, e o muro do cais.
   const sea = new THREE.Mesh(
     new THREE.PlaneGeometry(WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 6000, 3000).rotateX(-Math.PI / 2),
-    new THREE.MeshLambertMaterial({ color: "#2b6a8f", emissive: "#3a5a7a", emissiveIntensity: 0.35 }),
+    surface(new THREE.MeshLambertMaterial({ color: "#2b6a8f", emissive: "#3a5a7a", emissiveIntensity: 0.35 }), {
+      roughness: 0.12, normalMap: waterNormal, normalScale: 0.5, envMapIntensity: 1.6,
+    }),
   );
+  // UV em metros: uma onda da textura a cada ~14 m.
+  scaleUv(sea.geometry, (WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 6000) / 14, 3000 / 14);
   sea.position.set(0, -0.6, QUAY_Z - 1500);
   scene.add(sea);
   const quay = new THREE.Mesh(new THREE.BoxGeometry(WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 40, 1.6, 2), new THREE.MeshLambertMaterial({ color: "#6b6258" }));
@@ -300,11 +351,20 @@ function buildGround(scene: THREE.Scene) {
   shore.position.set(LAKE.x, 0.01, LAKE.z);
   const lake = new THREE.Mesh(
     new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2),
-    new THREE.MeshLambertMaterial({ color: "#2f7aa0", emissive: "#3a6a8a", emissiveIntensity: 0.4, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
+    surface(new THREE.MeshLambertMaterial({ color: "#2f7aa0", emissive: "#3a6a8a", emissiveIntensity: 0.4, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), {
+      roughness: 0.08, normalMap: waterNormal, normalScale: 0.3, envMapIntensity: 1.6,
+    }),
   );
+  scaleUv(lake.geometry, LAKE.rx / 5, LAKE.rz / 5);
   lake.scale.set(LAKE.rx, 1, LAKE.rz);
   lake.position.set(LAKE.x, 0.03, LAKE.z);
   scene.add(shore, lake);
+}
+
+/** Multiplica o UV de uma geometria (para a textura repetir na escala certa). */
+function scaleUv(geometry: THREE.BufferGeometry, u: number, v: number) {
+  const uv = geometry.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * u, uv.getY(i) * v);
 }
 
 /** Guindastes do porto (só enfeite, na beira do cais). */
@@ -328,9 +388,13 @@ function buildCranes(scene: THREE.Scene) {
   }
 }
 
-/** Postes ao longo das avenidas e ruas, com o brilho das lâmpadas num só Points (barato). */
+/**
+ * Postes ao longo das avenidas e ruas: coluna, braço curvo sobre a rua e a
+ * luminária, com o brilho das lâmpadas num só Points (barato).
+ */
 function buildLamps(scene: THREE.Scene) {
-  const spots: THREE.Vector3[] = [];
+  /** Pé do poste e para onde fica a rua (a luminária aponta para lá). */
+  const spots: { x: number; y: number; z: number; facing: number }[] = [];
   for (const road of ROADS) {
     if (road.kind === "viela") continue;
     let side = 1;
@@ -342,18 +406,35 @@ function buildLamps(scene: THREE.Scene) {
       const offset = side * (road.width / 2 + 1.8);
       const lx = x + ((nz - z) / len) * offset;
       const lz = z - ((nx - x) / len) * offset;
-      spots.push(new THREE.Vector3(lx, heightAt(lx, lz), lz));
+      spots.push({ x: lx, y: heightAt(lx, lz), z: lz, facing: Math.atan2(x - lx, z - lz) });
     }
   }
   // Também em volta do autódromo.
   const track = RACES.autodromo.track;
   for (let dist = 15, i = 0; dist < track.length; dist += 34, i++) {
     const p = pointOnTrack(track, dist, (i % 2 ? 1 : -1) * (track.width / 2 + 2.5));
-    spots.push(new THREE.Vector3(p.x, 0, p.z));
+    const center = pointOnTrack(track, dist, 0);
+    spots.push({ x: p.x, y: 0, z: p.z, facing: Math.atan2(center.x - p.x, center.z - p.z) });
   }
 
-  const poleGeometry = new THREE.CylinderGeometry(0.15, 0.22, 9, 6);
-  const poleMaterial = new THREE.MeshLambertMaterial({ color: "#2c2a2e" });
+  // O poste inteiro numa geometria só (frente da luminária para +Z).
+  const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+  const tube = (from: THREE.Vector3, to: THREE.Vector3, r0: number, r1: number) => {
+    const length = from.distanceTo(to);
+    const g = new THREE.CylinderGeometry(r1, r0, length, 8).translate(0, length / 2, 0);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(v(0, 1, 0), to.clone().sub(from).normalize()));
+    return g.translate(from.x, from.y, from.z);
+  };
+  const poleGeometry = mergeGeometries([
+    new THREE.BoxGeometry(0.5, 0.7, 0.5).translate(0, 0.35, 0),
+    tube(v(0, 0.7, 0), v(0, 8.3, 0), 0.17, 0.11),
+    tube(v(0, 8.3, 0), v(0, 8.85, 0.7), 0.11, 0.08),
+    tube(v(0, 8.85, 0.7), v(0, 9.0, 2.2), 0.08, 0.07),
+    new THREE.BoxGeometry(0.42, 0.2, 1.0).translate(0, 9.02, 2.55),
+  ].map((g) => g.toNonIndexed()));
+  const lensGeometry = new THREE.BoxGeometry(0.32, 0.04, 0.8).translate(0, 8.9, 2.55);
+  const poleMaterial = surface(new THREE.MeshLambertMaterial({ color: "#4a4a4e" }), { roughness: 0.45, metalness: 0.6 });
+  const lensMaterial = surface(new THREE.MeshBasicMaterial({ color: "#ffe2a8" }), { glow: 3 });
   const glowMaterial = new THREE.PointsMaterial({
     size: 7,
     map: glowTexture("rgba(255,214,140,1)"),
@@ -366,17 +447,21 @@ function buildLamps(scene: THREE.Scene) {
   const one = new THREE.Vector3(1, 1, 1);
   for (const tile of byTile(spots, (p) => [p.x, p.z])) {
     const poles = new THREE.InstancedMesh(poleGeometry, poleMaterial, tile.items.length);
+    const lenses = new THREE.InstancedMesh(lensGeometry, lensMaterial, tile.items.length);
     const glowPositions: number[] = [];
     tile.items.forEach((p, i) => {
-      matrix.compose(new THREE.Vector3(p.x, p.y + 4.5, p.z), quat, one);
+      quat.setFromAxisAngle(Y, p.facing);
+      matrix.compose(new THREE.Vector3(p.x, p.y - 0.2, p.z), quat, one);
       poles.setMatrixAt(i, matrix);
-      glowPositions.push(p.x, p.y + 9, p.z);
+      lenses.setMatrixAt(i, matrix);
+      glowPositions.push(p.x + Math.sin(p.facing) * 2.55, p.y + 8.7, p.z + Math.cos(p.facing) * 2.55);
     });
     poles.computeBoundingSphere();
+    lenses.computeBoundingSphere();
     const glowGeometry = new THREE.BufferGeometry();
     glowGeometry.setAttribute("position", new THREE.Float32BufferAttribute(glowPositions, 3));
     const lamps = new THREE.Group();
-    lamps.add(poles, new THREE.Points(glowGeometry, glowMaterial));
+    lamps.add(poles, lenses, new THREE.Points(glowGeometry, glowMaterial));
     addChunk(scene, lamps, tile.center);
   }
 }
@@ -457,45 +542,8 @@ function buildBillboards(scene: THREE.Scene) {
   });
 }
 
-/** Árvores de brócolis, porque toda dieta precisa de um vegetal (de enfeite). */
-function buildTrees(scene: THREE.Scene) {
-  const stemGeometry = new THREE.CylinderGeometry(0.5, 0.8, 3, 5);
-  const stemMaterial = new THREE.MeshLambertMaterial({ color: "#9bc25b" });
-  const crownGeometry = new THREE.IcosahedronGeometry(2.6, 0);
-  const crownMaterial = new THREE.MeshLambertMaterial({ color: "#3d7d2c", flatShading: true });
-  const matrix = new THREE.Matrix4();
-  const scale = new THREE.Vector3();
-  const quat = new THREE.Quaternion();
-  let n = 0;
-  for (const tile of byTile(TREES, (t) => [t.x, t.z])) {
-    const stem = new THREE.InstancedMesh(stemGeometry, stemMaterial, tile.items.length);
-    const crown = new THREE.InstancedMesh(crownGeometry, crownMaterial, tile.items.length * 3);
-    tile.items.forEach((tree, i) => {
-      const s = tree.size;
-      scale.setScalar(s);
-      const ground = heightAt(tree.x, tree.z) - 0.3;
-      matrix.compose(new THREE.Vector3(tree.x, ground + 1.5 * s, tree.z), quat, scale);
-      stem.setMatrixAt(i, matrix);
-      for (let k = 0; k < 3; k++) {
-        const angle = (k / 3) * Math.PI * 2 + n;
-        const pos = new THREE.Vector3(
-          tree.x + Math.cos(angle) * 1.1 * s,
-          ground + (3.4 + (k === 0 ? 0.6 : 0)) * s,
-          tree.z + Math.sin(angle) * 1.1 * s,
-        );
-        matrix.compose(pos, quat, scale);
-        crown.setMatrixAt(i * 3 + k, matrix);
-      }
-      n++;
-    });
-    stem.computeBoundingSphere();
-    crown.computeBoundingSphere();
-    const group = new THREE.Group();
-    group.add(stem, crown);
-    addChunk(scene, group, tile.center);
-  }
-
-  // Hambúrgueres gigantes de estátua: na beira do lago e no meio do autódromo.
+/** Hambúrgueres gigantes de estátua: na beira do lago e no meio do autódromo. */
+function buildStatues(scene: THREE.Scene) {
   for (const [x, z, size] of [[400, 40, 16], [400, 425, 14]] as const) {
     const statue = bake(makeBurger());
     statue.scale.setScalar(size);
@@ -775,6 +823,7 @@ export function buildScenery(scene: THREE.Scene) {
   buildLamps(scene);
   buildBillboards(scene);
   buildTrees(scene);
+  buildStatues(scene);
   buildFlags(scene);
   buildProps(scene);
   scene.add(buildTrackMesh(RACES.autodromo.track, { asphalt: true }));
