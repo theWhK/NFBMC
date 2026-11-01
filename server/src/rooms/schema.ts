@@ -23,7 +23,10 @@ export const Player = schema({
   /** Posição atual na corrida (1 = primeiro). */
   place: t.uint8().default(0),
   calories: t.uint32().default(0),
+  /** Nitro ligado agora (1) ou não (0). */
   boost: t.number().default(0),
+  /** Quanto sobra no cilindro de nitro (0 a 1; 0 também sem nitro instalado). */
+  nitro: t.number().default(0),
   finished: t.boolean().default(false),
   /** Segundos desde a largada até cruzar a chegada da última volta. */
   finishTime: t.number().default(0),
@@ -33,14 +36,6 @@ export const Player = schema({
   lastTrap: t.number().default(0),
 });
 export type Player = SchemaType<typeof Player>;
-
-export const Food = schema({
-  kind: t.string().default("burger"),
-  x: t.number().default(0),
-  z: t.number().default(0),
-  active: t.boolean().default(true),
-});
-export type Food = SchemaType<typeof Food>;
 
 /** Linha do placar final. Fica guardada mesmo se o jogador sair da sala. */
 export const Result = schema({
@@ -53,6 +48,8 @@ export const Result = schema({
   calories: t.uint32().default(0),
   bonus: t.uint32().default(0),
   total: t.uint32().default(0),
+  /** Prêmio em dinheiro (R$) da colocação. */
+  cash: t.uint32().default(0),
   /** Tempo de prova (s; 0 = não terminou) e se ele foi projetado pelo ritmo (bot que ainda corria). */
   time: t.number().default(0),
   projected: t.boolean().default(false),
@@ -86,8 +83,7 @@ export const RaceState = schema({
   /** Segundos desde a largada. */
   raceTime: t.number().default(0),
   players: t.map(Player),
-  foods: t.array(Food),
-  /** Placar da última corrida, do mais calórico para o menos. */
+  /** Placar da última corrida, na ordem da chegada. */
   results: t.array(Result),
 });
 export type RaceState = SchemaType<typeof RaceState>;
@@ -105,7 +101,9 @@ export const WorldPlayer = schema({
   z: t.number().default(0),
   heading: t.number().default(0),
   speed: t.number().default(0),
+  /** Nitro ligado agora (1) ou não (0), e quanto sobra no cilindro (0 a 1). */
   boost: t.number().default(0),
+  nitro: t.number().default(0),
   /** Calorias acumuladas na sessão (mundo + corridas). */
   calories: t.uint32().default(0),
   /** Nível de procurado pela Vigilância Sanitária (0 a 5; a parte inteira são as estrelas). */

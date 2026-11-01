@@ -5,7 +5,7 @@
 //
 // O navegador só libera o som depois de um clique, por isso `unlock()` é
 // chamado no botão de entrar. Qualquer erro aqui só deixa o jogo mudo.
-import { carSpec, wheelRpm, type EngineSound, type FoodKind, type TrafficKind } from "@nfbmc/shared";
+import { carSpec, wheelRpm, type CarSpec, type EngineSound, type FoodKind, type TrafficKind } from "@nfbmc/shared";
 
 import { EngineVoice, PlayerEngine, engineBank, type EngineBank } from "./engine-sound.ts";
 import { Music, prefetchMood, type CueName, type SongName, type TrackInfo } from "./music.ts";
@@ -51,11 +51,16 @@ const TRAFFIC_ENGINES: Record<TrafficKind, { engine: EngineSound; idle: number; 
   picape: { engine: { cylinders: 4, layout: "linha", liters: 2.8, aspiration: "turbo", exhaust: "fabrica", diesel: true }, idle: 750, redline: 4200 },
 };
 
-/** Que motor tem um carro da cena: garagem/viatura pelo id, trânsito pelo tipo. */
-function engineOf(car: { car?: string; traffic?: TrafficKind }) {
+/**
+ * Que motor tem um carro da cena: garagem/viatura pelo id, trânsito pelo tipo.
+ * `tuned`: a ficha com as peças da garagem (turbina e escapamento mudam o ronco).
+ */
+function engineOf(car: { car?: string; traffic?: TrafficKind }, tuned?: CarSpec) {
   if (car.traffic) return { key: `npc:${car.traffic}`, ...TRAFFIC_ENGINES[car.traffic] };
-  const spec = carSpec(car.car);
-  return { key: spec.id, engine: spec.engine, idle: spec.idleRpm, redline: spec.redline };
+  const spec = tuned ?? carSpec(car.car);
+  const e = spec.engine;
+  const key = tuned ? `${spec.id}|${e.aspiration}|${e.exhaust}|${e.bigTurbo ? 1 : 0}|${spec.redline}` : spec.id;
+  return { key, engine: e, idle: spec.idleRpm, redline: spec.redline };
 }
 
 /** Giro provável de quem não manda o giro (viaturas, trânsito): a marcha que um automático escolheria. */
@@ -474,8 +479,11 @@ export class Sound {
     make();
   }
 
-  private bankFor(car: { car?: string; traffic?: TrafficKind }, now: boolean): EngineBank | null {
-    const { key, engine, idle, redline } = engineOf(car);
+  /** Ficha do carro do jogador com a tunagem (o ronco dele segue as peças). */
+  mySpec: CarSpec | null = null;
+
+  private bankFor(car: { car?: string; traffic?: TrafficKind }, now: boolean, tuned?: CarSpec): EngineBank | null {
+    const { key, engine, idle, redline } = engineOf(car, tuned);
     const make = () => engineBank(this.ctx!, key, engine, idle, redline);
     if (now) return make();
     // Os outros esperam a vez (gerar leva alguns milissegundos).
@@ -494,10 +502,11 @@ export class Sound {
       for (const loop of [...this.squeal, this.scrub, this.road, this.gravel, this.dirt, this.wind, this.nitroHiss]) loop.gain.gain.setTargetAtTime(0, t, 0.1);
       return;
     }
-    const key = car.car ?? "";
+    const tuned = this.mySpec && this.mySpec.id === car.car ? this.mySpec : undefined;
+    const key = engineOf({ car: car.car }, tuned).key;
     if (!this.engine || key !== this.engineKey) {
       this.engine?.stop();
-      const bank = this.bankFor({ car: car.car }, true)!;
+      const bank = this.bankFor({ car: car.car }, true, tuned)!;
       this.engine = new PlayerEngine(this.kit, bank);
       this.engineKey = key;
     }
@@ -570,11 +579,11 @@ export class Sound {
   }
 
   /** Ronco de demonstração na garagem: liga, dá duas aceleradas e alivia. */
-  revPreview(carId: string) {
+  revPreview(carId: string, tuned?: CarSpec) {
     if (!this.ctx || !this.prefs.sfx) return;
     this.stopPreview();
-    const spec = carSpec(carId);
-    const engine = new PlayerEngine(this.kit, this.bankFor({ car: carId }, true)!);
+    const spec = tuned ?? carSpec(carId);
+    const engine = new PlayerEngine(this.kit, this.bankFor({ car: carId }, true, tuned)!);
     const start = this.ctx.currentTime;
     let rpm = spec.idleRpm;
     const timer = setInterval(() => {

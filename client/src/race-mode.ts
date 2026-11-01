@@ -6,6 +6,7 @@ import {
   MAX_PLAYERS,
   RACES,
   isRaceId,
+  raceCash,
   type Difficulty,
   type Phase,
   type RaceId,
@@ -14,12 +15,15 @@ import {
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import type { RaceRoom } from "./net.ts";
 import type { CarView } from "./scene.ts";
-import { $, escapeHtml, foodByCalories, kcal, ordinal, setHtml, showPopup, ui } from "./ui.ts";
+import { money } from "./economy.ts";
+import { $, escapeHtml, kcal, ordinal, setHtml, showNitro, ui } from "./ui.ts";
 
 export interface RaceFinish {
   /** Colocação na chegada (0 = não terminou). */
   place: number;
   total: number;
+  /** Prêmio em dinheiro da colocação. */
+  cash: number;
   event: boolean;
   challenge: boolean;
 }
@@ -39,8 +43,8 @@ export class RaceMode {
   /** Radares já mostrados (para o flash aparecer uma vez por radar). */
   private seenTraps = 0;
   private flashTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Valores do quadro anterior, para perceber eventos (comeu, deu volta, bateu...). */
-  private previous = { phase: "", countdown: 0, lap: 0, finished: false, calories: 0, boost: 0, speed: 0, bumpAt: 0 };
+  /** Valores do quadro anterior, para perceber eventos (deu volta, chegou, nitro, bateu...). */
+  private previous = { phase: "", countdown: 0, lap: 0, finished: false, boost: 0, speed: 0, bumpAt: 0 };
 
   /** Avisado uma vez quando a corrida termina (para o modo história). */
   private onFinish?: (result: RaceFinish) => void;
@@ -84,9 +88,11 @@ export class RaceMode {
   private carViews() {
     const views = new Map<string, CarView>();
     const showAll = this.phase() === "lobby" || this.phase() === "results";
+    // Jogando sozinho, o seu nome não fica em cima do seu carro (só o dos bots).
+    const alone = !!this.room.state.pausable;
     this.room.state.players?.forEach((p, id) => {
       views.set(id, {
-        name: p.bot ? `🤖 ${p.name}` : p.name,
+        name: p.bot ? `🤖 ${p.name}` : alone && id === this.room.sessionId ? "" : p.name,
         color: p.color,
         car: p.car,
         x: p.x,
@@ -115,7 +121,7 @@ export class RaceMode {
       followId = [...(room.state.players?.entries() ?? [])].find(([, p]) => p.racing && p.place === 1)?.[0];
     }
     const followed = ctx.scene
-      ? (ctx.scene.syncCars(cars), ctx.scene.syncFoods([...(room.state.foods ?? [])]), ctx.scene.render(cars, followId, room.sessionId))
+      ? (ctx.scene.syncCars(cars), ctx.scene.render(cars, followId, room.sessionId))
       : null;
     if (!me) return;
 
@@ -134,7 +140,7 @@ export class RaceMode {
     } : null);
     if (paused) ctx.sound.updateOthers(new Map());
     else ctx.updateOtherEngines(cars, room.sessionId, me);
-    ctx.drawMinimap({ cars, myId: room.sessionId, race: this.raceId, foods: [...(room.state.foods ?? [])] });
+    ctx.drawMinimap({ cars, myId: room.sessionId, race: this.raceId });
     this.updateUi();
   }
 
@@ -184,7 +190,8 @@ export class RaceMode {
     if (inRace) {
       ui.lap.textContent = `${Math.max(1, me.lap)}/${laps}`;
       ui.place.textContent = `${ordinal(me.place)}/${racers.length}`;
-      ui.calories.textContent = kcal(me.calories);
+      // Prêmio se a corrida acabasse agora, nesta posição.
+      ui.racePrize.textContent = money(raceCash(me.place, laps * RACES[this.raceId].track.length));
     }
     // Speedtrap: soma dos radares no HUD e o flash a cada radar passado.
     const radar = room.state.kind === "radar";
@@ -215,7 +222,7 @@ export class RaceMode {
     ui.dash.hidden = spectating;
     if (!spectating) {
       ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
-      ui.nitroFill.style.width = `${Math.min(100, (me.boost / 2.5) * 100)}%`;
+      showNitro(ctx.hasNitro() ? me.nitro : -1, me.boost > 0);
     }
     ui.speedlines.hidden = !(me.boost > 0 && !spectating);
 
@@ -249,7 +256,7 @@ export class RaceMode {
     else if (!this.reportedFinish && this.onFinish) {
       this.reportedFinish = true;
       const mine = [...(room.state.results ?? [])].find((r) => r.sessionId === room.sessionId);
-      this.onFinish({ place: mine?.place ?? 0, total: mine?.total ?? 0, event: room.state.event, challenge: room.state.challenge });
+      this.onFinish({ place: mine?.place ?? 0, total: mine?.total ?? 0, cash: mine?.cash ?? 0, event: room.state.event, challenge: room.state.challenge });
     }
 
     // Resultado
@@ -260,7 +267,7 @@ export class RaceMode {
       const winner = rows[0];
       setHtml(
         ui.winner,
-        winner && winner.total > 0 ? `🏆 ${escapeHtml(winner.name)} é o mais calórico!` : "Ninguém comeu nada?! 🥗",
+        winner && winner.place > 0 ? `🏆 ${escapeHtml(winner.name)} levou essa!` : "Ninguém chegou?! 🥗",
       );
       setHtml(
         ui.resultsBody,
@@ -270,13 +277,13 @@ export class RaceMode {
             `<td><span class="dot" style="background:${row.color}"></span>${row.bot ? "🤖 " : ""}${escapeHtml(row.name)}</td>` +
             `<td>${row.place ? ordinal(row.place) : "—"}</td>` +
             `<td>${row.time ? `${row.projected ? "~" : ""}${raceTime(row.time)}` : "—"}</td>` +
-            `<td class="trap-col">${kcal(Math.round(row.trap))} km/h</td><td>${kcal(row.calories)}</td>` +
-            `<td>+${kcal(row.bonus)}</td><td>${kcal(row.total)}</td></tr>`)
+            `<td class="trap-col">${kcal(Math.round(row.trap))} km/h</td><td>${kcal(row.total)}</td>` +
+            `<td>${row.cash ? money(row.cash) : "—"}</td></tr>`)
           .join(""),
       );
       ui.resultsTimer.textContent = room.state.challenge ? "" : room.state.event
         ? Number.isFinite(room.state.timer) && secondsLeft > 0
-          ? `Voltando para Porto Gordo em ${secondsLeft}s (as calorias vão para a sua conta)`
+          ? `Voltando para Porto Gordo em ${secondsLeft}s (as calorias e o prêmio vão para a sua conta)`
           : "Voltando para Porto Gordo…"
         : `Voltando para o lobby em ${secondsLeft}s`;
     }
@@ -284,7 +291,7 @@ export class RaceMode {
     this.playEventSounds(me);
   }
 
-  private playEventSounds(me: { lap: number; finished: boolean; calories: number; boost: number; speed: number; racing: boolean; place: number }) {
+  private playEventSounds(me: { lap: number; finished: boolean; boost: number; speed: number; racing: boolean; place: number }) {
     const { ctx, previous } = this;
     const current = this.phase();
 
@@ -301,12 +308,6 @@ export class RaceMode {
       const laps = this.room.state.laps || RACES[this.raceId].laps;
       if (me.lap > previous.lap && me.lap > 1 && !me.finished) ctx.sound.lap(laps > 1 && me.lap === laps);
       if (me.finished && !previous.finished) ctx.sound.finish(me.place === 1);
-      if (me.calories > previous.calories) {
-        const gained = me.calories - previous.calories;
-        const food = foodByCalories(gained);
-        ctx.sound.eat(food?.kind);
-        showPopup(`+${kcal(gained)} kcal${food ? ` ${food.label.toLowerCase()}` : ""}`);
-      }
       if (me.boost > previous.boost + 0.9) ctx.sound.boost();
     }
     ctx.detectBump(previous, me.speed);
@@ -314,7 +315,6 @@ export class RaceMode {
     previous.phase = current;
     previous.lap = me.lap;
     previous.finished = me.finished;
-    previous.calories = me.calories;
     previous.boost = me.boost;
     previous.speed = me.speed;
   }
@@ -358,7 +358,7 @@ export class RaceMode {
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
         name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: p.bot, x: p.x, z: p.z, speed: p.speed, racing: p.racing,
-        lap: p.lap, place: p.place, calories: p.calories, finished: p.finished,
+        lap: p.lap, place: p.place, calories: p.calories, finished: p.finished, nitro: p.nitro, boost: p.boost > 0,
       };
     });
     return result;

@@ -16,11 +16,15 @@ import {
   HERO_CAR,
   PROLOGUE,
   carSpec,
+  duelCash,
+  rivalTune,
+  tunedSpec,
   crossfitJoinsAt,
   currentRival,
   finalePending,
   isRaceId,
   DISTRICTS,
+  GARAGES,
   RACES,
   ROADS,
   districtAt,
@@ -40,6 +44,8 @@ import type { CueName } from "./music.ts";
 import { showNowPlaying } from "./now-playing.ts";
 import { jukeboxState, setupJukebox } from "./jukebox.ts";
 import { makeBridge, playStory, showRadio, type Cast } from "./cinematic.ts";
+import { economy, money } from "./economy.ts";
+import { createGarage } from "./garage.ts";
 import { createGps, type GpsGuidance, type GpsTarget } from "./gps.ts";
 import { createFullMap, createMinimap, createTacho, type MapPick, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
@@ -154,17 +160,21 @@ document.addEventListener("visibilitychange", () => {
 
 /** Freio de mão: Espaço no teclado, botão na tela do celular. */
 const HANDBRAKE = new Set(["Space", "TouchHandbrake"]);
+/** Nitro: Shift (segurando), ou o botão NOS na tela do celular. */
+const NITRO = new Set(["ShiftLeft", "ShiftRight", "TouchNitro"]);
 
 function currentInput(): InputMessage {
   let throttle = 0;
   let steer = 0;
   let handbrake = false;
+  let nitro = false;
   for (const code of keys) {
     throttle += THROTTLE[code] ?? 0;
     steer += STEER[code] ?? 0;
     if (HANDBRAKE.has(code)) handbrake = true;
+    if (NITRO.has(code)) nitro = true;
   }
-  return { throttle: Math.sign(throttle), steer: Math.sign(steer), handbrake };
+  return { throttle: Math.sign(throttle), steer: Math.sign(steer), handbrake, nitro };
 }
 
 // O próprio carro vira na tela na hora em que a tecla é apertada (sem esperar o servidor).
@@ -294,6 +304,7 @@ const ctx: ModeContext = {
     sound.updateOthers(nearest);
   },
   focusMap: (x, z) => fullMap.focus(x, z),
+  hasNitro: () => (carOptions().tune.nos ?? 0) > 0,
   detectBump(previous, speed) {
     const now = performance.now();
     const drop = Math.abs(previous.speed) - Math.abs(speed);
@@ -319,6 +330,7 @@ let soloWorld = false;
 let switching = false;
 
 function setMode(next: WorldMode | RaceMode | null) {
+  garage.close();
   mode?.dispose();
   hideModeUi();
   sound.updateSiren(null);
@@ -328,6 +340,11 @@ function setMode(next: WorldMode | RaceMode | null) {
   $("open-map").hidden = !next;
   closeOverlays();
   $("touch").classList.toggle("manual", menu.manual());
+  // Botão de nitro só com o cilindro instalado; a previsão da curva usa o carro tunado.
+  $("touch").classList.toggle("nitro", ctx.hasNitro());
+  const options = carOptions();
+  sound.mySpec = tunedSpec(carSpec(options.car), economy.tune(options.car));
+  if (scene) scene.localSpec = sound.mySpec;
   mode = next;
   pauseRequested = false;
   // A ponte do Cais (com a coluna de luz) só aparece durante a fuga final.
@@ -343,16 +360,58 @@ function setMode(next: WorldMode | RaceMode | null) {
   publishTestHook();
 }
 
-/** Nome, cor, carro e câmbio escolhidos no menu: vão junto ao entrar em qualquer sala. */
+/** Nome, cor, carro, câmbio e peças: vão junto ao entrar em qualquer sala. */
 function carOptions() {
   // No modo história, o carro é o escolhido entre os liberados na carreira (na fuga final, o M3).
   const car = finaleRun ? HERO_CAR : storyMode ? story.story.car : menu.car();
-  return { name: playerName, color: menu.color(), car, manual: menu.manual() };
+  return { name: playerName, color: menu.color(), car, manual: menu.manual(), tune: economy.tune(car) };
+}
+
+/**
+ * Parou no pátio de uma garagem (mundo aberto) e apertou Enter: abre a oficina
+ * do carro atual. Jogando sozinho o jogo pausa; as peças valem na hora.
+ */
+async function openSafehouse(name: string) {
+  if (!(mode instanceof WorldMode) || garage.isOpen() || overlayOpen()) return;
+  const world = mode;
+  releaseControls();
+  pauseGame(true);
+  await garage.open({
+    kind: "safehouse",
+    car: carOptions().car,
+    name,
+    onTune: (tune) => {
+      world.sendTune(tune);
+      sound.mySpec = tunedSpec(carSpec(carOptions().car), tune);
+      if (scene) scene.localSpec = sound.mySpec;
+      $("touch").classList.toggle("nitro", ctx.hasNitro());
+    },
+  });
+  if (mode === world) pauseGame(false);
+}
+
+/** Prêmio em dinheiro de uma corrida (qualquer uma): entra na carteira. */
+function racePrize(result: RaceFinish, extra = 0) {
+  const total = result.cash + extra;
+  if (total <= 0) return;
+  economy.earn(total);
+  showPopup(`💵 +${money(total)}`);
 }
 
 // --- Modo história ---------------------------------------------------------
 
 const story = new StoryTracker(loadStory());
+
+/** Garagem em tela cheia (client/src/garage.ts): carro, pintura e oficina. */
+const garage = createGarage({
+  sound,
+  scene,
+  storage,
+  careerCars: () => story.story.unlocked,
+  // Carro liberado na carreira: escolhido na garagem, vale lá também.
+  onCareerCar: (car) => story.setCar(car),
+});
+
 let storyMode = false;
 /** Fuga final (depois do Bruno): Porto Gordo inteiro atrás de você, até a ponte do Cais. */
 let finaleRun = false;
@@ -478,8 +537,9 @@ const storyHooks = () => storyMode ? {
   },
 } : {};
 
-/** Fim de corrida de evento no modo história: calorias da corrida e, se venceu, uma vitória. */
+/** Fim de corrida de evento: o prêmio e, no modo história, calorias e (se venceu) uma vitória. */
 function storyRaceFinished(result: RaceFinish) {
+  racePrize(result);
   if (!storyMode || !result.event) return;
   let ready = story.addBounty(result.total);
   if (result.place === 1) {
@@ -497,14 +557,17 @@ function duelFinished(result: RaceFinish) {
   duelDone = true;
   const won = result.place === 1;
   const stamp = $("duel-stamp");
+  // Duelo vencido paga a aposta do rival, além do prêmio da colocação.
+  const bet = won ? duelCash(rival.rank) : 0;
+  racePrize(result, bet);
   if (won) {
     story.defeat();
     const prizes = [carSpec(rival.car).name, ...(rival.bonusCar ? [carSpec(rival.bonusCar).name] : [])];
     stamp.textContent = "Nota fiscal";
     $("duel-title").textContent = `Você derrotou ${rival.name}!`;
-    $("duel-text").textContent = rival.rank === 1
+    $("duel-text").textContent = (rival.rank === 1
       ? "Você é o novo Número 1 da Lista Gorda."
-      : `Na sua garagem agora: ${prizes.join(" e ")}. Próximo alvo: #${rival.rank - 1}.`;
+      : `Na sua garagem agora: ${prizes.join(" e ")}. Próximo alvo: #${rival.rank - 1}.`) + ` A aposta: ${money(bet)}.`;
     sound.finish();
   } else {
     stamp.textContent = "Derrota";
@@ -577,7 +640,7 @@ async function enterWorld(spawn?: RaceId) {
   setMode(new WorldMode(room, ctx, goRace, (newToken) => {
     token = newToken;
     storage.set("nfbmc:token", newToken);
-  }, storyHooks()));
+  }, storyHooks(), (name) => void openSafehouse(name)));
   if (storyMode) renderObjective(story.story, finaleRun ? Math.hypot(FINALE_BRIDGE.x, FINALE_BRIDGE.z) : undefined);
 }
 
@@ -646,7 +709,7 @@ function shift(direction: number) {
 const pause = $("pause");
 const fullMapEl = $("fullmap");
 const help = $("help");
-const overlayOpen = () => !pause.hidden || !fullMapEl.hidden || !help.hidden;
+const overlayOpen = () => !pause.hidden || !fullMapEl.hidden || !help.hidden || garage.isOpen();
 
 /**
  * Pausa de verdade (a simulação para no servidor) com a pausa, o mapa ou a
@@ -736,6 +799,7 @@ function renderPauseCard() {
     `<p class="stamp small">${where}</p>`,
     car ? `<p><small>Carro</small><strong>${escapeHtml(car.name)}</strong></p>` : "",
     snapshot ? `<p><small>Calorias</small><strong>${kcal(snapshot.calories)} kcal</strong></p>` : "",
+    `<p><small>Carteira</small><strong>${money(economy.cash())}</strong></p>`,
     me ? `<p><small>Velocidade ao pausar</small><strong>${Math.round(Math.abs(me.speed) * 3.6)} km/h</strong></p>` : "",
     `<p class="hint">${PAUSE_TIPS[Math.floor(Math.random() * PAUSE_TIPS.length)]}</p>`,
   ];
@@ -745,9 +809,12 @@ function renderPauseCard() {
 const pauseCard = $("pause-card");
 const PAUSE_TIPS = [
   "Dica: freie antes da curva e acelere na saída. Freio de mão (Espaço) faz o carro deslizar.",
-  "Dica: comida dá turbo. Mas comer na rua esquenta a Vigilância Sanitária.",
+  "Dica: o nitro (Shift) só multiplica o acelerador: pise fundo antes de soltar o NOS.",
+  "Dica: comer no drive-thru dá calorias, mas a Vigilância Sanitária está de olho.",
+  "Dica: despistando a Vigilância, pare no pátio de uma garagem 🔧 para sumir de vez.",
+  "Dica: as corridas pagam em dinheiro. Na garagem dá para tunar motor, turbina, suspensão, freios e mais.",
   "Dica: empacou? R volta para a rua.",
-  "Dica: C troca a câmera. A de capô ajuda a mirar a curva.",
+  "Dica: C troca a câmera: capô, primeira pessoa, terceira pessoa perto e longe.",
   "Dica: no mapa (M) dá para ver quem está online e desafiar para um pega.",
 ];
 
@@ -906,10 +973,10 @@ window.addEventListener("keydown", (e) => {
   if (!e.repeat && e.code === "KeyH") carAction("horn");
   if (!e.repeat && e.code === "KeyC") carAction("camera");
   if (!e.repeat && e.code === "KeyR") carAction("reset");
-  if (!e.repeat && (e.code === "KeyE" || e.code === "ShiftLeft" || e.code === "ShiftRight")) shift(1);
+  if (!e.repeat && e.code === "KeyE") shift(1);
   if (!e.repeat && (e.code === "KeyQ" || e.code === "ControlLeft" || e.code === "ControlRight")) shift(-1);
   if (mode instanceof WorldMode) mode.handleKey(e.code);
-  if (!(e.code in THROTTLE) && !(e.code in STEER) && !HANDBRAKE.has(e.code)) return;
+  if (!(e.code in THROTTLE) && !(e.code in STEER) && !HANDBRAKE.has(e.code) && !NITRO.has(e.code)) return;
   // (Sem isto, o Espaço "clicaria" o último botão em foco e as setas rolariam a página.)
   e.preventDefault();
   keys.add(e.code);
@@ -970,7 +1037,7 @@ async function start(entry: MenuEntry) {
       cineSound(null);
     }
     const room = await joinQuickRace({
-      ...carOptions(), raceId: rival.race, rival: { name: rival.name, car: rival.car, skill: rival.skill },
+      ...carOptions(), raceId: rival.race, rival: { name: rival.name, car: rival.car, skill: rival.skill, tune: rivalTune(rival.rank) },
     }, true);
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
@@ -993,7 +1060,7 @@ async function start(entry: MenuEntry) {
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });
-    setMode(new RaceMode(room, ctx));
+    setMode(new RaceMode(room, ctx, undefined, (result) => racePrize(result)));
   }
   ui.status.textContent = scene ? "Conectado" : "Conectado (sem 3D neste navegador)";
   ui.join.hidden = true;
@@ -1030,6 +1097,7 @@ setupPwa(() => playerName || ui.name.value.trim());
 const menu = createMenu({
   sound,
   scene,
+  garage,
   storage,
   token: () => token,
   onEnter: enter,
@@ -1113,6 +1181,7 @@ $("story-car").addEventListener("click", () => {
 /** Deixa os testes (Playwright) lerem o estado sem depender do canvas. */
 // A trilha (clima, faixa e tema da cinemática) fica visível para os testes desde o menu.
 window.__nfbmcAudio = () => sound.audioState();
+window.__nfbmcEconomy = () => economy.state();
 window.__nfbmcJukebox = jukeboxState;
 
 function publishTestHook() {
@@ -1131,6 +1200,7 @@ function publishTestHook() {
       return target ? { target, points: gps.route().length, guidance: gps.guidance() } : null;
     },
     setDestination: (x: number, z: number) => pickDestination({ x, z, race: null, onPin: false }),
+    garages: () => GARAGES.map((g) => ({ name: g.name, x: g.apron.x, z: g.apron.z })),
     send: (type: string, message: unknown) => {
       if (current instanceof WorldMode) current.send(type, message);
       else (current.room as unknown as { send: (type: string, message: unknown) => void }).send(type, message);
@@ -1141,6 +1211,7 @@ function publishTestHook() {
 declare global {
   interface Window {
     __nfbmcJukebox?: typeof jukeboxState;
+    __nfbmcEconomy?: () => ReturnType<typeof economy.state>;
     __nfbmcAudio?: () => { mood: string | null; cue: string | null; track: string | null; enabled: boolean; cinematic: boolean; jukebox?: boolean };
     __nfbmc?: {
       sessionId: string;
@@ -1158,6 +1229,8 @@ declare global {
       gps: () => { target: GpsTarget; points: number; guidance: GpsGuidance | null } | null;
       /** Marca o destino do GPS como um toque no mapa (para os testes). */
       setDestination: (x: number, z: number) => void;
+      /** Garagens (esconderijos): nome e o meio do pátio. */
+      garages: () => { name: string; x: number; z: number }[];
       send: (type: string, message: unknown) => void;
     };
   }

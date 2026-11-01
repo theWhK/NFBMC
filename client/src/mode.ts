@@ -18,6 +18,8 @@ export interface ModeContext {
   detectBump: (previous: { speed: number; bumpAt: number }, speed: number) => void;
   /** Centraliza o mapa grande num ponto (o painel "Online agora" usa). */
   focusMap: (x: number, z: number) => void;
+  /** O carro do jogador tem cilindro de nitro (peça comprada na garagem)? */
+  hasNitro: () => boolean;
 }
 
 /** Estado de um carro como os testes e2e enxergam (via window.__nfbmc). */
@@ -35,4 +37,7 @@ export interface PlayerSnapshot {
   place: number;
   calories: number;
   finished: boolean;
+  /** Cilindro de nitro (0 a 1) e se está ligado agora. */
+  nitro: number;
+  boost: boolean;
 }

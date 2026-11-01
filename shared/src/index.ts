@@ -8,6 +8,9 @@ export * from "./collision.ts";
 export * from "./story.ts";
 export * from "./world.ts";
 export * from "./barriers.ts";
+export * from "./tuning.ts";
+
+import type { Tune } from "./tuning.ts";
 
 export const ROOM_NAME = "race";
 export const WORLD_ROOM_NAME = "world";
@@ -27,22 +30,23 @@ export const FINISH_CAM_SECONDS = 4;
 /** Quanto tempo a tela de resultado fica antes de voltar para o lobby. */
 export const RESULTS_SECONDS = 15;
 
-/** Bônus de calorias pela colocação (1º, 2º, 3º...). Ganha quem somar mais calorias. */
-export const PLACE_BONUS = [1000, 600, 300, 150, 100, 50, 50, 50] as const;
-
 export type Phase = "lobby" | "countdown" | "racing" | "results";
 
 export type FoodKind = "burger" | "fries" | "soda";
 
-export const FOOD: Record<FoodKind, { calories: number; boostSeconds: number; label: string }> = {
-  burger: { calories: 500, boostSeconds: 0.5, label: "Hambúrguer" },
-  fries: { calories: 300, boostSeconds: 1, label: "Batata frita" },
-  soda: { calories: 150, boostSeconds: 2.5, label: "Refri" },
+/**
+ * Comida do drive-thru das lanchonetes do mundo aberto (só calorias: o empurrão
+ * de velocidade agora é o nitro, comprado na garagem).
+ */
+export const FOOD: Record<FoodKind, { calories: number; label: string }> = {
+  burger: { calories: 500, label: "Hambúrguer" },
+  fries: { calories: 300, label: "Batata frita" },
+  soda: { calories: 150, label: "Refri" },
 };
 
-export const FOOD_PICKUP_RADIUS = 3;
-export const FOOD_RESPAWN_SECONDS = 8;
-/** No mundo aberto a comida das barraquinhas demora mais para voltar. */
+/** Raio do balcão do drive-thru. */
+export const FOOD_PICKUP_RADIUS = 4;
+/** O pedido do drive-thru demora para ficar pronto de novo. */
 export const STAND_RESPAWN_SECONDS = 25;
 /** Corrida de evento (saindo do mundo aberto): espera a galera entrar até este tempo. */
 export const EVENT_JOIN_SECONDS = 8;
@@ -105,6 +109,8 @@ export interface InputMessage {
   steer: number;
   /** Freio de mão (Espaço). */
   handbrake?: boolean;
+  /** Nitro (Shift), se o carro tiver o cilindro. */
+  nitro?: boolean;
 }
 
 export interface JoinOptions {
@@ -114,6 +120,8 @@ export interface JoinOptions {
   /** Carro escolhido na Garagem (id de CARS) e se o câmbio é manual. */
   car?: string;
   manual?: boolean;
+  /** Peças instaladas no carro (shared/src/tuning.ts); o servidor confere os níveis. */
+  tune?: Partial<Tune>;
 }
 
 /** Troca de marcha no câmbio manual (+1 sobe, -1 desce). */
@@ -154,7 +162,7 @@ export interface CreateOptions extends JoinOptions {
   /** Pista da corrida (padrão: autódromo). */
   raceId?: string;
   /** Duelo do modo história: um rival só, com o carro e a habilidade dele. */
-  rival?: { name: string; car: string; skill: number };
+  rival?: { name: string; car: string; skill: number; tune?: Partial<Tune> };
 }
 
 /** Entrar no mundo aberto. */

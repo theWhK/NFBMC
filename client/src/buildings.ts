@@ -108,6 +108,7 @@ function character(b: Building, district: string, random: () => number): { tone:
       if (district === "roca") return { tone: c(["#9b2226", "#8a1c1c", "#a4302a", "#7d2a1d"], 0.06), finish: "wood", pitched: true };
       return { tone: c(CLADDING, 0.05), finish: "metal", pitched: false };
     case "container":
+    case "landmark":
       return { tone: c(CONTAINERS, 0.08), finish: "metal", pitched: false };
   }
 }
@@ -151,6 +152,7 @@ type Draw = (L: Lot) => void;
 function drawerFor(p: Prepared): Draw {
   switch (p.b.kind) {
     case "container":
+    case "landmark": // (não chega aqui: lanchonetes e garagens são de landmarks.ts)
       return containers;
     case "tower":
       return tower;
@@ -327,7 +329,8 @@ function buildFar(lots: readonly Prepared[]) {
 }
 
 export function buildBuildings(scene: THREE.Scene) {
-  const prepared = BUILDINGS.map(prepare);
+  // Lanchonetes e garagens têm desenho próprio (client/src/landmarks.ts).
+  const prepared = BUILDINGS.filter((b) => b.kind !== "landmark").map(prepare);
   // Os materiais (e texturas) da versão detalhada são criados agora, uma vez só.
   buildingMaterials();
   for (const tile of byTile(prepared, (p) => [p.x, p.z], DETAIL_TILE)) {

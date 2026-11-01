@@ -11,7 +11,11 @@ test("3D: menu, garagem e cidade desenham sem erros", async ({ page }) => {
 
   await page.goto("/?spawn=centro");
   await page.getByTestId("garage-menu").click();
+  // Garagem em tela cheia: os carros passam pela vitrine (um sai, o outro chega).
+  await expect(page.getByTestId("garage")).toBeVisible();
   await page.getByTestId("car-list").locator('[data-car="a3bruno"]').click();
+  await page.waitForTimeout(500);
+  await page.getByTestId("garage-close").click();
   await page.getByTestId("name-input").fill("Will");
   // Pelo Co-op: o carro da garagem vale ali (na carreira, vale o carro conquistado).
   await page.getByTestId("world-button").click();
@@ -30,7 +34,8 @@ test("3D: menu, garagem e cidade desenham sem erros", async ({ page }) => {
       for (const change of changes) for (const node of change.addedNodes) seen.push((node as HTMLElement).textContent ?? "");
     }).observe(document.getElementById("popups")!, { childList: true });
   });
-  for (const name of ["Perto", "Longe", "Baixa", "Capô", "Primeira pessoa", "Perseguição"]) {
+  // Começa na terceira pessoa longe; a ordem é capô, primeira pessoa, terceira perto e longe.
+  for (const name of ["Capô", "Primeira pessoa", "Terceira pessoa perto", "Terceira pessoa longe"]) {
     await page.keyboard.press("KeyC");
     await expect.poll(() => page.evaluate(() => (window as unknown as { __popups: string[] }).__popups)).toContain(`Câmera: ${name}`);
   }

@@ -2,6 +2,8 @@
 // batidas e do drift), corpos para a colisão entre carros, leitura segura da
 // entrada do jogador e "voltar para a rua".
 import {
+  NOS_LEVELS,
+  NOS_REFILL_SECONDS,
   ROADS,
   TRAFFIC_SIZE,
   carHalfSize,
@@ -15,6 +17,7 @@ import {
   type DriveInput,
   type InputMessage,
   type Track,
+  type Tune,
 } from "@nfbmc/shared";
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -22,7 +25,41 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 /** Lê a entrada do jogador (o cliente pode mandar qualquer coisa). */
 export function readInput(message: InputMessage): DriveInput | null {
   if (!Number.isFinite(message?.throttle) || !Number.isFinite(message?.steer)) return null;
-  return { throttle: clamp(message.throttle, -1, 1), steer: clamp(message.steer, -1, 1), handbrake: message.handbrake === true };
+  return {
+    throttle: clamp(message.throttle, -1, 1),
+    steer: clamp(message.steer, -1, 1),
+    handbrake: message.handbrake === true,
+    nitro: message.nitro === true,
+  };
+}
+
+/**
+ * Cilindro de nitro de um carro (segundos que sobram). Com Shift apertado, o
+ * acelerador no fundo e o carro andando para a frente, gasta e devolve quanto o
+ * motor ganha de força; senão, enche devagar sozinho.
+ */
+export class Nitros {
+  private tanks = new Map<string, number>();
+
+  /** Enche o cilindro (largada da corrida, carro novo). */
+  fill(id: string, tune: Tune | undefined) {
+    this.tanks.set(id, NOS_LEVELS[tune?.nos ?? 0].seconds);
+  }
+
+  delete(id: string) {
+    this.tanks.delete(id);
+  }
+
+  /** Avança um tick: devolve a força extra (0 = desligado) e quanto do cilindro sobra (0 a 1). */
+  step(id: string, tune: Tune | undefined, input: DriveInput, car: CarState, dt: number) {
+    const level = NOS_LEVELS[tune?.nos ?? 0];
+    if (!level.seconds) return { power: 0, fill: 0 };
+    let tank = this.tanks.get(id) ?? level.seconds;
+    const firing = !!input.nitro && input.throttle > 0.1 && car.speed > 1 && tank > 0;
+    tank = firing ? Math.max(0, tank - dt) : Math.min(level.seconds, tank + (level.seconds / NOS_REFILL_SECONDS) * dt);
+    this.tanks.set(id, tank);
+    return { power: firing ? level.power : 0, fill: tank / level.seconds };
+  }
 }
 
 /** Movimento extra de cada carro (empurrão lateral e giro), criado quando precisa. */

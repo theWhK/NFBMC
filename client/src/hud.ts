@@ -1,6 +1,7 @@
 // Partes do HUD desenhadas em canvas 2D: conta-giros e minimapa.
 import {
   DISTRICTS,
+  GARAGES,
   LAKE,
   QUAY_Z,
   RACES,
@@ -251,6 +252,13 @@ export function createMinimap(canvas: HTMLCanvasElement) {
         ctx.textBaseline = "middle";
         ctx.fillText("🏁", mx, my + 1);
       }
+      // Garagens (esconderijo e oficina).
+      for (const garage of GARAGES) {
+        const [gx, gy] = toMap(garage.apron.x, garage.apron.z);
+        ctx.fillStyle = "#3fd4ff";
+        ctx.fillRect(gx - 6, gy - 6, 12, 12);
+        ctx.fillText("🔧", gx, gy + 1);
+      }
     }
 
     // GPS: a rota e o pino (fora do círculo, o pino fica na borda, na direção dele).
@@ -469,10 +477,31 @@ export function createFullMap(canvas: HTMLCanvasElement, onPick?: (pick: MapPick
       ctx.fillText(district.name.toUpperCase(), mx, my);
     }
 
-    // Comida (só quando dá para ver: com zoom).
+    // Drive-thru das lanchonetes (só quando dá para ver: com zoom).
     if (zoom >= 1.6) {
       ctx.font = `${Math.round(10 + zoom * 2)}px sans-serif`;
       for (const food of foods ?? []) if (food.active) ctx.fillText("🍔", ...toMap(food.x, food.z));
+    }
+    // Garagens (esconderijos e oficina): sempre no mapa, fora das corridas.
+    if (!race) {
+      for (const garage of GARAGES) {
+        const [gx, gy] = toMap(garage.apron.x, garage.apron.z);
+        ctx.fillStyle = "#3fd4ff";
+        ctx.beginPath();
+        ctx.roundRect(gx - 10, gy - 10, 20, 20, 4);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#16110d";
+        ctx.stroke();
+        ctx.font = "12px sans-serif";
+        ctx.fillText("🔧", gx, gy + 1);
+        if (zoom < 2.5) continue;
+        ctx.font = "12px 'Russo One', sans-serif";
+        ctx.lineWidth = 3;
+        ctx.strokeText(garage.name, gx, gy - 18);
+        ctx.fillStyle = "#9be8ff";
+        ctx.fillText(garage.name, gx, gy - 18);
+      }
     }
 
     // Corridas.

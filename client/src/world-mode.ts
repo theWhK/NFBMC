@@ -1,7 +1,9 @@
-// Modo mundo aberto: dirigir por Porto Gordo, comer nas barraquinhas e
-// disparar corridas nos pontos de encontro.
+// Modo mundo aberto: dirigir por Porto Gordo, comer no drive-thru das
+// lanchonetes, entrar nas garagens e disparar corridas nos pontos de encontro.
 import {
   CROSSFIT_CAR,
+  LANDMARKS,
+  garageAt,
   carSpec,
   DIFFICULTY_LABELS,
   DISTRICTS,
@@ -17,13 +19,15 @@ import {
   type InputMessage,
   type RaceId,
   type TrafficKind,
+  type Tune,
 } from "@nfbmc/shared";
 
 import { CoopPanel } from "./coop.ts";
 import type { ModeContext, PlayerSnapshot } from "./mode.ts";
 import type { WorldRoom } from "./net.ts";
+import { economy, money } from "./economy.ts";
 import type { CarView } from "./scene.ts";
-import { escapeHtml, foodByCalories, kcal, setHtml, showPopup, ui } from "./ui.ts";
+import { $, escapeHtml, foodByCalories, kcal, setHtml, showNitro, showPopup, ui } from "./ui.ts";
 
 /** Momentos de uma perseguição (o modo história põe o Cross-fit no rádio). */
 export type PursuitEvent = "start" | "crossfit" | "escaped" | "busted";
@@ -37,6 +41,16 @@ export interface WorldHooks {
   onFrame?: (me: { x: number; z: number }) => void;
 }
 
+/** Mensagem do fim de uma perseguição (server/src/rooms/WorldRoom.ts, PursuitMessage). */
+interface PursuitMessage {
+  result: "escaped" | "busted";
+  calories: number;
+  stars: number;
+  cash: number;
+  garage?: string;
+  finale?: boolean;
+}
+
 export class WorldMode {
   readonly room: WorldRoom;
   private ctx: ModeContext;
@@ -48,6 +62,8 @@ export class WorldMode {
   /** Bairro onde o carro estava no quadro anterior (para mostrar a placa ao trocar). */
   private district: string | null = null;
 
+  /** Parou no pátio de uma garagem e apertou Enter: abre a oficina. */
+  private onGarage: (name: string) => void;
   /** Ganchos do modo história (calorias ganhas e fugas da Vigilância). */
   private hooks: WorldHooks;
   /** Co-op: quem está online (no mapa) e os desafios para um pega. */
@@ -62,7 +78,9 @@ export class WorldMode {
     onGoRace: (message: GoRaceMessage) => void,
     onToken: (token: string) => void,
     hooks: WorldHooks = {},
+    onGarage: (name: string) => void = () => {},
   ) {
+    this.onGarage = onGarage;
     this.room = room;
     this.ctx = ctx;
     this.hooks = hooks;
@@ -75,22 +93,27 @@ export class WorldMode {
     });
     room.onMessage("goRace", (message: GoRaceMessage) => onGoRace(message));
     room.onMessage("notice", (message: { text: string }) => showPopup(message.text));
-    room.onMessage("pursuit", (message: { result: "escaped" | "busted"; calories: number; finale?: boolean }) => {
+    room.onMessage("pursuit", (message: PursuitMessage) => {
       // O número que sobe/desce aqui já é o da Vigilância; não é comida.
       this.previous.calories = -1;
       this.hooks.onPursuit?.(message.result, !!message.finale);
       if (message.result === "escaped" && message.finale) {
+        economy.earn(message.cash);
         ctx.sound.escaped();
         this.showBanner("escaped", "A ponte!", "Pisa fundo e não freia!");
       } else if (message.result === "escaped") {
-        // O prêmio é 300 kcal por estrela: daí sai o nível da fuga.
-        this.hooks.onEscape?.(Math.round(message.calories / POLICE.escapeBonusPerStar), message.calories);
+        this.hooks.onEscape?.(message.stars ?? Math.round(message.calories / POLICE.escapeBonusPerStar), message.calories);
+        economy.earn(message.cash);
         ctx.sound.escaped();
-        this.showBanner("escaped", "Escapou!", `A Vigilância perdeu você de vista. +${kcal(message.calories)} kcal`);
+        this.showBanner("escaped", message.garage ? "Na garagem!" : "Escapou!", message.garage
+          ? `Você sumiu na ${message.garage}. +${kcal(message.calories)} kcal · +${money(message.cash)}`
+          : `A Vigilância perdeu você de vista. +${kcal(message.calories)} kcal · +${money(message.cash)}`);
       } else {
+        const fine = economy.pay(message.cash ?? 0);
         ctx.sound.busted();
-        this.showBanner("busted", "Autuado!", message.calories > 0
-          ? `A Vigilância Sanitária confiscou ${kcal(message.calories)} kcal`
+        const lost = [message.calories > 0 ? `${kcal(message.calories)} kcal` : "", fine > 0 ? `multa de ${money(fine)}` : ""].filter(Boolean);
+        this.showBanner("busted", "Autuado!", lost.length
+          ? `A Vigilância Sanitária levou ${lost.join(" e ")}`
           : "Sorte que você não tinha nada para confiscar");
       }
     });
@@ -139,7 +162,23 @@ export class WorldMode {
   }
 
   handleKey(code: string) {
-    if (code === "Enter") this.startRace();
+    if (code !== "Enter") return;
+    const garage = this.garageHere();
+    if (garage) this.onGarage(garage);
+    else this.startRace();
+  }
+
+  /** Garagem em que o carro está parado agora (sem a Vigilância atrás), se estiver. */
+  private garageHere() {
+    const me = this.room.state.players?.get(this.room.sessionId);
+    if (!me || Math.abs(me.speed) > 4) return null;
+    if ([...(this.room.state.cops?.values() ?? [])].some((c) => c.target === this.room.sessionId)) return null;
+    return garageAt(me.x, me.z)?.name ?? null;
+  }
+
+  /** Peças novas compradas na oficina: valem na hora. */
+  sendTune(tune: Tune) {
+    this.room.send("tune", { tune });
   }
 
   /** Y/X respondem a um desafio na tela (funciona até com o mapa aberto). */
@@ -154,8 +193,11 @@ export class WorldMode {
       ctx.scene?.setRace(null);
     }
     const cars = new Map<string, CarView>();
+    // Na carreira (cidade só sua), o seu nome não fica em cima do carro.
+    const alone = !!room.state.solo;
     room.state.players?.forEach((p, id) => {
-      cars.set(id, { name: p.name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible: true });
+      const name = alone && id === room.sessionId ? "" : p.name;
+      cars.set(id, { name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible: true });
     });
     room.state.traffic?.forEach((n, id) => {
       cars.set(`npc:${id}`, {
@@ -217,8 +259,9 @@ export class WorldMode {
     ctx.drawMinimap({ cars, myId: room.sessionId, race: null, foods: [...(room.state.stands ?? [])] });
     this.coop.frame(room.sessionId, me);
     ctx.drawTacho({ speed: me.speed, rpm: me.rpm, gear: me.gear, car: me.car, manual: me.manual });
-    ui.nitroFill.style.width = `${Math.min(100, (me.boost / 2.5) * 100)}%`;
+    showNitro(ctx.hasNitro() ? me.nitro : -1, me.boost > 0);
     ui.speedlines.hidden = !(me.boost > 0);
+    ui.worldCash.textContent = money(economy.cash());
 
     // HUD e Lista Gorda (quem está online, do mais calórico para o menos).
     ui.worldHud.hidden = false;
@@ -236,6 +279,12 @@ export class WorldMode {
           `<li><span class="dot" style="background:${p.color}"></span>${escapeHtml(p.name)}${id === room.sessionId ? " (você)" : ""}<strong>${kcal(p.calories)}</strong></li>`)
         .join(""),
     );
+
+    // Garagem: parado no pátio, Enter abre a oficina.
+    const garage = this.garageHere();
+    const prompt = $("garage-prompt");
+    prompt.hidden = !garage;
+    if (garage) $("garage-prompt-name").textContent = garage;
 
     // Painel do ponto de encontro.
     const raceId = this.markerHere();
@@ -261,12 +310,14 @@ export class WorldMode {
         : this.calling ? "Chamando a galera…" : document.body.classList.contains("touch") ? "Começar corrida" : "Começar corrida (Enter)";
     }
 
-    // Comeu numa barraquinha.
+    // Comeu no drive-thru de uma lanchonete.
     if (this.previous.calories >= 0 && me.calories > this.previous.calories) {
       const gained = me.calories - this.previous.calories;
       const food = foodByCalories(gained);
+      const stand = (room.state.stands ?? []).find((s) => Math.hypot(s.x - me.x, s.z - me.z) < 8);
+      const place = stand ? LANDMARKS.find((l) => Math.hypot(l.x - stand.x, l.z - stand.z) < 30)?.name : undefined;
       ctx.sound.eat(food?.kind);
-      showPopup(`+${kcal(gained)} kcal${food ? ` ${food.label.toLowerCase()}` : ""}`);
+      showPopup(`${place ? `${place}: ` : ""}+${kcal(gained)} kcal${food ? ` ${food.label.toLowerCase()}` : ""}`);
       this.hooks.onCalories?.(gained);
     }
     if (me.boost > this.previous.boost + 0.9) ctx.sound.boost();
@@ -347,7 +398,7 @@ export class WorldMode {
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
         name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: false, x: p.x, z: p.z, speed: p.speed, racing: false,
-        lap: 0, place: 0, calories: p.calories, finished: false,
+        lap: 0, place: 0, calories: p.calories, finished: false, nitro: p.nitro, boost: p.boost > 0,
       };
     });
     return result;
@@ -370,6 +421,7 @@ export class WorldMode {
   }
 
   dispose() {
+    $("garage-prompt").hidden = true;
     if (this.bannerTimer) clearTimeout(this.bannerTimer);
     this.coop.dispose();
     ui.markerBotsMinus.onclick = ui.markerBotsPlus.onclick = ui.startRace.onclick = null;
