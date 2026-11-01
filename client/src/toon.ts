@@ -19,7 +19,7 @@ const gradient = (() => {
 const converted = new WeakMap<THREE.Material, THREE.Material>();
 
 /** Troca materiais "Lambert" por "Toon" (mesmas cores e texturas), uma vez por material. */
-function toonMaterial(material: THREE.Material): THREE.Material {
+export function toonMaterial(material: THREE.Material): THREE.Material {
   if (!(material instanceof THREE.MeshLambertMaterial)) return material;
   const cached = converted.get(material);
   if (cached) return cached;

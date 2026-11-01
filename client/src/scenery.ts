@@ -30,6 +30,9 @@ import {
 
 import { bake, makeBurger } from "./models.ts";
 import { buildTrackMesh } from "./track-mesh.ts";
+import { TILE, addChunk, byTile } from "./chunks.ts";
+
+export { CHUNKS, addChunk } from "./chunks.ts";
 
 export const FOG_COLOR = "#e0995a";
 /** Direção de onde vem o sol (baixo, quase no horizonte). */
@@ -154,41 +157,6 @@ const instancedBoxes = (material: THREE.Material, list: { matrix: THREE.Matrix4;
   mesh.count = list.length;
   return mesh;
 };
-
-/**
- * Porto Gordo ficou grande: prédios, árvores e postes são divididos em blocos
- * de TILE metros, e a cena só desenha os blocos perto da câmera (o resto está
- * escondido na neblina de qualquer jeito). `CHUNKS` guarda cada bloco com o
- * centro dele em `userData.center`.
- */
-const TILE = 400;
-export const CHUNKS: THREE.Object3D[] = [];
-
-function byTile<T>(items: T[], position: (item: T) => [number, number]) {
-  const tiles = new Map<string, { center: [number, number]; items: T[] }>();
-  for (const item of items) {
-    const [x, z] = position(item);
-    const tx = Math.floor(x / TILE);
-    const tz = Math.floor(z / TILE);
-    const key = `${tx},${tz}`;
-    let tile = tiles.get(key);
-    if (!tile) tiles.set(key, (tile = { center: [(tx + 0.5) * TILE, (tz + 0.5) * TILE], items: [] }));
-    tile.items.push(item);
-  }
-  return [...tiles.values()];
-}
-
-/**
- * Põe na cena um objeto que pertence a um bloco (a cena esconde quando está
- * longe). `radius`: até onde o conteúdo vai, a partir do centro (padrão: o
- * canto do bloco, com folga para um galpão grande).
- */
-export function addChunk(scene: THREE.Scene, object: THREE.Object3D, center: [number, number], radius = TILE * 0.71 + 40) {
-  object.userData.center = center;
-  object.userData.radius = radius;
-  CHUNKS.push(object);
-  scene.add(object);
-}
 
 const matrixXZ = (m: THREE.Matrix4): [number, number] => [m.elements[12], m.elements[14]];
 
