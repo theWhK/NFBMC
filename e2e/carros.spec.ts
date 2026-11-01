@@ -10,6 +10,9 @@ test("garagem: escolher um carro e entrar com ele; o câmbio automático troca d
   await page.getByTestId("car-list").locator('[data-car="supra"]').click();
   await expect(page.getByTestId("car-info")).toContainText("Supra Salsicha");
   await expect(page.getByTestId("car-info")).toContainText("Toyota Supra");
+  // Esc fecha a garagem (tela cheia) e volta para o menu.
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("garage")).toBeHidden();
 
   await page.getByTestId("name-input").fill("Will");
   // O carro da garagem vale no Co-op e na corrida rápida (na carreira, vale o carro conquistado).

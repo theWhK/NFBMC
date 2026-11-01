@@ -1,6 +1,5 @@
 // Pilotos controlados pelo servidor. Cada bot olha um ponto à frente na pista,
-// freia antes das curvas, às vezes desvia para pegar comida e se desatola
-// sozinho quando bate ou sai da pista. Eles "apertam os mesmos botões" que um
+// freia antes das curvas, desvia de quem está na frente e se desatola sozinho quando bate ou sai da pista. Eles "apertam os mesmos botões" que um
 // jogador: a saída é um DriveInput, e a física é a mesma de todo mundo.
 import {
   RIVALS,
@@ -18,23 +17,11 @@ import {
 /** Nomes dos bots: os rivais da Lista Gorda (lista no shared, que o menu também mostra). */
 export const BOT_NAMES: string[] = RIVALS.map((r) => r.name);
 
-/**
- * Por dificuldade: quanto da velocidade máxima o bot usa e quanto ele vai atrás
- * de comida (comida dá turbo e calorias, então gula também é habilidade).
- */
+/** Por dificuldade: quanto da velocidade máxima o bot usa. */
 const SKILL: Record<Difficulty, number> = { facil: 0.78, medio: 0.87, dificil: 0.95 };
-const GREED: Record<Difficulty, [number, number]> = { facil: [0.1, 0.3], medio: [0.35, 0.6], dificil: [0.65, 0.9] };
-
-export interface FoodSpot {
-  dist: number;
-  side: number;
-  active: boolean;
-}
 
 export interface Brain {
   skill: number;
-  /** 0 a 1: chance de ir atrás de comida que aparece pela frente. */
-  greed: number;
   /** Faixa preferida (metros do centro) e quanto ela oscila com o tempo. */
   lane: number;
   sway: number;
@@ -43,8 +30,6 @@ export interface Brain {
   time: number;
   stuckFor: number;
   reverseFor: number;
-  /** Comida que o bot decidiu buscar, pela distância na pista. */
-  chasing: number | null;
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
@@ -53,14 +38,12 @@ const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
 export function createBrain(difficulty: Difficulty, random: () => number = Math.random): Brain {
   return {
     skill: SKILL[difficulty] * (0.96 + random() * 0.06),
-    greed: GREED[difficulty][0] + random() * (GREED[difficulty][1] - GREED[difficulty][0]),
     lane: (random() - 0.5) * 6,
     sway: 1 + random() * 2.5,
     wobble: difficulty === "facil" ? 0.25 : difficulty === "medio" ? 0.1 : 0.03,
     time: random() * 100,
     stuckFor: 0,
     reverseFor: 0,
-    chasing: null,
   };
 }
 
@@ -113,7 +96,6 @@ export function botInput(
   car: CarState,
   spec: CarSpec,
   dt: number,
-  foods: FoodSpot[],
   others: CarState[],
   pace = 1,
 ): DriveInput {
@@ -135,27 +117,9 @@ export function botInput(
     brain.reverseFor = 1;
   }
 
-  // Comida pela frente, perto o bastante da faixa atual: vale o desvio?
-  if (brain.chasing === null || !foods.some((f) => f.active && f.dist === brain.chasing)) {
-    brain.chasing = null;
-    for (const food of foods) {
-      const ahead = (food.dist - here + track.length) % track.length;
-      if (!food.active || ahead < 12 || ahead > 45) continue;
-      // Decide uma vez por comida (a semente é a própria distância, para não ficar indeciso).
-      const roll = (Math.sin(food.dist * 12.9898 + brain.lane * 78.233) * 43758.5453) % 1;
-      if (Math.abs(roll) < brain.greed) brain.chasing = food.dist;
-      break;
-    }
-  }
-  const chased = brain.chasing !== null ? foods.find((f) => f.dist === brain.chasing) : undefined;
-  const chasedAhead = chased ? (chased.dist - here + track.length) % track.length : Infinity;
-  if (chased && chasedAhead > track.length / 2) brain.chasing = null; // já passou
-
   const lookahead = 9 + Math.max(0, speed) * 0.42;
   const edge = track.width / 2 - 2.5;
-  let lane = chased && chasedAhead < 45
-    ? chased.side
-    : clamp(brain.lane + Math.sin(brain.time / brain.sway) * 2, -edge, edge);
+  let lane = clamp(brain.lane + Math.sin(brain.time / brain.sway) * 2, -edge, edge);
 
   // Carro logo à frente na mesma faixa: muda de faixa para ultrapassar e,
   // se estiver muito perto, alivia o pé para não bater na traseira.

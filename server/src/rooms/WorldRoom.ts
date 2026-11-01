@@ -17,6 +17,11 @@ import {
   isOnRoad,
   isRaceId,
   raceMarker,
+  bustFine,
+  escapeCash,
+  garageAt,
+  sanitizeTune,
+  tunedSpec,
   gradeAt,
   stepCar,
   pickColor,
@@ -37,8 +42,10 @@ import {
   type ChallengeMessage,
   type ChallengeReply,
   type RaceId,
+  type CarSpec,
   type DriveState,
   type ShiftMessage,
+  type Tune,
   type Difficulty,
   type DriveInput,
   type EventRaceOptions,
@@ -53,7 +60,7 @@ import { loadProfile, setCalories, type Profile } from "../profiles.ts";
 import { copInput, createCopBrain, spawnPoint, type CopBrain } from "./cops.ts";
 import { Cop, Npc, Stand, WorldPlayer, WorldState } from "./schema.ts";
 import { realTimeSteps } from "./tick.ts";
-import { Motions, carBody, readInput, resetToRoad } from "./vehicles.ts";
+import { Motions, Nitros, carBody, readInput, resetToRoad } from "./vehicles.ts";
 import { spawnTraffic, trafficInput, type TrafficBrain } from "./traffic.ts";
 
 /** Carros do trânsito: alguns por jogador, até um limite, só por perto de quem joga. */
@@ -71,6 +78,12 @@ const TEST_HOOKS = process.env.NFBMC_TEST_HOOKS === "1";
 export interface PursuitMessage {
   result: "escaped" | "busted";
   calories: number;
+  /** Nível de procurado da perseguição. */
+  stars: number;
+  /** Dinheiro: prêmio da fuga (positivo) ou multa da autuação (o cliente tira da carteira). */
+  cash: number;
+  /** Escapou entrando numa garagem (esconderijo). */
+  garage?: string;
   /** Era a fuga final do modo história (escapou = chegou na ponte). */
   finale?: boolean;
 }
@@ -110,6 +123,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
   /** Motor e câmbio de cada carro (jogadores, viaturas e trânsito). */
   private drives = new Map<string, DriveState>();
   private motions = new Motions();
+  /** Peças de cada jogador (tunagem) e a ficha do carro já com elas. */
+  private tunes = new Map<string, Tune>();
+  private specs = new Map<string, CarSpec>();
+  private nitros = new Nitros();
   private lastReset = new Map<string, number>();
   private lastHorn = new Map<string, number>();
   private profiles = new Map<string, Profile>();
@@ -162,7 +179,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     shift: (client: Client, message: ShiftMessage) => {
       const player = this.state.players.get(client.sessionId);
       const drive = this.drives.get(client.sessionId);
-      if (player && drive && Number.isFinite(message?.direction)) requestShift(drive, carSpec(player.car), message.direction);
+      if (player && drive && Number.isFinite(message?.direction)) requestShift(drive, this.specOf(client.sessionId, player), message.direction);
+    },
+    // Oficina da garagem: peças compradas agora valem na hora (o carro é o mesmo).
+    tune: (client: Client, message: { tune?: unknown }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player) this.setTune(client.sessionId, player, message?.tune);
     },
     gearbox: (client: Client, message: { manual?: unknown }) => {
       const player = this.state.players.get(client.sessionId);
@@ -231,7 +253,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     player.color = pickColor(options?.color, usedColors, this.joinCount);
     player.car = isCarId(options?.car) ? options.car : DEFAULT_CAR;
     player.manual = options?.manual === true;
-    this.drives.set(client.sessionId, createPlayerDrive(carSpec(player.car), player.manual));
+    this.setTune(client.sessionId, player, options?.tune);
+    this.drives.set(client.sessionId, createPlayerDrive(this.specOf(client.sessionId, player), player.manual));
 
     if (isRaceId(options?.spawn)) {
       // Voltando de uma corrida: aparece no ponto de encontro dela, um pouco ao lado.
@@ -274,7 +297,23 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.lastCopHit.delete(client.sessionId);
     this.drives.delete(client.sessionId);
     this.motions.delete(client.sessionId);
+    this.tunes.delete(client.sessionId);
+    this.specs.delete(client.sessionId);
+    this.nitros.delete(client.sessionId);
     this.removeCops(client.sessionId);
+  }
+
+  private specOf(id: string, player: WorldPlayer) {
+    return this.specs.get(id) ?? carSpec(player.car);
+  }
+
+  private setTune(id: string, player: WorldPlayer, raw: unknown) {
+    const tune = sanitizeTune(raw);
+    const nosBefore = this.tunes.get(id)?.nos ?? -1;
+    this.tunes.set(id, tune);
+    this.specs.set(id, tunedSpec(carSpec(player.car), tune));
+    // Cilindro novo (ou maior) já vem cheio.
+    if (tune.nos !== nosBefore) this.nitros.fill(id, tune);
   }
 
   /** Dispara a corrida do ponto de encontro e chama todo mundo que está nele. */
@@ -398,11 +437,13 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const input = this.leaving.has(sessionId)
         ? { throttle: -1, steer: 0 }
         : this.controls.get(sessionId) ?? { throttle: 0, steer: 0 };
-      player.boost = Math.max(0, player.boost - dt);
-      const spec = carSpec(player.car);
+      const spec = this.specOf(sessionId, player);
       const drive = this.driveOf(sessionId, spec, player.manual, true);
       const motion = this.motions.get(sessionId);
-      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), player.boost > 0, motion, gradeAt(player.x, player.z, player.heading));
+      const nitro = this.nitros.step(sessionId, this.tunes.get(sessionId), input, player, dt);
+      player.boost = nitro.power > 0 ? 1 : 0;
+      player.nitro = nitro.fill;
+      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), nitro.power, motion, gradeAt(player.x, player.z, player.heading));
       const size = carHalfSize(player.car);
       collideWorld(player, size.halfLength, size.halfWidth, motion);
       player.rpm = Math.round(drive.rpm);
@@ -417,7 +458,12 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     // tamanho de cada um, com impulso pela massa e giro.
     const all: [string, WorldPlayer | Cop | Npc][] = [...cars, ...this.state.cops.entries(), ...this.state.traffic.entries()];
     // (Trânsito não tem carro da garagem: os ids dele começam com "npc-".)
-    const bodies = all.map(([id, c]) => carBody(c, this.motions.get(id), id.startsWith("npc-") ? null : (c as WorldPlayer | Cop).car));
+    const bodies = all.map(([id, c]) => {
+      const body = carBody(c, this.motions.get(id), id.startsWith("npc-") ? null : (c as WorldPlayer | Cop).car);
+      // Redução de peso da tunagem vale nas batidas também.
+      const spec = this.specs.get(id);
+      return spec ? { ...body, mass: spec.mass } : body;
+    });
     for (const impact of collideCars(bodies)) {
       // Jogador batendo forte em viatura ou no trânsito esquenta a situação (sendo atingido, não).
       for (const [mine, other] of [[impact.a, impact.b], [impact.b, impact.a]]) {
@@ -523,7 +569,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       // O trânsito anda num carro popular comum, com câmbio automático.
       const spec = carSpec("uno");
       const motion = this.motions.get(id);
-      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z), false, motion, gradeAt(npc.x, npc.z, npc.heading));
+      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z), 0, motion, gradeAt(npc.x, npc.z, npc.heading));
       collideWorld(npc, TRAFFIC_SIZE.length / 2, TRAFFIC_SIZE.width / 2, motion);
     }
   }
@@ -545,7 +591,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const { input, boost } = copInput(brain, cop, spec, target, stars, dt);
       cop.boost = boost ? 1 : 0;
       const motion = this.motions.get(id);
-      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z), boost, motion, gradeAt(cop.x, cop.z, cop.heading));
+      // A viatura também tem nitro (a partir de 2★, quando está longe e alinhada).
+      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z), boost ? 0.5 : 0, motion, gradeAt(cop.x, cop.z, cop.heading));
       const size = carHalfSize(cop.car);
       collideWorld(cop, size.halfLength, size.halfWidth, motion);
     }
@@ -599,7 +646,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         const bonus = POLICE.escapeBonusPerStar * POLICE.maxHeat;
         player.calories += bonus;
         this.finale = false;
-        this.endPursuit(sessionId, player, { result: "escaped", calories: bonus, finale: true });
+        this.endPursuit(sessionId, player, { result: "escaped", calories: bonus, stars: POLICE.maxHeat, cash: escapeCash(POLICE.maxHeat), finale: true });
         return;
       }
     }
@@ -618,17 +665,22 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     const pinned = nearest < POLICE.bustRadius && Math.abs(player.speed) < POLICE.bustSpeed;
     player.bust = pinned ? player.bust + dt / POLICE.bustSeconds : Math.max(0, player.bust - dt);
 
-    if (player.escape >= 1) {
+    // Esconderijo: despistando (nenhuma viatura vendo), entrar numa garagem e
+    // parar no pátio dela encerra a perseguição na hora (fora da fuga final).
+    const hideout = !this.finale && !player.chased && Math.abs(player.speed) < 4 ? garageAt(player.x, player.z) : null;
+    if (player.escape >= 1 || hideout) {
       const bonus = POLICE.escapeBonusPerStar * Math.max(1, stars);
       player.calories += bonus;
-      this.endPursuit(sessionId, player, { result: "escaped", calories: bonus });
+      this.endPursuit(sessionId, player, {
+        result: "escaped", calories: bonus, stars: Math.max(1, stars), cash: escapeCash(stars), ...(hideout && { garage: hideout.name }),
+      });
     } else if (player.bust >= 1) {
       const lost = Math.floor(player.calories * POLICE.bustPenalty);
       player.calories -= lost;
       player.speed = 0;
       const finale = this.finale;
       this.finale = false;
-      this.endPursuit(sessionId, player, { result: "busted", calories: lost, ...(finale && { finale }) });
+      this.endPursuit(sessionId, player, { result: "busted", calories: lost, stars: Math.max(1, stars), cash: bustFine(stars), ...(finale && { finale }) });
     }
   }
 
@@ -648,7 +700,6 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       if (Math.hypot(stand.x - player.x, stand.z - player.z) > FOOD_PICKUP_RADIUS) continue;
       const info = FOOD[stand.kind as FoodKind];
       player.calories += info.calories;
-      player.boost = Math.max(player.boost, info.boostSeconds);
       this.syncProfile(sessionId, player);
       // Comer na rua chama a atenção da Vigilância Sanitária.
       player.heat = Math.min(POLICE.maxHeat, player.heat + POLICE.heatPerStand);

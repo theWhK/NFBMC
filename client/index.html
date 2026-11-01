@@ -38,7 +38,7 @@
         <button type="button" id="world" data-testid="world-button" data-hint="Porto Gordo com a galera: veja no mapa (M) quem está online e desafie para um pega, coma tudo e corra nos pontos de encontro."><span class="icon" aria-hidden="true">👥</span><span class="label">Co-op</span> <span class="online-badge" id="online-badge" data-testid="online-badge" hidden></span></button>
         <button type="button" data-screen="quick" data-testid="quick-menu" data-hint="Uma corrida direto na largada, sem passar pela cidade: escolha a pista."><span class="icon" aria-hidden="true">⏱️</span><span class="label">Corrida rápida</span></button>
         <button type="button" data-screen="story" data-testid="story-menu" data-hint="O cardápio de Porto Gordo: os 10 combos da Lista Gorda, o que falta para cada desafio e os mais pedidos de todos os tempos."><span class="icon" aria-hidden="true">🍔</span><span class="label">Lista Gorda</span></button>
-        <button type="button" data-screen="garage" data-testid="garage-menu" data-hint="Escolha a cor do seu carrinho de lanche."><span class="icon" aria-hidden="true">🔧</span><span class="label">Garagem</span></button>
+        <button type="button" id="menu-garage" data-testid="garage-menu" data-hint="Os 16 carros de Porto Gordo passando na vitrine: escolha, pinte e tune com o dinheiro das corridas (motor, turbina, câmbio, suspensão, freios, pneus, peso e nitro)."><span class="icon" aria-hidden="true">🔧</span><span class="label">Garagem</span></button>
         <button type="button" id="menu-jukebox" data-testid="jukebox-menu" data-hint="As 20 faixas da rádio de Porto Gordo, por álbum: toque, pule, embaralhe e veja o visualizador."><span class="icon" aria-hidden="true">🎵</span><span class="label">Jukebox</span></button>
         <button type="button" data-screen="options" data-testid="options-menu" data-hint="Volume da música e dos efeitos, câmbio, gráficos e abertura."><span class="icon" aria-hidden="true">⚙️</span><span class="label">Opções</span></button>
         <button type="button" data-screen="credits" data-hint="Quem fez esta bagunça."><span class="icon" aria-hidden="true">🎬</span><span class="label">Créditos</span></button>
@@ -85,16 +85,6 @@
         </div>
       </section>
 
-      <section class="mw-screen garage-screen" data-screen-id="garage" hidden>
-        <h2>Garagem</h2>
-        <div class="garage">
-          <div class="mw-list sub car-list" id="car-list" data-testid="car-list"></div>
-          <div class="car-info" id="car-info" data-testid="car-info"></div>
-        </div>
-        <p class="hint">Pintura (se outro piloto na sala já estiver com a cor, você fica com outra):</p>
-        <div class="swatches" id="swatches" data-testid="swatches"></div>
-      </section>
-
       <section class="mw-screen" data-screen-id="options" hidden>
         <h2>Opções</h2>
         <div class="mw-list sub">
@@ -132,6 +122,42 @@
       </footer>
     </div>
 
+    <!-- Garagem em tela cheia: vitrine 3D (os carros passam pela reta), ficha, pintura e oficina. -->
+    <section id="garage" class="garage-full" data-testid="garage" hidden>
+      <header class="garage-head">
+        <div class="garage-brand">
+          <span class="icon" aria-hidden="true">🔧</span>
+          <div><h2 id="garage-title">Garagem</h2><small id="garage-sub"></small></div>
+        </div>
+        <nav class="garage-tabs">
+          <button type="button" data-tab="cars" data-testid="garage-tab-cars">Carro e pintura</button>
+          <button type="button" data-tab="tuning" data-testid="garage-tab-tuning">Oficina</button>
+        </nav>
+        <span class="garage-cash" id="garage-cash" data-testid="garage-cash"></span>
+        <button type="button" class="link garage-close" id="garage-close" data-testid="garage-close">Pronto (Esc)</button>
+      </header>
+      <div class="garage-stage">
+        <button type="button" class="garage-arrow" id="garage-prev" aria-label="Carro anterior">‹</button>
+        <button type="button" class="garage-arrow" id="garage-next" aria-label="Próximo carro">›</button>
+      </div>
+      <aside class="garage-side">
+        <div class="car-info" id="car-info" data-testid="car-info"></div>
+        <div class="garage-pane" data-pane="cars">
+          <p class="stamp small">Pintura</p>
+          <div class="swatches" id="swatches" data-testid="swatches"></div>
+          <p class="hint">Se outro piloto na sala já estiver com a cor, você fica com outra.</p>
+        </div>
+        <div class="garage-pane" data-pane="tuning" hidden>
+          <ul class="garage-parts" id="garage-parts" data-testid="garage-parts"></ul>
+          <p class="hint" id="garage-part-info"></p>
+        </div>
+      </aside>
+      <footer class="garage-foot">
+        <nav class="garage-strip" id="car-list" data-testid="car-list" aria-label="Carros"></nav>
+        <span class="keys">←→ carro · ↑↓ peças · Enter compra · Tab aba · Esc sai</span>
+      </footer>
+    </section>
+
     <div id="lobby" class="panel side" hidden>
       <h2 id="lobby-title">Lobby</h2>
       <p class="hint" id="lobby-hint">Dirija à vontade enquanto a galera chega.</p>
@@ -158,7 +184,7 @@
     <div id="hud" hidden>
       <div class="hud-place"><strong id="place" data-testid="place">1º</strong><span>posição</span></div>
       <div class="hud-row"><span>volta</span><strong id="lap" data-testid="lap">1/3</strong></div>
-      <div class="hud-row kcal"><span>🍔 kcal</span><strong id="calories" data-testid="calories">0</strong></div>
+      <div class="hud-row cash"><span>💵 prêmio</span><strong id="race-prize" data-testid="race-prize">R$ 0</strong></div>
       <div class="hud-row trap" id="trap-row" hidden><span>📸 radares</span><strong id="trap" data-testid="trap">0 km/h</strong></div>
     </div>
 
@@ -174,7 +200,7 @@
 
     <div id="dash" hidden>
       <canvas id="tacho" width="220" height="220"></canvas>
-      <div id="nitro"><div id="nitro-fill"></div><span>TURBO</span></div>
+      <div id="nitro" data-testid="nitro" hidden><div id="nitro-fill"></div><span>NITRO · SHIFT</span></div>
     </div>
 
     <div id="countdown" data-testid="countdown" hidden></div>
@@ -186,7 +212,7 @@
       <p class="stamp">Lista Gorda</p>
       <h2 id="winner"></h2>
       <table>
-        <thead><tr><th>#</th><th>Piloto</th><th>Chegada</th><th>Tempo</th><th class="trap-col">Radares</th><th>Comeu</th><th>Bônus</th><th>Total</th></tr></thead>
+        <thead><tr><th>#</th><th>Piloto</th><th>Chegada</th><th>Tempo</th><th class="trap-col">Radares</th><th>kcal</th><th>Prêmio</th></tr></thead>
         <tbody id="results-body"></tbody>
       </table>
       <p class="hint" id="results-timer"></p>
@@ -194,9 +220,10 @@
 
     <div id="world-hud" hidden>
       <div class="hud-row kcal"><span>🍔 kcal acumuladas</span><strong id="world-calories" data-testid="world-calories">0</strong></div>
+      <div class="hud-row cash"><span>💵 na carteira</span><strong id="world-cash" data-testid="world-cash">R$ 0</strong></div>
       <p class="stats" id="world-stats" data-testid="world-stats"></p>
       <div id="story-objective" class="story-objective" data-testid="story-objective" hidden></div>
-      <p class="hint">Siga as colunas de luz 🏁 no mapa para achar corridas. Comida nas esquinas… mas cuidado com a Vigilância Sanitária!</p>
+      <p class="hint">Siga as colunas de luz 🏁 no mapa para achar corridas. Comida no drive-thru das lanchonetes (mas a Vigilância Sanitária vê) e oficina nas garagens 🔧.</p>
     </div>
 
     <div id="wanted" data-testid="wanted" hidden></div>
@@ -212,6 +239,11 @@
       <ol id="leaderboard-list" data-testid="leaderboard"></ol>
       <p class="hint">Desafie a galera pelo mapa 🗺️</p>
     </div>
+
+    <!-- Parado no pátio de uma garagem: Enter abre a oficina. -->
+    <button type="button" id="garage-prompt" class="panel bottom garage-prompt" data-testid="garage-prompt" hidden>
+      <span class="icon" aria-hidden="true">🔧</span><strong id="garage-prompt-name"></strong><span>Enter: abrir a garagem</span>
+    </button>
 
     <div id="marker-panel" class="panel bottom" data-testid="marker-panel" hidden>
       <h2 id="marker-title"></h2>
@@ -266,14 +298,15 @@
         <tr><td><kbd>↓</kbd> <kbd>S</kbd></td><td>Frear (parado, segure para dar ré)</td></tr>
         <tr><td><kbd>←</kbd><kbd>→</kbd> <kbd>A</kbd><kbd>D</kbd></td><td>Virar</td></tr>
         <tr><td><kbd>Espaço</kbd></td><td>Freio de mão (drift)</td></tr>
-        <tr><td><kbd>E</kbd> <kbd>Shift</kbd> / <kbd>Q</kbd> <kbd>Ctrl</kbd></td><td>Subir / descer marcha (câmbio manual)</td></tr>
+        <tr><td><kbd>Shift</kbd></td><td>Nitro (segure acelerando; precisa do cilindro, comprado na garagem)</td></tr>
+        <tr><td><kbd>E</kbd> / <kbd>Q</kbd> <kbd>Ctrl</kbd></td><td>Subir / descer marcha (câmbio manual)</td></tr>
         <tr><td><kbd>H</kbd></td><td>Buzina (a galera ouve)</td></tr>
-        <tr><td><kbd>C</kbd></td><td>Trocar câmera (perseguição, perto, longe, baixa, capô, primeira pessoa)</td></tr>
+        <tr><td><kbd>C</kbd></td><td>Trocar câmera (capô, primeira pessoa, terceira pessoa perto e longe)</td></tr>
         <tr><td><kbd>R</kbd></td><td>Voltar para a rua (quando empacar)</td></tr>
         <tr><td><kbd>M</kbd> <kbd>Tab</kbd></td><td>Mapa da cidade e pilotos online (desafiar para um pega)</td></tr>
         <tr><td>Clique no mapa</td><td>Marca o destino do GPS (a rota aparece no chão e no minimapa; clique no pino para tirar)</td></tr>
         <tr><td><kbd>Y</kbd> / <kbd>X</kbd></td><td>Aceitar / amarelar um desafio</td></tr>
-        <tr><td><kbd>Enter</kbd></td><td>Começar a corrida (no ponto de encontro)</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>Começar a corrida (no ponto de encontro) ou abrir a garagem (parado no pátio dela)</td></tr>
         <tr><td><kbd>Esc</kbd> <kbd>P</kbd></td><td>Pausa</td></tr>
         <tr><td><kbd>N</kbd></td><td>Liga/desliga a música</td></tr>
         <tr><td><kbd>F1</kbd></td><td>Esta lista</td></tr>
@@ -394,6 +427,7 @@
         <button type="button" data-shift="-1" data-testid="touch-shift-down" aria-label="Descer marcha">−</button>
       </div>
       <div class="touch-pedals">
+        <button type="button" data-key="TouchNitro" data-testid="touch-nitro" class="nitro" aria-label="Nitro">NOS</button>
         <button type="button" data-key="TouchHandbrake" data-testid="touch-handbrake" class="handbrake" aria-label="Freio de mão">FREIO<br />DE MÃO</button>
         <button type="button" data-key="TouchDown" data-testid="touch-brake" class="brake" aria-label="Freio e ré">FREIO</button>
         <button type="button" data-key="TouchUp" data-testid="touch-gas" class="gas" aria-label="Acelerar">ACELERA</button>

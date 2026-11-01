@@ -42,7 +42,8 @@ test("dois jogadores entram no lobby, largam juntos e um vê o outro andar", asy
   await expect(bob.getByTestId("countdown")).toHaveText(/^[123]$/);
   await expect.poll(() => phase(bob), { timeout: 6_000 }).toBe("racing");
   await expect(alice.getByTestId("lap")).toHaveText("1/3");
-  await expect(alice.getByTestId("calories")).toHaveText("0");
+  // Sem comida na pista: o HUD mostra o prêmio em dinheiro da posição atual.
+  await expect(alice.getByTestId("race-prize")).toContainText("R$");
 
   const aliceId = await sessionId(alice);
   const before = await playerSeenBy(bob, aliceId);
@@ -154,6 +155,9 @@ test("fim de corrida contra bots: não espera ninguém, câmera de chegada e tem
   await expect(rows).toHaveCount(6);
   // Os bots que ainda corriam têm o tempo projetado (com "~").
   await expect(page.getByTestId("results")).toContainText("~");
+  // Sem comida na pista: a colocação paga em dinheiro (vai para a carteira, que começa com R$ 2.000).
+  await expect(page.getByTestId("results").locator("tr.me")).toContainText("R$");
+  await expect.poll(() => page.evaluate(() => window.__nfbmcEconomy!().cash)).toBeGreaterThan(2000);
 });
 
 test("speedtrap: radares somam a velocidade e decidem a colocação", async ({ browser }) => {

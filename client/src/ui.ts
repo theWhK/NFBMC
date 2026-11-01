@@ -27,7 +27,7 @@ export const ui = {
   hud: $("hud"),
   lap: $("lap"),
   place: $("place"),
-  calories: $("calories"),
+  racePrize: $("race-prize"),
   countdown: $("countdown"),
   message: $("message"),
   results: $("results"),
@@ -37,6 +37,7 @@ export const ui = {
   // Mundo aberto
   worldHud: $("world-hud"),
   worldCalories: $("world-calories"),
+  worldCash: $("world-cash"),
   worldStats: $("world-stats"),
   hall: $("hall"),
   hallList: $("hall-list"),
@@ -62,6 +63,7 @@ export const ui = {
   // Comum
   dash: $("dash"),
   tacho: $<HTMLCanvasElement>("tacho"),
+  nitro: $("nitro"),
   nitroFill: $("nitro-fill"),
   speedlines: $("speedlines"),
   popups: $("popups"),
@@ -77,6 +79,14 @@ export const escapeHtml = (text: string) =>
 /** Só troca o HTML quando muda, para não refazer o DOM a cada quadro. */
 export function setHtml(el: HTMLElement, html: string) {
   if (el.innerHTML !== html) el.innerHTML = html;
+}
+
+/** Barra do nitro: só aparece com o cilindro instalado (`fill` < 0 = sem nitro). */
+export function showNitro(fill: number, firing: boolean) {
+  ui.nitro.hidden = fill < 0;
+  if (fill < 0) return;
+  ui.nitroFill.style.width = `${Math.round(Math.min(1, fill) * 100)}%`;
+  ui.nitro.classList.toggle("firing", firing);
 }
 
 export function showPopup(text: string) {
@@ -100,7 +110,7 @@ export function hideModeUi() {
   for (const el of [
     ui.lobby, ui.hud, ui.countdown, ui.message, ui.results,
     ui.worldHud, ui.leaderboard, ui.markerPanel, ui.speedlines,
-    ui.wanted, ui.pursuit, ui.banner, ui.district,
+    ui.wanted, ui.pursuit, ui.banner, ui.district, $("garage-prompt"),
     // O painel (velocímetro e turbo) também: senão ficava aparecendo no menu.
     ui.dash,
     // Chegada e flash do radar (corrida).

@@ -24,6 +24,8 @@ export interface DriveInput {
   steer: number;
   /** Freio de mão: trava a traseira (freia e deixa o carro escorregar de lado: drift). */
   handbrake?: boolean;
+  /** Pedido de nitro (Shift); quem decide se tem cilindro é a sala. */
+  nitro?: boolean;
 }
 
 /**
@@ -64,8 +66,6 @@ export const CAR = {
   halfWidth: 0.9,
   /** Meio comprimento padrão (m). */
   halfLength: 2.1,
-  /** Turbo da comida: aceleração extra (m/s²). */
-  boostAccel: 9,
 } as const;
 
 const AIR_DENSITY = 1.2;
@@ -129,19 +129,24 @@ export function yawRate(spec: CarSpec, speed: number, steer: number, onGrass: bo
   const v = Math.abs(speed);
   const grip = clamp(speed / 6, -1, 1);
   const highSpeed = 1 / (1 + (v / 50) ** 2 * spec.understeer * 2);
-  const limit = ((handbrake ? HANDBRAKE_GRIP : LATERAL_GRIP) * (onGrass ? 0.75 : 1)) / Math.max(v, 1);
+  const limit = ((handbrake ? HANDBRAKE_GRIP : LATERAL_GRIP) * (spec.grip ?? 1) * (onGrass ? 0.75 : 1)) / Math.max(v, 1);
   return steer * Math.min(spec.turn * highSpeed * (handbrake ? 1.3 : 1), limit) * grip;
 }
 
-/** Torque do motor (N·m) num giro: sobe até o pico e cai um pouco até a faixa vermelha. */
+/**
+ * Torque do motor (N·m) num giro: sobe até o pico e cai um pouco até a faixa
+ * vermelha. Com turbina da tunagem, ganha força que enche do meio do conta-giros
+ * para cima (e segura a queda no fim).
+ */
 export function torqueAt(spec: CarSpec, rpm: number) {
   const peak = spec.torque * GAME_TORQUE;
+  const turbo = spec.turboGain ? 1 + spec.turboGain * clamp((rpm - spec.redline * 0.35) / (spec.redline * 0.3), 0, 1) : 1;
   if (rpm <= spec.peakRpm) {
     const t = clamp((rpm - spec.idleRpm) / (spec.peakRpm - spec.idleRpm), 0, 1);
-    return peak * (0.62 + 0.38 * t);
+    return peak * (0.62 + 0.38 * t) * turbo;
   }
   const t = clamp((rpm - spec.peakRpm) / (spec.redline - spec.peakRpm), 0, 1);
-  return peak * (1 - 0.28 * t ** 1.5);
+  return peak * (1 - 0.28 * t ** 1.5) * turbo;
 }
 
 const gearRatio = (spec: CarSpec, gear: number) => (gear < 0 ? REVERSE_RATIO : spec.gears[gear - 1]);
@@ -157,7 +162,7 @@ export function requestShift(drive: DriveState, spec: CarSpec, direction: number
   const next = clamp(drive.gear + Math.sign(direction), 1, spec.gears.length);
   if (next === drive.gear) return;
   drive.gear = next;
-  drive.shiftTimer = 0.18;
+  drive.shiftTimer = 0.18 * (spec.shiftTime ?? 1);
 }
 
 export function stepCar(
@@ -167,12 +172,16 @@ export function stepCar(
   input: DriveInput,
   dt: number,
   onGrass: boolean,
-  boosting: boolean,
+  /**
+   * Nitro ligado: fração de força a mais no motor (0 = sem nitro). Só multiplica
+   * o que o acelerador já pede: sem pé no acelerador, não faz nada.
+   */
+  nitro: number,
   motion?: CarMotion,
   /** Rampa na direção do carro (m por m, positivo = subida): ver `gradeAt` em terrain.ts. */
   grade = 0,
 ) {
-  const gas = boosting ? 1 : Math.max(0, input.throttle);
+  const gas = Math.max(0, input.throttle);
   const brakeInput = Math.max(0, -input.throttle);
   const v = car.speed;
 
@@ -206,10 +215,10 @@ export function stepCar(
   else if (!drive.manual && drive.gear >= 1) {
     if (fromWheels > spec.redline * 0.93 && drive.gear < spec.gears.length) {
       drive.gear++;
-      drive.shiftTimer = 0.22;
+      drive.shiftTimer = 0.22 * (spec.shiftTime ?? 1);
     } else if (drive.gear > 1 && fromWheels < spec.redline * 0.45 && wheelRpm(spec, v, drive.gear - 1) < spec.redline * 0.85) {
       drive.gear--;
-      drive.shiftTimer = 0.15;
+      drive.shiftTimer = 0.15 * (spec.shiftTime ?? 1);
     }
   }
 
@@ -217,8 +226,8 @@ export function stepCar(
   const direction = reverse ? -1 : 1;
   const engineForce = drive.shiftTimer > 0 || drive.limiter
     ? 0
-    : (torqueAt(spec, drive.rpm) * gearRatio(spec, drive.gear) * spec.finalDrive * DRIVETRAIN / spec.wheelRadius) * drive.pedal;
-  const boostForce = boosting && !reverse ? spec.mass * CAR.boostAccel : 0;
+    : (torqueAt(spec, drive.rpm) * gearRatio(spec, drive.gear) * spec.finalDrive * DRIVETRAIN / spec.wheelRadius) * drive.pedal
+      * (reverse ? 1 : 1 + Math.max(0, nitro));
   const drag = 0.5 * AIR_DENSITY * spec.dragArea * v * Math.abs(v);
   const rolling = (onGrass ? 0.32 : 0.015) * spec.mass * GRAVITY * Math.sign(v);
   // Freio motor: tirar o pé segura o carro, mais forte em giro alto.
@@ -226,10 +235,10 @@ export function stepCar(
 
   // Ladeira: a gravidade puxa para baixo do morro (na subida segura, na descida embala).
   const hill = (spec.mass * GRAVITY * grade) / Math.sqrt(1 + grade * grade);
-  let next = v + ((engineForce * direction + boostForce - drag - rolling - engineBrake - hill) / spec.mass) * dt;
+  let next = v + ((engineForce * direction - drag - rolling - engineBrake - hill) / spec.mass) * dt;
   // Sem tração, o atrito para o carro, mas não o faz andar para trás (a não ser
   // que a ladeira seja forte o bastante para vencer a rolagem: aí desce de ré).
-  if (engineForce === 0 && boostForce === 0 && Math.abs(grade) < 0.06 && (Math.abs(v) < 0.3 || (Math.sign(next) !== Math.sign(v) && v !== 0))) next = 0;
+  if (engineForce === 0 && Math.abs(grade) < 0.06 && (Math.abs(v) < 0.3 || (Math.sign(next) !== Math.sign(v) && v !== 0))) next = 0;
   // Freio: sempre contra o movimento, até parar.
   if (braking > 0) {
     const drop = brakeDecel(spec) * braking * dt;
@@ -318,7 +327,7 @@ export function zeroToHundred(spec: CarSpec) {
   const drive = createDrive(spec);
   let t = 0;
   while (car.speed < 100 / 3.6 && t < 40) {
-    stepCar(car, drive, spec, { throttle: 1, steer: 0 }, 1 / 60, false, false);
+    stepCar(car, drive, spec, { throttle: 1, steer: 0 }, 1 / 60, false, 0);
     t += 1 / 60;
   }
   return t;
@@ -340,13 +349,14 @@ export function cornerSpeed(spec: CarSpec, radius: number) {
   return lo;
 }
 
-const topSpeedCache = new Map<string, number>();
+// Por ficha (e não pelo id): o carro tunado tem o mesmo id e outra velocidade final.
+const topSpeedCache = new WeakMap<CarSpec, number>();
 /** topSpeed com cache (a conta percorre todas as marchas e velocidades). */
 export function cachedTopSpeed(spec: CarSpec) {
-  let v = topSpeedCache.get(spec.id);
+  let v = topSpeedCache.get(spec);
   if (v === undefined) {
     v = topSpeed(spec);
-    topSpeedCache.set(spec.id, v);
+    topSpeedCache.set(spec, v);
   }
   return v;
 }

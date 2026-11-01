@@ -13,6 +13,7 @@ import {
   rampSteer,
   yawRate,
   raceMarker,
+  type CarSpec,
   type FoodKind,
   type RaceId,
   type TrafficKind,
@@ -184,19 +185,26 @@ function chooseQuality(renderer: THREE.WebGLRenderer, choice?: string): Quality 
   return window.matchMedia?.("(pointer: coarse)").matches ? "medio" : "alto";
 }
 
-/** Câmeras de perseguição: distância atrás (negativa = na frente do centro, no capô), alturas e se o carro aparece. */
 /**
- * Câmeras (tecla C). `back` negativo = presa ao carro; `seat` = deslocada para
- * o lado do motorista (esquerda), dentro do carro, com o painel e o volante.
+ * Câmeras (tecla C), nesta ordem: capô, primeira pessoa, terceira pessoa perto
+ * e longe. `back` (metros atrás do centro do carro) negativo = presa ao carro,
+ * no capô; `seat` = deslocada para o lado do motorista (esquerda), dentro do
+ * carro, com o painel e o volante.
  */
 const CAMERAS: { name: string; back: number; height: number; ahead: number; lookHeight: number; showCar: boolean; seat?: number }[] = [
-  { name: "Perseguição", back: 11, height: 5.5, ahead: 6, lookHeight: 1.5, showCar: true },
-  { name: "Perto", back: 7, height: 3.2, ahead: 6, lookHeight: 1.3, showCar: true },
-  { name: "Longe", back: 17, height: 8, ahead: 8, lookHeight: 1.5, showCar: true },
-  { name: "Baixa", back: 7, height: 2.3, ahead: 10, lookHeight: 1.2, showCar: true },
   { name: "Capô", back: -0.7, height: 1.2, ahead: 25, lookHeight: 1.0, showCar: false },
   { name: "Primeira pessoa", back: 0.1, height: 1.2, ahead: 20, lookHeight: 0.9, showCar: false, seat: 0.36 },
+  { name: "Terceira pessoa perto", back: 5.2, height: 2.25, ahead: 6, lookHeight: 1.15, showCar: true },
+  { name: "Terceira pessoa longe", back: 7, height: 3.2, ahead: 6, lookHeight: 1.3, showCar: true },
 ];
+/** Câmera de quem nunca trocou (a de trás, longe). */
+const DEFAULT_CAMERA = 3;
+/** A ordem das câmeras mudou: a escolha antiga (outro índice) não vale mais. */
+const CAMERA_KEY = "nfbmc:camera-v2";
+
+/** Vitrine da garagem: quanto tempo o carro leva para entrar (freando) e para sair (arrancando). */
+const SHOWROOM_IN = 1.1;
+const SHOWROOM_OUT = 1.4;
 
 /** Painel, volante e colunas do para-brisa, para a câmera em primeira pessoa. */
 function makeCockpit() {
@@ -264,6 +272,9 @@ function makeRadar(x: number, z: number, heading: number) {
   return group;
 }
 
+/** Freada de chegada (rápido no começo, parando de leve no fim). */
+const easeOut = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
+
 export class GameScene {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -282,9 +293,17 @@ export class GameScene {
   private ink: InkPass | null = null;
   private sunDirection = SUN_DIRECTION;
   /** Carro de vitrine do menu (girando na reta do autódromo). */
-  private showcase: { model: CarModel; key: string } | null = null;
-  /** Câmera atual (C troca): atrás, longe, baixa ou no capô. */
-  private cameraMode = 0;
+  private showcase: { model: CarModel; key: string; enteredAt: number } | null = null;
+  /** Vitrine da garagem: câmera parada de lado, e os carros passam pela reta (um sai, o outro chega). */
+  private showroom = false;
+  /** Carros saindo da vitrine (arrancando para fora da tela). */
+  private leaving: { model: CarModel; since: number }[] = [];
+  /** Oficina no mundo aberto: a câmera gira devagar em volta do carro parado na garagem. */
+  private garageCam = false;
+  /** Ficha do próprio carro (com a tunagem), para a previsão da curva bater com a do servidor. */
+  localSpec: CarSpec | null = null;
+  /** Câmera atual (C troca): capô, primeira pessoa, terceira perto ou longe. */
+  private cameraMode = DEFAULT_CAMERA;
   private cars = new Map<string, CarEntry>();
   private foods: THREE.Group[] = [];
   private foodActive: boolean[] = [];
@@ -341,7 +360,8 @@ export class GameScene {
     if (this.quality === "alto") this.enableShadows();
 
     try {
-      this.cameraMode = Math.min(CAMERAS.length - 1, Number(localStorage.getItem("nfbmc:camera")) || 0);
+      const saved = localStorage.getItem(CAMERA_KEY);
+      if (saved !== null && Number(saved) >= 0 && Number(saved) < CAMERAS.length) this.cameraMode = Math.floor(Number(saved));
     } catch {
       // Sem localStorage: começa na câmera padrão.
     }
@@ -496,22 +516,30 @@ export class GameScene {
     if (map) map.offset.x = (map.offset.x - 0.012) % 1;
   }
 
-  /** Troca a câmera (atrás → longe → baixa → capô) e devolve o nome dela. */
+  /** Troca a câmera (capô → primeira pessoa → terceira perto → terceira longe) e devolve o nome dela. */
   cycleCamera() {
     this.cameraMode = (this.cameraMode + 1) % CAMERAS.length;
     try {
-      localStorage.setItem("nfbmc:camera", String(this.cameraMode));
+      localStorage.setItem(CAMERA_KEY, String(this.cameraMode));
     } catch {
       // Sem localStorage: vale só nesta aba.
     }
     return CAMERAS[this.cameraMode].name;
   }
 
-  /** Mostra (ou tira, com null) o carro na vitrine do menu, na cor escolhida. */
-  setShowcase(color: string | null, car?: string) {
+  /**
+   * Mostra (ou tira, com null) o carro na vitrine do menu, na cor escolhida.
+   * `pass`: troca de carro na garagem; o de antes arranca para fora e o novo
+   * chega pela reta, freando (os carros "passam" pela vitrine).
+   */
+  setShowcase(color: string | null, car?: string, pass = false) {
     const key = `${color}|${car ?? ""}`;
     if (this.showcase && this.showcase.key === key) return;
-    if (this.showcase) this.scene.remove(this.showcase.model.group);
+    const animate = pass && this.showroom && !!this.showcase && !!color;
+    if (this.showcase) {
+      if (animate) this.leaving.push({ model: this.showcase.model, since: this.time });
+      else this.scene.remove(this.showcase.model.group);
+    }
     this.showcase = null;
     if (!color) return;
     const model = makeCar(color, "", { car });
@@ -520,7 +548,20 @@ export class GameScene {
     model.group.position.set(spot.x, 0, spot.z);
     model.group.rotation.y = spot.heading;
     this.scene.add(model.group);
-    this.showcase = { model, key };
+    this.showcase = { model, key, enteredAt: animate ? this.time : -Infinity };
+  }
+
+  /** Vitrine da garagem (tela cheia): câmera parada de lado, carros passando. */
+  setShowroom(on: boolean) {
+    this.showroom = on;
+    if (on) return;
+    for (const car of this.leaving) this.scene.remove(car.model.group);
+    this.leaving = [];
+  }
+
+  /** Oficina no mundo aberto: a câmera gira em volta do próprio carro. */
+  setGarageCam(on: boolean) {
+    this.garageCam = on;
   }
 
   /** Liga (ou desliga, com null) o diretor de cinemática. */
@@ -609,6 +650,52 @@ export class GameScene {
     }
   }
 
+  /**
+   * Garagem em tela cheia: a câmera fica parada ao lado da reta do autódromo
+   * (balançando de leve) e os carros passam por ela. O que sai arranca e some
+   * pela frente; o escolhido chega por trás, freando até parar no meio.
+   */
+  private renderShowroom(dt: number) {
+    const spot = pointOnTrack(RACES.autodromo.track, -14, 0);
+    const fx = Math.sin(spot.heading);
+    const fz = Math.cos(spot.heading);
+    const place = (model: CarModel, along: number, speed: number) => {
+      model.group.position.set(spot.x + fx * along, 0, spot.z + fz * along);
+      model.group.rotation.set(0, spot.heading, 0);
+      for (const wheel of model.wheels) wheel.rotation.x += (speed * dt) / 0.33;
+      model.flame.visible = false;
+    };
+    // Chegando: vem de 45 m atrás freando até o ponto da vitrine.
+    const current = this.showcase!;
+    const t = (this.time - current.enteredAt) / SHOWROOM_IN;
+    const along = -45 * (1 - easeOut(t));
+    const speed = t < 1 ? (45 * 3 * (1 - Math.min(1, t)) ** 2) / SHOWROOM_IN : 0;
+    place(current.model, along, speed);
+    // Saindo: arranca para a frente (aceleração constante) e some.
+    this.leaving = this.leaving.filter((car) => {
+      const age = this.time - car.since;
+      if (age > SHOWROOM_OUT) {
+        this.scene.remove(car.model.group);
+        return false;
+      }
+      place(car.model, 30 * age * age, 60 * age);
+      return true;
+    });
+    // Câmera de lado (à esquerda do carro), um pouco à frente, balançando devagar.
+    const sway = Math.sin(this.time * 0.35) * 0.18;
+    const side = 10.5;
+    const ax = Math.cos(spot.heading) * Math.cos(sway) + fx * Math.sin(sway);
+    const az = -Math.sin(spot.heading) * Math.cos(sway) + fz * Math.sin(sway);
+    this.camera.position.set(spot.x + ax * side + fx * 1.5, 1.9, spot.z + az * side + fz * 1.5);
+    // Vista do lado esquerdo do carro, a frente dele aponta para a esquerda da tela.
+    // O alvo fica um pouco atrás do carro: ele aparece à esquerda do meio da tela
+    // (a ficha e as peças ficam à direita).
+    this.cameraTarget.set(spot.x - fx * 1.8, 0.75, spot.z - fz * 1.8);
+    this.camera.fov = damp(this.camera.fov, 42, 4, dt);
+    this.camera.near = 0.8;
+    this.camera.updateProjectionMatrix();
+  }
+
   /** Desenha um quadro. `followId` é o carro que a câmera persegue. */
   render(cars: Map<string, CarView>, followId: string | undefined, myId?: string): FollowedInfo | null {
     const rawDt = this.clock.getDelta();
@@ -647,7 +734,8 @@ export class GameScene {
       if (id === myId && this.localInput && car.car) {
         const input = this.localInput();
         entry.steer = rampSteer(entry.steer, input.steer, dt);
-        yaw = yawRate(carSpec(car.car), car.speed, entry.steer, entry.offroad, !!input.handbrake && Math.abs(car.speed) > 3);
+        const spec = this.localSpec?.id === car.car ? this.localSpec : carSpec(car.car);
+        yaw = yawRate(spec, car.speed, entry.steer, entry.offroad, !!input.handbrake && Math.abs(car.speed) > 3);
         lead = Math.min(age + this.latency, 0.3);
       }
       const predictedHeading = entry.serverHeading - yaw * lead;
@@ -719,11 +807,12 @@ export class GameScene {
     if (this.director) {
       this.director(dt, this.camera, this.cameraTarget);
       this.camera.updateProjectionMatrix();
-    } else if (followed && followedCar && this.finishCam !== null) {
+    } else if (followed && followedCar && (this.finishCam !== null || this.garageCam)) {
       // Chegada: a câmera gira devagar em volta do carro, baixa, como nos replays da série.
-      const t = this.time - this.finishCam;
+      // Na oficina da garagem, o mesmo giro, um pouco mais aberto.
+      const t = this.garageCam ? this.time * 0.6 : this.time - this.finishCam!;
       const angle = followed.heading + 2.4 - t * 0.45;
-      const radius = 8 - Math.min(2.5, t * 0.8);
+      const radius = this.garageCam ? 7.5 : 8 - Math.min(2.5, t * 0.8);
       const y = followed.y ?? 0;
       this.camera.position.lerp(new THREE.Vector3(followed.x + Math.sin(angle) * radius, y + 1.6 + t * 0.15, followed.z + Math.cos(angle) * radius), 1 - Math.exp(-5 * dt));
       this.cameraTarget.set(followed.x, y + 0.9, followed.z);
@@ -768,6 +857,8 @@ export class GameScene {
         this.cameraTarget.x += (Math.random() - 0.5) * 0.25;
         this.cameraTarget.y += (Math.random() - 0.5) * 0.25;
       }
+    } else if (this.showcase && this.showroom) {
+      this.renderShowroom(dt);
     } else if (this.showcase) {
       // Menu: a câmera gira devagar em volta do carro da vitrine.
       const center = this.showcase.model.group.position;
@@ -786,6 +877,7 @@ export class GameScene {
       this.camera.fov = 60;
       this.camera.updateProjectionMatrix();
     }
+    if (!this.showroom && this.leaving.length) this.setShowroom(false);
     this.camera.lookAt(this.cameraTarget);
     this.cullChunks();
     // Céu e sol acompanham a câmera, para nunca chegar perto da borda do céu.

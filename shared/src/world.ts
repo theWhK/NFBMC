@@ -357,7 +357,7 @@ function autodromoClearance(x: number, z: number) {
 
 /** O carro está numa rua ou na pista do autódromo? Fora disso é calçada/grama (mais lento). */
 export function isOnRoad(x: number, z: number) {
-  return roadClearance(x, z) <= 1 || autodromoClearance(x, z) <= 1;
+  return roadClearance(x, z) <= 1 || autodromoClearance(x, z) <= 1 || onApron(x, z);
 }
 
 const insideLake = (x: number, z: number, margin = 0) =>
@@ -365,7 +365,8 @@ const insideLake = (x: number, z: number, margin = 0) =>
 
 // --- Prédios, casas, galpões e contêineres ----------------------------------
 
-export type BuildingKind = "tower" | "office" | "shop" | "house" | "warehouse" | "container";
+/** "landmark": lanchonete ou garagem (o cliente desenha cada uma; ver LANDMARKS). */
+export type BuildingKind = "tower" | "office" | "shop" | "house" | "warehouse" | "container" | "landmark";
 
 /** Caixa girada no chão: centro, tamanho (w ao longo da rua, d para dentro), ângulo e altura. */
 export interface Building {
@@ -554,6 +555,71 @@ const STYLES: Partial<Record<DistrictId, LotStyle>> = {
   },
 };
 
+// --- Lanchonetes e garagens ----------------------------------------------------
+
+/**
+ * Lugares especiais na beira das ruas: as lanchonetes (paródias das redes de
+ * fast-food, com drive-thru: é ali que se come no mundo aberto) e as garagens
+ * (esconderijos: parar no pátio abre a oficina e, despistando a Vigilância,
+ * entrar numa garagem encerra a perseguição).
+ */
+export type LandmarkKind = "garagem" | "mcgordos" | "burgerkilo" | "subgordo" | "outbacon";
+
+export const LANDMARK_NAMES: Record<LandmarkKind, string> = {
+  garagem: "Garagem",
+  mcgordos: "McGordo's",
+  burgerkilo: "Burger Kilo",
+  subgordo: "Subgordo",
+  outbacon: "Outbacon Steakhouse",
+};
+
+type Box = { x: number; z: number; w: number; d: number; angle: number };
+
+export interface Landmark extends Box {
+  id: string;
+  kind: LandmarkKind;
+  name: string;
+  /** Lado da caixa virado para a rua (como em Building). */
+  front: number;
+  /** Pátio asfaltado entre a rua e a fachada (estacionamento, drive-thru, porta da garagem). */
+  apron: Box;
+  /** Rumo de quem olha da fachada para a rua. */
+  facing: number;
+}
+
+/** Medidas de cada tipo: largura ao longo da rua, fundo e o pátio na frente. */
+const LANDMARK_SIZE: Record<LandmarkKind, { w: number; d: number; apron: number }> = {
+  garagem: { w: 16, d: 14, apron: 12 },
+  mcgordos: { w: 22, d: 16, apron: 13 },
+  burgerkilo: { w: 22, d: 16, apron: 13 },
+  subgordo: { w: 16, d: 13, apron: 11 },
+  outbacon: { w: 26, d: 18, apron: 13 },
+};
+
+/** Onde cada um tenta ficar (tipo, bairro, nome). */
+const LANDMARK_WISHES: [LandmarkKind, DistrictId, string?][] = [
+  ["garagem", "centro", "Garagem do Centro"],
+  ["garagem", "vila", "Garagem da Vila"],
+  ["garagem", "industrial", "Oficina da Gordura Trans"],
+  ["garagem", "praia", "Garagem da Praia"],
+  ["garagem", "liberdade", "Garagem da Liberdade"],
+  ["garagem", "picanha", "Garagem do Alto"],
+  ["garagem", "porto", "Galpão do Porto"],
+  ["mcgordos", "centro"], ["mcgordos", "praia"], ["mcgordos", "jardim"], ["mcgordos", "liberdade"],
+  ["burgerkilo", "vila"], ["burgerkilo", "industrial"], ["burgerkilo", "praia"],
+  ["subgordo", "centro"], ["subgordo", "morro"], ["subgordo", "picanha"],
+  ["outbacon", "jardim"], ["outbacon", "porto"], ["outbacon", "liberdade"],
+];
+
+/** O ponto está dentro da caixa (com folga)? */
+function insideBox(b: Box, x: number, z: number, margin = 0) {
+  const dx = x - b.x;
+  const dz = z - b.z;
+  const lw = dx * Math.cos(b.angle) - dz * Math.sin(b.angle);
+  const ld = dx * Math.sin(b.angle) + dz * Math.cos(b.angle);
+  return Math.abs(lw) <= b.w / 2 + margin && Math.abs(ld) <= b.d / 2 + margin;
+}
+
 const insideWorld = (x: number, z: number, margin: number) =>
   x > WORLD_BOUNDS.minX + margin && x < WORLD_BOUNDS.maxX - margin && z > WORLD_BOUNDS.minZ + margin && z < WORLD_BOUNDS.maxZ - margin;
 
@@ -562,6 +628,9 @@ function generateCity() {
   const buildings: Building[] = [];
   const trees: Tree[] = [];
   const buildingGrid = new Map<string, Building[]>();
+  const landmarks: Landmark[] = [];
+  /** Lotes das lanchonetes e garagens (prédio + pátio): nada de prédio nem árvore em cima. */
+  const reserved: Box[] = [];
 
   const nearby = (x: number, z: number) => {
     const out: Building[] = [];
@@ -576,7 +645,7 @@ function generateCity() {
     for (const [x, z] of points) {
       if (!insideWorld(x, z, 4) || roadClearance(x, z) < roadMargin || autodromoClearance(x, z) < 10 || insideLake(x, z, 6)) return false;
     }
-    return !nearby(b.x, b.z).some((other) => overlaps(b, other, 2));
+    return !nearby(b.x, b.z).some((other) => overlaps(b, other, 2)) && !reserved.some((r) => overlaps(b as Building, r as Building, 2));
   };
   const add = (b: Building) => {
     buildings.push(b);
@@ -585,6 +654,53 @@ function generateCity() {
     if (list) list.push(b);
     else buildingGrid.set(key, [b]);
   };
+
+  // Lanchonetes e garagens primeiro (elas escolhem o lugar; os lotes comuns desviam).
+  const spotRandom = seeded(4242);
+  const candidates = ROADS.filter((r) => (r.kind === "avenida" || r.kind === "rua") && r.length > 90);
+  for (const [kind, district, name] of LANDMARK_WISHES) {
+    const size = LANDMARK_SIZE[kind];
+    const roads = candidates.filter((r) => districtAt(...r.points[Math.floor(r.points.length / 2)]) === district);
+    let placed: Landmark | null = null;
+    for (let attempt = 0; attempt < 60 && roads.length && !placed; attempt++) {
+      const road = roads[Math.floor(spotRandom() * roads.length)];
+      // Longe das pontas (cruzamentos): um ponto no meio da quadra.
+      const k = Math.floor((0.3 + spotRandom() * 0.4) * (road.points.length - 1));
+      const [ax, az] = road.points[k];
+      const [bx, bz] = road.points[Math.min(road.points.length - 1, k + 1)];
+      const len = Math.hypot(bx - ax, bz - az) || 1;
+      const tx = (bx - ax) / len;
+      const tz = (bz - az) / len;
+      const side = spotRandom() < 0.5 ? -1 : 1;
+      const nx = tz * side;
+      const nz = -tx * side;
+      const angle = Math.atan2(tx, tz) + Math.PI / 2;
+      const offset = road.width / 2 + size.apron + size.d / 2;
+      const b: Building = {
+        x: ax + nx * offset, z: az + nz * offset, w: size.w, d: size.d, angle,
+        height: kind === "garagem" ? 7 : 6, kind: "landmark", tint: 0, front: -side,
+      };
+      const apronOffset = road.width / 2 + size.apron / 2;
+      const apron: Box = { x: ax + nx * apronOffset, z: az + nz * apronOffset, w: size.w + 4, d: size.apron, angle };
+      const lot: Box = { x: (b.x + apron.x) / 2, z: (b.z + apron.z) / 2, w: size.w + 6, d: size.d + size.apron, angle };
+      if (districtAt(b.x, b.z) !== district || !free(b, 6)) continue;
+      // O pátio não pode encostar em outra rua (só na da frente) nem em prédio.
+      const apronPoints: Point[] = [-1, 0, 1].flatMap((u) => [-0.3, 0.45].map((v) => [
+        apron.x + Math.cos(angle) * u * (apron.w / 2) + Math.sin(angle) * v * apron.d * side,
+        apron.z - Math.sin(angle) * u * (apron.w / 2) + Math.cos(angle) * v * apron.d * side,
+      ] as Point));
+      if (apronPoints.some(([x, z]) => roadClearance(x, z) < -1 && Math.abs(distanceAlong(road, x, z)) > road.width / 2 + 1)) continue;
+      if (nearby(apron.x, apron.z).some((o) => overlaps(apron as Building, o, 1))) continue;
+      if (landmarks.some((l) => Math.hypot(l.x - b.x, l.z - b.z) < (l.kind === kind ? 400 : 90))) continue;
+      placed = {
+        ...b, id: `${kind}-${landmarks.length}`, kind, name: name ?? LANDMARK_NAMES[kind], apron,
+        facing: Math.atan2(-nx, -nz),
+      };
+      add(b);
+      reserved.push(lot);
+    }
+    if (placed) landmarks.push(placed);
+  }
 
   // Lotes ao longo das ruas, dos dois lados, de frente para a rua.
   for (const road of ROADS) {
@@ -642,7 +758,7 @@ function generateCity() {
               const back = d / 2 + 4;
               const tx2 = b.x + nx * back + (random() - 0.5) * w;
               const tz2 = b.z + nz * back;
-              if (roadClearance(tx2, tz2) > 3 && !nearby(tx2, tz2).some((o) => Math.hypot(o.x - tx2, o.z - tz2) < Math.max(o.w, o.d) / 2 + 2)) {
+              if (roadClearance(tx2, tz2) > 3 && !reserved.some((r) => insideBox(r, tx2, tz2, 3)) && !nearby(tx2, tz2).some((o) => Math.hypot(o.x - tx2, o.z - tz2) < Math.max(o.w, o.d) / 2 + 2)) {
                 trees.push({ x: tx2, z: tz2, size: 0.8 + random() * 0.6 });
               }
             }
@@ -681,6 +797,7 @@ function generateCity() {
       const z = minZ + random() * (maxZ - minZ);
       if (districtAt(x, z) !== district || !insideWorld(x, z, 6)) continue;
       if (roadClearance(x, z) < 4 || autodromoClearance(x, z) < 8 || insideLake(x, z, 4)) continue;
+      if (reserved.some((r) => insideBox(r, x, z, 3))) continue;
       if (nearby(x, z).some((o) => Math.hypot(o.x - x, o.z - z) < Math.max(o.w, o.d) / 2 + 3)) continue;
       if ((treeCells.get(cellKey(x, z)) ?? []).some((t) => Math.abs(t.x - x) < 5 && Math.abs(t.z - z) < 5)) continue;
       const tree = { x, z, size: 0.8 + random() * 0.9 };
@@ -694,12 +811,35 @@ function generateCity() {
       }
     }
   }
-  return { buildings, trees, buildingGrid };
+  return { buildings, trees, buildingGrid, landmarks };
+}
+
+/** Distância (com sinal) de um ponto até o eixo da rua, medida no trecho mais perto. */
+function distanceAlong(road: Road, x: number, z: number) {
+  let best = Infinity;
+  for (let i = 1; i < road.points.length; i++) {
+    const [ax, az] = road.points[i - 1];
+    const [bx, bz] = road.points[i];
+    best = Math.min(best, distanceToSegment(x, z, { ax, az, bx, bz, half: 0, road: 0, index: 0 }));
+  }
+  return best;
 }
 
 const city = generateCity();
 export const BUILDINGS = city.buildings;
 export const TREES = city.trees;
+/** Lanchonetes e garagens da cidade (com o prédio já na colisão, como kind "landmark"). */
+export const LANDMARKS = city.landmarks;
+export const GARAGES = LANDMARKS.filter((l) => l.kind === "garagem");
+
+/** Garagem cujo pátio contém o ponto (para entrar nela parado). */
+export function garageAt(x: number, z: number) {
+  return GARAGES.find((g) => insideBox(g.apron, x, z, 1)) ?? null;
+}
+
+/** O ponto está no pátio asfaltado de alguma lanchonete ou garagem? */
+const onApron = (x: number, z: number) =>
+  LANDMARKS.some((l) => Math.abs(l.apron.x - x) < 25 && Math.abs(l.apron.z - z) < 25 && insideBox(l.apron, x, z, 0.5));
 
 const treeGrid = new Map<string, Tree[]>();
 for (const tree of TREES) {
@@ -1111,28 +1251,29 @@ export interface StandSpot {
   x: number;
   z: number;
   kind: "burger" | "fries" | "soda";
+  /** Lanchonete do drive-thru. */
+  landmark: string;
 }
 
-/** Comida perto dos cruzamentos, em cima da rua. */
-export const STANDS: StandSpot[] = (() => {
-  const random = seeded(77);
-  const kinds = ["burger", "fries", "soda"] as const;
-  const spots: StandSpot[] = [];
-  for (const node of NAV) {
-    // Só nos cruzamentos da planta (os gerados ao adensar encheriam a cidade de comida).
-    if (!(node.id in NODES) || node.links.length < 3 || random() < 0.35) continue;
-    const link = node.links[Math.floor(random() * node.links.length)];
-    const points = linkPoints(link);
-    const k = Math.min(points.length - 2, 6 + Math.floor(random() * 3));
-    const [x, z] = points[k];
-    const [nx, nz] = points[k + 1];
-    const len = Math.hypot(nx - x, nz - z) || 1;
-    const side = (random() < 0.5 ? -1 : 1) * ROADS[link.road].width * 0.22;
-    const spot: StandSpot = { x: x + ((nz - z) / len) * side, z: z - ((nx - x) / len) * side, kind: kinds[Math.floor(random() * 3)] };
-    // Longe dos pontos de encontro: quem volta de uma corrida nasce ali, e o
-    // turbo da comida mandava o carro sozinho para a parede.
-    if (RACE_IDS.some((id) => Math.hypot(raceMarker(id).x - spot.x, raceMarker(id).z - spot.z) < 45)) continue;
-    spots.push(spot);
-  }
-  return spots;
-})();
+/** O que sai em cada drive-thru (cada rede tem o seu carro-chefe). */
+const STAND_FOOD: Record<Exclude<LandmarkKind, "garagem">, StandSpot["kind"]> = {
+  mcgordos: "fries", burgerkilo: "burger", subgordo: "soda", outbacon: "burger",
+};
+
+/**
+ * Comida do mundo aberto: o balcão do drive-thru de cada lanchonete, no pátio,
+ * na frente da janelinha (fora da rua: para comer é preciso entrar no pátio).
+ */
+export const STANDS: StandSpot[] = LANDMARKS.filter((l) => l.kind !== "garagem").map((l) => {
+  const fx = Math.sin(l.angle) * l.front;
+  const fz = Math.cos(l.angle) * l.front;
+  // Janelinha perto de uma ponta da fachada; o balcão fica 3,5 m para fora dela.
+  const along = l.w / 2 - 4;
+  const out = l.d / 2 + 3.5;
+  return {
+    x: l.x + Math.cos(l.angle) * along + fx * out,
+    z: l.z - Math.sin(l.angle) * along + fz * out,
+    kind: STAND_FOOD[l.kind as Exclude<LandmarkKind, "garagem">],
+    landmark: l.id,
+  };
+});

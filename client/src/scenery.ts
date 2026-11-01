@@ -30,6 +30,7 @@ import {
 
 import { bake, makeBurger } from "./models.ts";
 import { buildTrackMesh } from "./track-mesh.ts";
+import { buildLandmarks } from "./landmarks.ts";
 
 export const FOG_COLOR = "#e0995a";
 /** Direção de onde vem o sol (baixo, quase no horizonte). */
@@ -133,7 +134,8 @@ const buildingMaterial = (color: string, fog = true) =>
     fog,
   });
 
-const PALETTES: Record<BuildingKind, string[]> = {
+// As lanchonetes e garagens ("landmark") têm desenho próprio (landmarks.ts).
+const PALETTES: Record<Exclude<BuildingKind, "landmark">, string[]> = {
   tower: ["#3e4450", "#4a3f48", "#2f3a48", "#544a3e"],
   office: ["#6b5a4a", "#5a4a44", "#4e5560", "#6a6058"],
   shop: ["#f1e3c6", "#e8d2b0", "#d9e4dc", "#f3d6c8"],
@@ -230,9 +232,10 @@ function buildBuildings(scene: THREE.Scene) {
   const plain: { matrix: THREE.Matrix4; color: THREE.Color }[] = [];
   const awnings: { matrix: THREE.Matrix4; color: THREE.Color }[] = [];
   const roofs: { matrix: THREE.Matrix4; color: THREE.Color }[] = [];
-  const color = (kind: BuildingKind, tint: number) => new THREE.Color(PALETTES[kind][tint % PALETTES[kind].length]);
+  const color = (kind: Exclude<BuildingKind, "landmark">, tint: number) => new THREE.Color(PALETTES[kind][tint % PALETTES[kind].length]);
 
   for (const b of BUILDINGS) {
+    if (b.kind === "landmark") continue;
     // No morro, o prédio afunda no lado de baixo até o lado de cima encostar no chão.
     const ground = heightAt(b.x, b.z);
     const [sx, sz] = slopeAt(b.x, b.z);
@@ -496,42 +499,72 @@ const groundTexture = (() => {
   return texture;
 })();
 
-/** Nuvens de desenho animado: bolhas brancas com contorno escuro, bem no alto. */
+/**
+ * Nuvens de desenho animado, de volume: cachos de bolhas (esferas achatadas,
+ * com a base reta) bem no alto, tingidas de pêssego embaixo pelo pôr do sol.
+ * Ficam fora da neblina (senão sumiriam) e viram uma malha só; a cena mantém o
+ * grupo centrado na câmera e gira devagar.
+ */
 function buildClouds() {
   const group = new THREE.Group();
   const random = seeded(5);
-  const makeTexture = () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 512;
-    canvas.height = 256;
-    const ctx = canvas.getContext("2d")!;
-    const blobs = Array.from({ length: 6 }, () => [90 + random() * 330, 120 + random() * 40, 50 + random() * 50] as const);
-    // Primeiro o contorno (bolhas um pouco maiores e escuras), depois o recheio.
-    for (const [pass, grow, color] of [[0, 7, "#3a2a24"], [1, 0, "#fff4e6"]] as const) {
-      void pass;
-      ctx.fillStyle = color;
-      for (const [x, y, r] of blobs) {
-        ctx.beginPath();
-        ctx.arc(x, y, r + grow, 0, Math.PI * 2);
-        ctx.fill();
+  const puff = new THREE.IcosahedronGeometry(1, 2);
+  const top = new THREE.Color("#fff6ea");
+  const belly = new THREE.Color("#f2a07c");
+  const color = new THREE.Color();
+  const parts: THREE.BufferGeometry[] = [];
+  const count = 16;
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + random() * 0.25;
+    const radius = 680 + random() * 300;
+    const base = 150 + random() * 140;
+    const size = 0.7 + random() * 0.6;
+    const cx = Math.cos(angle) * radius;
+    const cz = Math.sin(angle) * radius;
+    // A nuvem se estica de lado (tangente ao círculo), para ser vista comprida.
+    const tx = -Math.sin(angle);
+    const tz = Math.cos(angle);
+    const puffs = 5 + Math.floor(random() * 5);
+    const tall = 60 * size;
+    for (let k = 0; k < puffs; k++) {
+      const u = puffs === 1 ? 0 : k / (puffs - 1) - 0.5;
+      // Bolhas maiores no meio, menores nas pontas.
+      const r = (30 + random() * 22) * size * (1 - Math.abs(u) * 0.8);
+      const along = u * 170 * size + (random() - 0.5) * 18;
+      const across = (random() - 0.5) * 50 * size;
+      const lift = random() * r * 0.35;
+      const g = puff.clone().scale(r * 1.25, r * 0.8, r);
+      const positions = g.attributes.position as THREE.BufferAttribute;
+      const normals = g.attributes.normal as THREE.BufferAttribute;
+      const floor = -lift - r * 0.15;
+      const colors = new Float32Array(positions.count * 3);
+      for (let v = 0; v < positions.count; v++) {
+        // Base reta (todas as bolhas do cacho apoiadas na mesma "linha"). A
+        // normal fica deitada: virada para baixo, a barriga caía no degrau
+        // mais escuro do cel-shading e parecia uma mancha preta.
+        if (positions.getY(v) < floor) {
+          positions.setY(v, floor);
+          const nx = normals.getX(v);
+          const nz = normals.getZ(v);
+          const len = Math.hypot(nx, nz) || 1;
+          normals.setXYZ(v, (nx / len) * 0.95, 0.3, (nz / len) * 0.95);
+        }
+        // (max: a posição volta em float32 e dá um pouquinho abaixo da base; pow de negativo é NaN, nuvem preta.)
+        const height = Math.max(0, positions.getY(v) - floor);
+        color.copy(belly).lerp(top, Math.min(1, Math.pow(height / tall, 0.7)));
+        colors.set([color.r, color.g, color.b], v * 3);
       }
+      g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+      g.translate(cx + tx * along + Math.cos(angle) * across, base + lift + r * 0.15, cz + tz * along + Math.sin(angle) * across);
+      parts.push(g);
     }
-    // Sombra alaranjada embaixo (pôr do sol).
-    ctx.globalCompositeOperation = "source-atop";
-    ctx.fillStyle = "rgba(255, 150, 80, 0.45)";
-    ctx.fillRect(0, 150, 512, 106);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    return texture;
-  };
-  for (let i = 0; i < 9; i++) {
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeTexture(), fog: false, depthWrite: false }));
-    const angle = (i / 9) * Math.PI * 2 + random();
-    const radius = 650 + random() * 300;
-    sprite.position.set(Math.cos(angle) * radius, 170 + random() * 110, Math.sin(angle) * radius);
-    sprite.scale.set(220 + random() * 120, 110 + random() * 50, 1);
-    group.add(sprite);
   }
+  const clouds = new THREE.Mesh(
+    mergeGeometries(parts),
+    new THREE.MeshLambertMaterial({ vertexColors: true, emissive: "#a8644c", emissiveIntensity: 1, fog: false }),
+  );
+  clouds.geometry.computeBoundingSphere();
+  group.add(clouds);
   return group;
 }
 
@@ -1089,6 +1122,7 @@ export function buildScenery(scene: THREE.Scene) {
   buildSkyline(scene);
   buildGround(scene);
   buildBuildings(scene);
+  buildLandmarks(scene, addChunk);
   buildCranes(scene);
   buildLamps(scene);
   buildBillboards(scene);

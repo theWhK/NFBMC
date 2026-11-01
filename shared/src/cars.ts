@@ -103,6 +103,12 @@ export interface CarSpec {
   understeer: number;
   /** Perfil do ronco (o som de cada carro sai daqui). */
   engine: EngineSound;
+  /** Tunagem (shared/src/tuning.ts): força extra da turbina no giro alto (fração do torque). */
+  turboGain?: number;
+  /** Tunagem: multiplica o tempo das trocas de marcha (câmbio mais rápido < 1). */
+  shiftTime?: number;
+  /** Tunagem: multiplica a aderência lateral (pneus). */
+  grip?: number;
 }
 
 const CARS_LIST: CarSpec[] = [
