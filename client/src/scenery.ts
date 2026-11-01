@@ -440,7 +440,7 @@ function buildLamps(scene: THREE.Scene) {
   const poleMaterial = surface(new THREE.MeshLambertMaterial({ color: "#4a4a4e" }), { roughness: 0.45, metalness: 0.6 });
   const lensMaterial = surface(new THREE.MeshBasicMaterial({ color: "#ffe2a8" }), { glow: 3 });
   const glowMaterial = new THREE.PointsMaterial({
-    size: 7,
+    size: 3.5,
     map: glowTexture("rgba(255,214,140,1)"),
     blending: THREE.AdditiveBlending,
     depthWrite: false,
