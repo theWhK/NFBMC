@@ -69,8 +69,11 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
 
   const curb = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   const stripe = (i: number) => (Math.floor(i / 2) % 2 ? RED : WHITE);
-  group.add(new THREE.Mesh(ribbon(track, half - 0.6, half + 0.8, 0.12, stripe), curb));
-  group.add(new THREE.Mesh(ribbon(track, -half - 0.8, -half + 0.6, 0.12, stripe), curb));
+  // Nas ruas, a zebra fica toda dentro do asfalto, antes da sarjeta (o meio-fio e a
+  // calçada, mais altos, cobriam a parte de fora); no autódromo ela passa da borda.
+  const [inner, outer] = options.asphalt ? [0.6, 0.8] : [1.9, -0.5];
+  group.add(new THREE.Mesh(ribbon(track, half - inner, half + outer, 0.12, stripe), curb));
+  group.add(new THREE.Mesh(ribbon(track, -half - outer, -half + inner, 0.12, stripe), curb));
 
   const start = track.samples[0];
   const heading = Math.atan2(start.tx, start.tz);
