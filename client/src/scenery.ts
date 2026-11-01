@@ -1,7 +1,7 @@
 // Porto Gordo em 3D, no clima "fim de tarde alaranjado" dos jogos de corrida de
 // rua dos anos 2000: céu em degradê, sol baixo, prédios com janelas acesas,
 // ruas com calçada e faixa, casas com telhado, galpões e contêineres no porto,
-// o mar, o lago do parque e árvores de brócolis. A planta (ruas, prédios,
+// o mar, o lago do parque e as árvores. A planta (ruas, prédios,
 // árvores) vem do shared/world.ts; aqui só se desenha.
 import * as THREE from "three";
 import { makeFlag, FLAG_STRIPES } from "./flag.ts";
@@ -143,7 +143,7 @@ function buildSkyline(scene: THREE.Scene) {
  */
 function buildTerrain(scene: THREE.Scene) {
   const material = surface(new THREE.MeshLambertMaterial({ color: "#ffffff", map: groundTexture, vertexColors: true }), {
-    roughness: 0.95, normalMap: grassNormal, normalScale: 1.4,
+    roughness: 0.95, normalMap: grassNormal, normalScale: 0.55,
   });
   const step = 20;
   const size = 500;

@@ -81,7 +81,7 @@ const barkNormal = normalTexture(128, (ctx, size, random) => {
 }, 62, 2.5);
 
 const leafMaterial = surface(new THREE.MeshLambertMaterial({ color: "#ffffff", vertexColors: true }), {
-  roughness: 0.8, normalMap: leafNormal, normalScale: 1.2,
+  roughness: 0.8, normalMap: leafNormal, normalScale: 0.7,
 });
 const barkMaterial = surface(new THREE.MeshLambertMaterial({ color: "#ffffff", vertexColors: true }), {
   roughness: 0.95, normalMap: barkNormal, normalScale: 1,
@@ -104,7 +104,7 @@ const frondTexture = (() => {
     const reach = 30 * Math.sin((y / 256) * Math.PI * 0.95 + 0.1);
     for (const side of [-1, 1]) {
       const shade = 70 + Math.floor(random() * 40);
-      ctx.strokeStyle = `rgb(${shade - 20}, ${shade + 50}, ${Math.floor(shade * 0.45)})`;
+      ctx.strokeStyle = `rgb(${shade + 10}, ${shade + 85}, ${Math.floor(shade * 0.5)})`;
       ctx.lineWidth = 2.2;
       ctx.beginPath();
       ctx.moveTo(32, y);
@@ -159,8 +159,8 @@ function blob(radius: number, squash: number, seed: number, detail = 2) {
     const z = position.getZ(i);
     const r = radius * (1 + 0.22 * wobble(x * 2 + seed, y * 2, z * 2 - seed));
     position.setXYZ(i, x * r, y * r * squash, z * r);
-    uv[i * 2] = (Math.atan2(z, x) / (Math.PI * 2) + 0.5) * 3;
-    uv[i * 2 + 1] = (y * 0.5 + 0.5) * 1.5;
+    uv[i * 2] = (Math.atan2(z, x) / (Math.PI * 2) + 0.5) * 5 * radius;
+    uv[i * 2 + 1] = (y * 0.5 + 0.5) * 2.5 * radius;
   }
   geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   geometry.computeVertexNormals();
