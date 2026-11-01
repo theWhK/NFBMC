@@ -5,7 +5,7 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import { CROSSFIT_CAR, carSpec, type FoodKind, type TrafficKind } from "@nfbmc/shared";
 
 import { roundRect, type MatName, type P2 } from "./car-kit.ts";
-import { bodyGeometry, roofPeak, topStripe, trafficGeometry, wheelGeometry, type BuiltBody, type Kit, type WheelSpec } from "./car-models.ts";
+import { bodyGeometry, roofPeak, trafficGeometry, wheelGeometry, type BuiltBody, type Kit, type WheelSpec } from "./car-models.ts";
 import { surface, type Surface } from "./look.ts";
 
 const lambert = (color: THREE.ColorRepresentation) => new THREE.MeshLambertMaterial({ color });

@@ -7,25 +7,20 @@ import * as THREE from "three";
 import { makeFlag, FLAG_STRIPES } from "./flag.ts";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
-  BUILDINGS,
   DISTRICTS,
   LAKE,
-  NAV,
   QUAY_Z,
   RACES,
   RACE_IDS,
   ROADS,
-  TREES,
   districtAt,
   heightAt,
   insideBuilding,
-  slopeAt,
   isOnRoad,
   raceMarker,
   WORLD_BOUNDS,
   pointOnTrack,
   seeded,
-  type BuildingKind,
 } from "@nfbmc/shared";
 
 import { bake, makeBurger } from "./models.ts";

@@ -9,8 +9,8 @@ import { BOX, rgb, shade, type Rgb } from "./mesher.ts";
 import { M } from "./building-materials.ts";
 import {
   ALUMINUM, DARK, IRON, OFFWHITE, WHITE,
-  airConditioner, antenna, awning, chimney, dish, clothesline, doorIn, gableRoof, gutter, hipRoof, onWall, pane,
-  parapet, pick, plainWindow, railing, railingZ, range, rebars, rollerDoor, shedRoof, signBoard, slab,
+  airConditioner, antenna, chimney, dish, clothesline, doorIn, gableRoof, hipRoof, onWall, pane,
+  parapet, pick, plainWindow, railing, railingZ, range, rebars, shedRoof, signBoard, slab,
   spread, stairs, wall, waterTank, windowIn,
   type Hole, type Lot, type Random, type WindowStyle,
 } from "./building-kit.ts";
@@ -590,7 +590,6 @@ export function morroHouse(L: Lot) {
 // --- Alto da Picanha: mansões (moderna ou neoclássica) -----------------------------
 
 export function mansion(L: Lot) {
-  const r = L.random;
   if (L.pitched) classicMansion(L);
   else modernMansion(L);
 }
