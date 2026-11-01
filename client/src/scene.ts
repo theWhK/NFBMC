@@ -22,7 +22,7 @@ import { Effects } from "./effects.ts";
 import { forgetFlags, waveFlags } from "./flag.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
 import { LOD_CHUNKS } from "./chunks.ts";
-import { applyLook, type Look } from "./look.ts";
+import { applyLook, surface, type Look } from "./look.ts";
 import { RealPass, skyEnvironment } from "./realism.ts";
 import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture, waterNormal } from "./scenery.ts";
 import { InkPass, type Quality } from "./toon.ts";
@@ -219,36 +219,110 @@ const CAMERAS: { name: string; back: number; height: number; ahead: number; look
   { name: "Primeira pessoa", back: 0.1, height: 1.2, ahead: 20, lookHeight: 0.9, showCar: false, seat: 0.36 },
 ];
 
-/** Painel, volante e colunas do para-brisa, para a câmera em primeira pessoa. */
+/** Mostrador de painel (conta-giros ou velocímetro), desenhado em canvas. */
+function dialTexture(marks: number, redFrom: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#0b0b0d";
+  ctx.beginPath();
+  ctx.arc(64, 64, 64, 0, Math.PI * 2);
+  ctx.fill();
+  for (let k = 0; k <= marks; k++) {
+    const angle = Math.PI * 0.75 + (k / marks) * Math.PI * 1.5;
+    ctx.strokeStyle = k >= redFrom ? "#ff3a2a" : "#f2efe8";
+    ctx.lineWidth = k % 2 ? 2 : 4;
+    ctx.beginPath();
+    ctx.moveTo(64 + Math.cos(angle) * 46, 64 + Math.sin(angle) * 46);
+    ctx.lineTo(64 + Math.cos(angle) * 58, 64 + Math.sin(angle) * 58);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "#ff7a1a";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(64, 64);
+  ctx.lineTo(64 + Math.cos(Math.PI * 1.1) * 44, 64 + Math.sin(Math.PI * 1.1) * 44);
+  ctx.stroke();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * Painel, volante, console e colunas do para-brisa, para a câmera em primeira
+ * pessoa. No grupo do carro, +Z é a frente e +X é a esquerda (lado do motorista).
+ */
 function makeCockpit() {
   const group = new THREE.Group();
-  const dark = new THREE.MeshLambertMaterial({ color: "#2a2522" });
-  const black = new THREE.MeshLambertMaterial({ color: "#141110" });
-  // No grupo do carro, +Z é a frente e +X é a esquerda (lado do motorista).
-  const dash = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.16, 0.5), dark);
-  dash.position.set(0, 0.72, 0.95);
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.04, 1.1), dark);
-  hood.position.set(0, 0.8, 1.75);
-  const pillars = [1, -1].map((side) => {
-    const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.62, 0.08), black);
-    pillar.position.set(side * 0.8, 1.22, 1.0);
-    pillar.rotation.x = -0.55;
-    pillar.rotation.z = side * 0.12;
-    return pillar;
-  });
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.06, 0.12), black);
-  roof.position.set(0, 1.52, 0.8);
+  const soft = surface(new THREE.MeshLambertMaterial({ color: "#2b2724" }), { roughness: 0.78 });
+  const black = surface(new THREE.MeshLambertMaterial({ color: "#121110" }), { roughness: 0.55 });
+  const metal = surface(new THREE.MeshLambertMaterial({ color: "#9a9ca0" }), { roughness: 0.3, metalness: 1 });
+  const add = (geometry: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+    return mesh;
+  };
+
+  // Painel: perfil lateral arredondado, extrudado na largura da cabine.
+  const profile = new THREE.Shape();
+  profile.moveTo(0.52, 0.5);
+  profile.lineTo(0.56, 0.74);
+  profile.quadraticCurveTo(0.6, 0.86, 0.74, 0.88);
+  profile.lineTo(1.08, 0.91);
+  profile.quadraticCurveTo(1.3, 0.9, 1.38, 0.84);
+  profile.lineTo(1.38, 0.5);
+  profile.closePath();
+  const dash = new THREE.ExtrudeGeometry(profile, { depth: 1.56, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 3, curveSegments: 10 });
+  dash.rotateY(-Math.PI / 2);
+  dash.translate(0.78, 0, 0);
+  add(dash, soft, 0, 0, 0);
+  // Capelinha dos mostradores, na frente do motorista, e os dois mostradores.
+  const hood = new THREE.CylinderGeometry(0.17, 0.17, 0.2, 24, 1, true, -Math.PI / 2, Math.PI);
+  hood.rotateX(Math.PI / 2);
+  add(hood, black, 0.36, 0.86, 0.7).scale.set(1.25, 0.55, 1);
+  for (const [dx, marks, red] of [[0.075, 8, 7], [-0.075, 12, 13]] as const) {
+    const dial = add(new THREE.CircleGeometry(0.068, 32), surface(new THREE.MeshBasicMaterial({ map: dialTexture(marks, red) }), { glow: 1.3 }), 0.36 + dx, 0.87, 0.71);
+    dial.rotation.set(-0.35, Math.PI, 0);
+  }
+  // Saídas de ar e o rádio no meio.
+  for (const x of [0.62, -0.62, 0.1, -0.1]) add(new THREE.BoxGeometry(0.16, 0.06, 0.02), black, x, 0.8, 0.6);
+  add(new THREE.BoxGeometry(0.22, 0.1, 0.02), black, 0, 0.7, 0.58);
+  // Console central com a alavanca de câmbio.
+  add(new THREE.BoxGeometry(0.26, 0.3, 0.7), soft, 0, 0.42, 0.3);
+  add(new THREE.CylinderGeometry(0.012, 0.016, 0.2, 8), metal, 0, 0.64, 0.2);
+  add(new THREE.SphereGeometry(0.035, 14, 10), black, 0, 0.75, 0.2);
+
+  // Colunas do para-brisa, o teto e o retrovisor interno.
+  for (const side of [1, -1]) {
+    const pillar = add(new THREE.BoxGeometry(0.08, 0.66, 0.1), black, side * 0.8, 1.2, 1.02);
+    pillar.rotation.set(-0.6, 0, side * 0.12);
+  }
+  add(new THREE.BoxGeometry(1.48, 0.06, 0.16), black, 0, 1.5, 0.78);
+  add(new THREE.CylinderGeometry(0.01, 0.01, 0.08, 6), black, 0, 1.44, 0.82);
+  add(new THREE.BoxGeometry(0.26, 0.075, 0.025), black, 0, 1.39, 0.83);
+  // Capô lá fora, visto pelo para-brisa.
+  add(new THREE.BoxGeometry(1.5, 0.04, 1.1), soft, 0, 0.84, 1.95);
+
+  // Volante: aro, três raios e o miolo, na coluna de direção.
   const wheel = new THREE.Group();
-  wheel.add(new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 6, 20), black));
-  const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.03, 0.02), black);
-  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 6), black);
+  wheel.add(new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 12, 48), black));
+  for (const angle of [0, Math.PI, -Math.PI / 2]) {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.03, 0.02), metal);
+    spoke.position.set(Math.cos(angle) * 0.085, Math.sin(angle) * 0.085, 0);
+    spoke.rotation.z = angle;
+    wheel.add(spoke);
+  }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.04, 20), black);
+  hub.rotation.x = Math.PI / 2;
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.3, 10), black);
   column.rotation.x = Math.PI / 2;
   column.position.z = 0.15;
-  wheel.add(spoke, column);
-  wheel.position.set(0.36, 0.82, 0.62);
+  wheel.add(hub, column);
+  wheel.position.set(0.36, 0.82, 0.58);
   // Inclinado para o motorista.
   wheel.rotation.x = -0.5;
-  group.add(dash, hood, ...pillars, roof, wheel);
+  group.add(wheel);
   group.visible = false;
   return { group, wheel };
 }

@@ -122,3 +122,41 @@ test("3D: apresentação, provocação e derrota do rival em cinemática", async
 
   expect(errors).toEqual([]);
 });
+
+// Visual realista na qualidade média (materiais físicos, reflexo do céu e os blocos
+// detalhados montados perto da câmera) e a troca para o quadrinho pelas Opções.
+// A alta (sombras, oclusão e bloom) é pesada demais para o 3D desenhado na CPU.
+test("3D: visual realista com detalhes de perto e troca para o quadrinho", async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => {
+    if (m.type() === "error") errors.push(m.text());
+  });
+  await page.addInitScript(() => localStorage.setItem("nfbmc:quality", "medio"));
+
+  await page.goto("/?spawn=centro");
+  await page.getByTestId("options-menu").click();
+  await expect(page.getByTestId("opt-look")).toHaveText("Visual: realista");
+  await expect(page.getByTestId("opt-quality")).toContainText("médio (reflexos");
+  await page.getByTestId("name-input").fill("Will");
+  await page.getByTestId("world-button").click();
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
+  // Anda um pouco: os blocos detalhados em volta vão sendo montados, um por quadro.
+  await page.keyboard.down("ArrowUp");
+  await page.waitForTimeout(2500);
+  await page.keyboard.up("ArrowUp");
+  await page.waitForTimeout(2000);
+
+  // De volta ao menu, troca para o quadrinho (vale na hora, sem recarregar).
+  await page.keyboard.press("Escape");
+  await page.getByTestId("pause-quit").click();
+  await page.getByTestId("options-menu").click();
+  await page.getByTestId("opt-look").click();
+  await expect(page.getByTestId("opt-look")).toHaveText("Visual: quadrinho (cel-shading)");
+  await expect(page.getByTestId("opt-quality")).toContainText("médio (contorno)");
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => localStorage.getItem("nfbmc:look"))).toBe("quadrinho");
+
+  expect(errors).toEqual([]);
+});

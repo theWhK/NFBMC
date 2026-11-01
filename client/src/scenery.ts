@@ -90,6 +90,10 @@ function buildSky(scene: THREE.Scene) {
           float glow = pow(max(dot(vDir, sun), 0.0), 12.0);
           color += vec3(1.0, 0.6, 0.25) * glow * 0.6;
           gl_FragColor = vec4(color, 1.0);
+          // Mesma conversão de cor do resto da cena (sem isso, desenhando direto na
+          // tela, sem pós-processamento, o céu saía bem mais vermelho).
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }`,
     }),
   );
