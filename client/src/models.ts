@@ -1,9 +1,12 @@
 // Modelos 3D feitos só com formas simples do Three.js (sem arquivos externos).
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { CROSSFIT_CAR, carSpec, type FoodKind, type TrafficKind } from "@nfbmc/shared";
 
-import { buildBody } from "./car-models.ts";
+import { roundRect, type MatName, type P2 } from "./car-kit.ts";
+import { bodyGeometry, roofPeak, topStripe, trafficGeometry, wheelGeometry, type BuiltBody, type Kit, type WheelSpec } from "./car-models.ts";
+import { surface, type Surface } from "./look.ts";
 
 const lambert = (color: THREE.ColorRepresentation) => new THREE.MeshLambertMaterial({ color });
 
@@ -14,12 +17,6 @@ const MATERIALS = {
   cheese: lambert("#f6c945"),
   lettuce: lambert("#5cb83a"),
   tomato: lambert("#e2412f"),
-  tire: lambert("#222222"),
-  rim: lambert("#c9cdd2"),
-  rimDark: lambert("#2c2f33"),
-  caliper: lambert("#c1121f"),
-  window: lambert("#2a3540"),
-  light: new THREE.MeshBasicMaterial({ color: "#fff3b0" }),
   fry: lambert("#f7d154"),
   carton: lambert("#d62828"),
   cup: lambert("#e63946"),
@@ -145,161 +142,207 @@ export interface CarOptions {
   car?: string;
   /** Viatura da Vigilância Sanitária (com pintura e giroflex). */
   cop?: boolean;
-  /** Carro do trânsito (modelo simples, sem nome). */
+  /** Carro do trânsito (modelo mais leve, rodas fundidas, sem nome). */
   traffic?: TrafficKind;
 }
 
-/** Carroceria de cada tipo de carro do trânsito, montada no grupo `shell`. */
-function trafficBody(shell: THREE.Group, kind: TrafficKind, body: THREE.Material) {
-  if (kind === "kombi") {
-    // Kombi: caixa alta e arredondada, com a faixa branca no meio.
-    shell.add(mesh(new THREE.BoxGeometry(2.1, 1.7, 4.2), body, 0, 1.25));
-    shell.add(mesh(new THREE.BoxGeometry(2.14, 0.5, 4.24), lambert("#f4f1e6"), 0, 1.75));
-    shell.add(mesh(new THREE.BoxGeometry(1.9, 0.55, 0.1), MATERIALS.window, 0, 1.8, 2.11));
-  } else if (kind === "picape") {
-    // Picape: cabine na frente e caçamba aberta atrás.
-    shell.add(mesh(new THREE.BoxGeometry(2.1, 0.7, 4.4), body, 0, 0.75));
-    shell.add(mesh(new THREE.BoxGeometry(1.9, 0.7, 1.6), body, 0, 1.45, 0.8));
-    shell.add(mesh(new THREE.BoxGeometry(1.7, 0.45, 0.1), MATERIALS.window, 0, 1.5, 1.61));
-    shell.add(mesh(new THREE.BoxGeometry(1.9, 0.12, 1.9), lambert("#2a2a2a"), 0, 1.11, -1.1));
-  } else {
-    shell.add(mesh(new THREE.BoxGeometry(2.0, 0.65, 4.2), body, 0, 0.72));
-    shell.add(mesh(new THREE.BoxGeometry(1.75, 0.55, 2.0), MATERIALS.window, 0, 1.3, -0.2));
-    shell.add(mesh(new THREE.BoxGeometry(1.8, 0.1, 2.0), body, 0, 1.62, -0.2));
+// --- Materiais dos carros ------------------------------------------------------
+//
+// Tudo é Lambert (o material "de autoria"); `surface` diz o que cada um é no
+// visual realista (look.ts). A pintura é um material por cor, guardado; o resto
+// é igual para todos os carros.
+
+const PAINT: Surface = { clearcoat: 1, clearcoatRoughness: 0.06, roughness: 0.36, metalness: 0.2 };
+const offset = <M extends THREE.Material>(m: M) => {
+  // Peças coladas na lataria (vidros, faróis, frisos) ficam um tiquinho na frente.
+  m.polygonOffset = true;
+  m.polygonOffsetFactor = -1;
+  m.polygonOffsetUnits = -2;
+  return m;
+};
+const CAR_MATERIALS: Record<Exclude<MatName, "paint">, THREE.Material> = {
+  accent: offset(surface(new THREE.MeshLambertMaterial({ color: "#ffffff", vertexColors: true }), PAINT)),
+  glass: offset(surface(new THREE.MeshLambertMaterial({ color: "#121a22" }), { roughness: 0.05, metalness: 0, envMapIntensity: 1.5 })),
+  chrome: offset(surface(new THREE.MeshLambertMaterial({ color: "#d9dee3" }), { metalness: 1, roughness: 0.15 })),
+  trim: offset(surface(new THREE.MeshLambertMaterial({ color: "#ffffff", vertexColors: true }), { roughness: 0.6 })),
+  lamp: offset(surface(new THREE.MeshBasicMaterial({ color: "#ffffff", vertexColors: true }), { glow: 2.5 })),
+  food: surface(new THREE.MeshLambertMaterial({ color: "#ffffff", vertexColors: true }), { roughness: 0.7 }),
+  rubber: surface(new THREE.MeshLambertMaterial({ color: "#1d1d1f" }), { roughness: 0.95 }),
+  metal: surface(new THREE.MeshLambertMaterial({ color: "#ffffff", vertexColors: true }), { metalness: 0.9, roughness: 0.3 }),
+};
+for (const [name, m] of Object.entries(CAR_MATERIALS)) m.name = `carro-${name}`;
+
+const paints = new Map<string, THREE.MeshLambertMaterial>();
+/** Pintura de uma cor (uma por cor, reaproveitada). */
+function paintMaterial(color: string) {
+  let m = paints.get(color);
+  if (!m) {
+    m = surface(new THREE.MeshLambertMaterial({ color }), PAINT);
+    m.name = `pintura-${color}`;
+    paints.set(color, m);
   }
+  return m;
 }
 
-/** Pintura de viatura: branca, faixa verde (cor de "saúde") e "VIGILÂNCIA" escrito. */
-const copLivery: Parameters<typeof buildBody>[2] = (add, design) => {
-  add.box(design.width + 0.14, 0.22, design.length - 0.3, "#2a9d4a", 0, 0.62, 0);
-  add.box(1.4, 0.16, 0.5, "#222222", 0, 1.42, -0.2);
+const materialOf = (mat: MatName, color: string) => (mat === "paint" ? paintMaterial(color) : CAR_MATERIALS[mat]);
+
+/** Malhas de uma carroceria pronta (uma por material). */
+function bodyMeshes(parts: Map<MatName, THREE.BufferGeometry>, color: string) {
+  const group = new THREE.Group();
+  for (const [mat, geometry] of parts) {
+    const m = new THREE.Mesh(geometry, materialOf(mat, color));
+    m.name = mat;
+    group.add(m);
+  }
+  return group;
+}
+
+/** Roda que gira: o grupo gira em x; dentro, a roda virada para o lado de fora. */
+function makeWheel(spec: WheelSpec, side: number): THREE.Object3D {
+  const wheel = new THREE.Group();
+  const inner = new THREE.Group();
+  for (const [mat, geometry] of wheelGeometry(spec)) inner.add(new THREE.Mesh(geometry, materialOf(mat, "#ffffff")));
+  if (side < 0) inner.rotation.y = Math.PI;
+  wheel.add(inner);
+  return wheel;
+}
+
+// --- Pinturas das viaturas ------------------------------------------------------
+
+/** Faixa lateral numa altura relativa (0 = embaixo, 1 = em cima da lataria) e com uma espessura. */
+function sideStripe(k: Kit, at: number, height: number, color: string, mat: MatName = "accent") {
+  const spec = k.body.spec;
+  const z0 = -k.L / 2 + 0.22;
+  const z1 = k.L / 2 - 0.22;
+  k.both((side) => {
+    const surf = k.s.side(side);
+    const path: P2[] = [];
+    for (let i = 0; i <= 24; i++) {
+      const z = z0 + ((z1 - z0) * i) / 24;
+      const y = spec.bottom(z) + (spec.top(z) - spec.bottom(z)) * at;
+      path.push([z, y]);
+    }
+    k.strip(surf, path, height, mat, color, { off: 0.005 });
+  });
+}
+
+/** Barra do giroflex (a base fica fundida na carroceria; as luzes são à parte, porque piscam). */
+function lightbarBase(k: Kit, roofZ: number) {
+  const y = k.topAt(roofZ);
+  k.box("trim", "#1a1a1c", [1.12, 0.06, 0.3], [0, y + 0.02, roofZ], { r: 0.02 });
+  k.both((side) => k.box("trim", "#2a2a2c", [0.05, 0.05, 0.26], [side * 0.5, y - 0.005, roofZ], { r: 0.01 }));
+}
+
+/** Cruz verde da "saúde" (emblema da Vigilância) na porta. */
+function healthCross(k: Kit, z: number, y: number, size: number) {
+  k.both((side) => {
+    const surf = k.s.side(side);
+    k.patch(surf, roundRect(z - size, y - size, z + size, y + size, size * 0.3), "accent", "#ffffff", { off: 0.006 });
+    k.rect(surf, z - size * 0.75, z + size * 0.75, y - size * 0.22, y + size * 0.22, "accent", "#1f8f43", { off: 0.009, na: 3, nb: 1 });
+    k.rect(surf, z - size * 0.22, z + size * 0.22, y - size * 0.75, y + size * 0.75, "accent", "#1f8f43", { off: 0.009, na: 1, nb: 3 });
+  });
+}
+
+/** Pintura de viatura: branca, faixa verde (cor de "saúde"), a cruz nas portas e o giroflex. */
+const copLivery = {
+  key: "cop",
+  draw: (k: Kit) => {
+    sideStripe(k, 0.5, 0.16, "#22994a");
+    sideStripe(k, 0.32, 0.035, "#0f5c2a");
+    healthCross(k, 0.0, k.body.spec.bottom(0) + (k.body.spec.top(0) - k.body.spec.bottom(0)) * 0.5, 0.11);
+    // Capô com a faixa e o para-choque preto de impulsão.
+    k.rect(k.s.hood, -0.18, 0.18, k.L / 2 - 0.9, k.L / 2 - 0.15, "accent", "#22994a", { off: 0.005 });
+    lightbarBase(k, roofPeak(k));
+  },
 };
 
 /**
  * Couve-vette do Sargento Cross-fit: verde-couve escuro, faixa verde-limão
- * (suco detox), "DETOX" no capô e um halter amarrado no teto.
+ * (suco detox), halter amarrado no teto e folhas de couve no para-choque.
  */
-const crossfitLivery: Parameters<typeof buildBody>[2] = (add, design) => {
-  add.box(design.width + 0.14, 0.18, design.length - 0.3, "#9be22d", 0, 0.62, 0);
-  add.box(0.36, 0.05, design.length * 0.42, "#9be22d", 0, 1.02, design.length * 0.22);
-  // Halter: a barra e as anilhas.
-  add.cylinder(0.04, 1.5, "#c9cdd2", 0, 1.5, -0.75, "x");
-  for (const x of [-0.62, 0.62]) add.cylinder(0.2, 0.1, "#1b1b1b", x, 1.5, -0.75, "x");
-  // Folhas de couve no para-choque.
-  for (const x of [-0.5, 0, 0.5]) add.sphere(0.16, "#3f8f2a", x, 0.55, design.length / 2 + 0.02, [1.2, 0.7, 0.5]);
+const crossfitLivery = {
+  key: "crossfit",
+  draw: (k: Kit) => {
+    sideStripe(k, 0.42, 0.12, "#9be22d");
+    k.rect(k.s.top, -0.16, 0.16, -k.L / 2 + 0.2, k.L / 2 - 0.12, "accent", "#9be22d", { off: 0.006, step: 0.05 });
+    const roofZ = roofPeak(k);
+    const y = k.topAt(roofZ) + 0.2;
+    // Halter: a barra, as anilhas e as cintas que prendem no teto.
+    k.cyl("chrome", null, 0.03, 1.5, [0, y, roofZ - 0.15], { rot: [0, 0, Math.PI / 2], seg: 12 });
+    for (const x of [-0.55, -0.45, 0.45, 0.55]) k.cyl("trim", "#151515", Math.abs(x) > 0.5 ? 0.17 : 0.2, 0.08, [x, y, roofZ - 0.15], { rot: [0, 0, Math.PI / 2], seg: 24 });
+    k.both((side) => k.box("trim", "#c9a227", [0.04, 0.2, 0.05], [side * 0.3, y - 0.1, roofZ - 0.15]));
+    // Folhas de couve no para-choque (crespas: esferas achatadas em leque).
+    for (let i = 0; i < 7; i++) {
+      const x = -0.6 + i * 0.2;
+      const z = k.frontAt(x, 0.45) + 0.03;
+      k.sphere("food", i % 2 ? "#2f7d32" : "#3f9a3a", 0.13, [x, 0.42 + (i % 2) * 0.04, z], { scale: [1.2, 0.8, 0.3], rot: [0.3, 0, (i - 3) * 0.2], seg: 12 });
+    }
+    lightbarBase(k, roofZ);
+  },
 };
 
-/**
- * Roda: pneu com banda e flanco, aro de cinco raios com cubo e a pinça de freio
- * vermelha atrás. `side` (+1/-1) diz para que lado fica a face de fora.
- * O conjunto gira em torno do eixo X (a pinça fica parada, presa ao carro, no
- * modelo do trânsito, que é fundido).
- */
-function makeWheel(radius: number, side: number, simple: boolean): THREE.Object3D {
-  const wheel = new THREE.Group();
-  const tire = new THREE.CylinderGeometry(radius, radius, 0.3, 20);
-  tire.rotateZ(Math.PI / 2);
-  wheel.add(new THREE.Mesh(tire, MATERIALS.tire));
-  const rim = new THREE.CylinderGeometry(radius * 0.66, radius * 0.66, 0.06, 20);
-  rim.rotateZ(Math.PI / 2);
-  const rimMesh = new THREE.Mesh(rim, MATERIALS.rimDark);
-  rimMesh.position.x = side * 0.13;
-  wheel.add(rimMesh);
-  if (!simple) {
-    for (let k = 0; k < 5; k++) {
-      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.05, radius * 1.22, 0.07), MATERIALS.rim);
-      spoke.position.x = side * 0.165;
-      spoke.rotation.x = (k / 5) * Math.PI * 2;
-      wheel.add(spoke);
-    }
-    const hub = new THREE.CylinderGeometry(radius * 0.18, radius * 0.18, 0.08, 10);
-    hub.rotateZ(Math.PI / 2);
-    const hubMesh = new THREE.Mesh(hub, MATERIALS.rim);
-    hubMesh.position.x = side * 0.17;
-    wheel.add(hubMesh);
-  }
-  return wheel;
-}
+// --- Peças compartilhadas --------------------------------------------------------
 
-/** Pinça de freio (fica parada enquanto a roda gira). */
-function makeCaliper(radius: number, side: number) {
-  const caliper = new THREE.Mesh(new THREE.BoxGeometry(0.06, radius * 0.5, radius * 0.4), MATERIALS.caliper);
-  caliper.position.set(side * 0.1, radius * 0.25, -radius * 0.25);
-  return caliper;
-}
+const flameGeometry = new THREE.ConeGeometry(0.4, 1.6, 12).rotateX(-Math.PI / 2);
+const shadowGeometry = new THREE.CircleGeometry(1.2, 24).rotateX(-Math.PI / 2);
+const shadowMaterial = new THREE.MeshBasicMaterial({ color: "#000000", transparent: true, opacity: 0.28, depthWrite: false });
+const lightGeometry = new RoundedBoxGeometry(0.5, 0.1, 0.24, 2, 0.03);
+const LIGHT_RED = surface(new THREE.MeshBasicMaterial({ color: "#ff1a1a" }), { glow: 3 });
+const LIGHT_BLUE = surface(new THREE.MeshBasicMaterial({ color: "#1f5bff" }), { glow: 3 });
+for (const g of [flameGeometry, shadowGeometry, lightGeometry]) g.userData.shared = true;
 
 /** Carro de um jogador, bot, viatura ou do trânsito. A frente aponta para +Z. */
 export function makeCar(color: string, name: string, options: CarOptions = {}): CarModel {
   const { cop, traffic } = options;
   const group = new THREE.Group();
-  const shell = new THREE.Group();
-  let wheelSpots: { x: number; z: number; radius: number }[];
-  let length = 4.2;
-  let roofY = 1.8;
-
+  let built: BuiltBody;
+  let paint = color;
   if (traffic) {
-    trafficBody(shell, traffic, lambert(color));
-    shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, -0.65, 0.85, 2.11));
-    shell.add(mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), MATERIALS.light, 0.65, 0.85, 2.11));
-    wheelSpots = [[-1.1, 1.3], [1.1, 1.3], [-1.1, -1.3], [1.1, -1.3]].map(([x, z]) => ({ x, z, radius: 0.45 }));
+    built = trafficGeometry(traffic);
   } else {
     const spec = carSpec(options.car ?? (cop ? "viatura" : undefined));
     const crossfit = cop && spec.id === CROSSFIT_CAR;
-    const paint = crossfit ? spec.color : cop ? "#f4f4f0" : color;
-    const built = buildBody(spec.body, paint, crossfit ? crossfitLivery : cop ? copLivery : undefined);
-    shell.add(built.shell);
-    wheelSpots = built.wheels;
-    length = built.length;
-    roofY = 1.6;
+    paint = crossfit ? spec.color : cop ? "#f4f4f0" : color;
+    built = bodyGeometry(spec.body, crossfit ? crossfitLivery : cop ? copLivery : undefined);
   }
+  group.add(bodyMeshes(built.parts, paint));
 
   let lights: [THREE.Mesh, THREE.Mesh] | undefined;
   if (cop) {
-    const red = mesh(new THREE.BoxGeometry(0.6, 0.2, 0.42), new THREE.MeshBasicMaterial({ color: "#ff2a2a" }), -0.35, 1.58, -0.2);
-    const blue = mesh(new THREE.BoxGeometry(0.6, 0.2, 0.42), new THREE.MeshBasicMaterial({ color: "#2a6bff" }), 0.35, 1.58, -0.2);
+    const y = built.roofY + 0.1;
+    const red = new THREE.Mesh(lightGeometry, LIGHT_RED);
+    red.position.set(-0.28, y, built.roofZ);
+    const blue = new THREE.Mesh(lightGeometry, LIGHT_BLUE);
+    blue.position.set(0.28, y, built.roofZ);
     lights = [red, blue];
+    group.add(red, blue);
   }
 
   const wheels: THREE.Object3D[] = [];
-  for (const spot of wheelSpots) {
-    const wheel = makeWheel(spot.radius, spot.x > 0 ? 1 : -1, !!traffic);
-    wheel.position.set(spot.x, spot.radius, spot.z);
-    // No trânsito as rodas vão fundidas na carroceria (não giram, mas são dezenas de
-    // carros: assim cada um custa uma chamada de desenho em vez de cinco).
-    if (traffic) shell.add(wheel);
-    else wheels.push(wheel);
-  }
   if (!traffic) {
-    for (const spot of wheelSpots) {
-      const caliper = makeCaliper(spot.radius, spot.x > 0 ? 1 : -1);
-      caliper.position.x += spot.x;
-      caliper.position.y += spot.radius * 0.6;
-      caliper.position.z += spot.z;
-      shell.add(caliper);
+    for (const spot of built.wheels) {
+      const wheel = makeWheel(built.wheel, spot.x > 0 ? 1 : -1);
+      wheel.position.set(spot.x, spot.radius, spot.z);
+      wheel.userData.radius = spot.radius;
+      wheels.push(wheel);
     }
+    group.add(...wheels);
   }
-  group.add(bake(shell));
-  if (lights) group.add(...lights);
-  if (wheels.length) group.add(...wheels);
 
-  const flame = mesh(new THREE.ConeGeometry(0.4, 1.6, 10), MATERIALS.flame, 0, 0.6, -length / 2 - 0.8);
-  flame.rotation.x = -Math.PI / 2;
+  const flame = new THREE.Mesh(flameGeometry, MATERIALS.flame);
+  flame.position.set(0, 0.5, -built.length / 2 - 0.8);
   flame.visible = false;
   group.add(flame);
 
   // Sombra falsa: um círculo escuro no chão, bem mais barato que sombra de verdade.
-  const shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(1.2, 20),
-    new THREE.MeshBasicMaterial({ color: "#000000", transparent: true, opacity: 0.28, depthWrite: false }),
-  );
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.06;
-  shadow.scale.set(1.0, length / 2.2, 1);
+  const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
+  shadow.position.y = 0.04;
+  shadow.scale.set(1.0, 1, built.length / 2.2);
   group.add(shadow);
 
   if (name) {
     const label = makeLabel(name, color);
-    label.position.y = roofY + 1.6;
+    label.position.y = Math.max(built.roofY, 1.2) + 1.7;
     group.add(label);
   }
 

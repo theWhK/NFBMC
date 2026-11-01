@@ -775,11 +775,11 @@ export class GameScene {
       }
       if (chunk.near && distance > range + 260) {
         chunk.group.remove(chunk.near);
-        // Geometria marcada com `userData.keep` é compartilhada (as formas das árvores): fica.
+        // Geometria marcada com `userData.shared` é compartilhada (as formas das árvores): fica.
         chunk.near.traverse((o) => {
           if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose();
           const geometry = (o as THREE.Mesh).geometry;
-          if (geometry && !geometry.userData.keep) geometry.dispose();
+          if (geometry && !geometry.userData.shared) geometry.dispose();
         });
         chunk.near = null;
       }
@@ -862,7 +862,7 @@ export class GameScene {
       entry.y = heightAt(entry.x, entry.z);
       group.position.set(entry.x, entry.y, entry.z);
       group.rotation.set(-Math.atan(sx * fx + sz * fz), entry.heading, entry.lean + Math.atan(sx * fz - sz * fx), "YXZ");
-      for (const wheel of wheels) wheel.rotation.x += (car.speed * dt) / 0.45;
+      for (const wheel of wheels) wheel.rotation.x += (car.speed * dt) / ((wheel.userData.radius as number | undefined) ?? 0.45);
       if (entry.model.lights) {
         // Giroflex: vermelho e azul alternando rápido.
         const on = Math.floor(this.time * 6) % 2 === 0;

@@ -279,7 +279,7 @@ function getShapes() {
     araucaria: [araucariaShape(8), araucariaShape(9)],
   };
   // Compartilhadas por todos os blocos: a cena não descarta.
-  for (const list of Object.values(shapes)) for (const shape of list) for (const g of [shape.wood, shape.leaves, shape.fronds]) if (g) g.userData.keep = true;
+  for (const list of Object.values(shapes)) for (const shape of list) for (const g of [shape.wood, shape.leaves, shape.fronds]) if (g) g.userData.shared = true;
   return shapes;
 }
 

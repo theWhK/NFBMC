@@ -140,10 +140,13 @@ export function rivalPortrait(key: string, name: string, car: string, color: str
   // Libera a memória da cena (o renderizador fica para as próximas fotos).
   scene.traverse((object) => {
     const mesh = object as THREE.Mesh;
-    mesh.geometry?.dispose?.();
-    const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
-    if (Array.isArray(material)) material.forEach((m) => m.dispose());
-    else material?.dispose?.();
+    // Geometria e materiais compartilhados (os dos carros) ficam: o jogo usa os mesmos.
+    if (mesh.geometry && !mesh.geometry.userData.shared) mesh.geometry.dispose();
+    const material = (mesh.userData.base ?? mesh.material) as THREE.Material | THREE.Material[] | undefined;
+    if (!mesh.geometry?.userData.shared) {
+      if (Array.isArray(material)) material.forEach((m) => m.dispose());
+      else material?.dispose?.();
+    }
   });
   return url;
 }
