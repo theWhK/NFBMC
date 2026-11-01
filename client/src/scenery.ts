@@ -1,36 +1,39 @@
 // Porto Gordo em 3D, no clima "fim de tarde alaranjado" dos jogos de corrida de
 // rua dos anos 2000: céu em degradê, sol baixo, prédios com janelas acesas,
 // ruas com calçada e faixa, casas com telhado, galpões e contêineres no porto,
-// o mar, o lago do parque e árvores de brócolis. A planta (ruas, prédios,
+// o mar, o lago do parque e as árvores. A planta (ruas, prédios,
 // árvores) vem do shared/world.ts; aqui só se desenha.
 import * as THREE from "three";
 import { makeFlag, FLAG_STRIPES } from "./flag.ts";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
-  BUILDINGS,
   DISTRICTS,
   LAKE,
-  NAV,
   QUAY_Z,
   RACES,
   RACE_IDS,
   ROADS,
-  TREES,
   districtAt,
   heightAt,
   insideBuilding,
-  slopeAt,
   isOnRoad,
   raceMarker,
   WORLD_BOUNDS,
   pointOnTrack,
   seeded,
-  type BuildingKind,
 } from "@nfbmc/shared";
 
 import { bake, makeBurger } from "./models.ts";
 import { buildTrackMesh } from "./track-mesh.ts";
 import { buildLandmarks } from "./landmarks.ts";
+import { TILE, addChunk, byTile } from "./chunks.ts";
+import { buildBuildings, buildingMaterial } from "./buildings.ts";
+import { buildStreets } from "./streets.ts";
+import { buildTrees } from "./trees.ts";
+import { surface } from "./look.ts";
+import { normalTexture, paintedTexture } from "./textures.ts";
+
+export { CHUNKS, addChunk } from "./chunks.ts";
 
 export const FOG_COLOR = "#e0995a";
 /** Direção de onde vem o sol (baixo, quase no horizonte). */
@@ -83,6 +86,10 @@ function buildSky(scene: THREE.Scene) {
           float glow = pow(max(dot(vDir, sun), 0.0), 12.0);
           color += vec3(1.0, 0.6, 0.25) * glow * 0.6;
           gl_FragColor = vec4(color, 1.0);
+          // Mesma conversão de cor do resto da cena (sem isso, desenhando direto na
+          // tela, sem pós-processamento, o céu saía bem mais vermelho).
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
         }`,
     }),
   );
@@ -102,191 +109,6 @@ function buildSky(scene: THREE.Scene) {
   sun.scale.setScalar(220);
   scene.add(sun);
   return { sky, sun };
-}
-
-/** Fachada com janelas, umas acesas e outras apagadas. */
-function windowsTexture() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#000000";
-  ctx.fillRect(0, 0, 64, 128);
-  const random = seeded(7);
-  for (let y = 4; y < 128; y += 8) {
-    for (let x = 4; x < 64; x += 8) {
-      const lit = random() < 0.35;
-      ctx.fillStyle = lit ? `hsl(${35 + random() * 15}, 100%, ${60 + random() * 20}%)` : "#000000";
-      ctx.fillRect(x, y, 4, 5);
-    }
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
-const buildingMaterial = (color: string, fog = true) =>
-  new THREE.MeshLambertMaterial({
-    color,
-    emissive: "#ffcf8a",
-    emissiveMap: windowsTexture(),
-    emissiveIntensity: 1.2,
-    fog,
-  });
-
-// As lanchonetes e garagens ("landmark") têm desenho próprio (landmarks.ts).
-const PALETTES: Record<Exclude<BuildingKind, "landmark">, string[]> = {
-  tower: ["#3e4450", "#4a3f48", "#2f3a48", "#544a3e"],
-  office: ["#6b5a4a", "#5a4a44", "#4e5560", "#6a6058"],
-  shop: ["#f1e3c6", "#e8d2b0", "#d9e4dc", "#f3d6c8"],
-  house: ["#f4e1b8", "#e9c46a", "#f2a3a3", "#a8d5c2", "#c9b8e8", "#f7f3ea"],
-  warehouse: ["#7d8794", "#8a7f6e", "#6e7f8a", "#9a8f80"],
-  container: ["#c1121f", "#2a6bff", "#e9c46a", "#2a9d8f", "#f4a261", "#6c757d"],
-};
-const AWNINGS = ["#c1121f", "#2a9d8f", "#f4a261", "#1d3557"];
-const ROOFS = ["#8d3b2a", "#6b3a2a", "#4a4f57", "#7a4b2a"];
-
-const unitBox = new THREE.BoxGeometry(1, 1, 1);
-const instancedBoxes = (material: THREE.Material, list: { matrix: THREE.Matrix4; color: THREE.Color }[], geometry: THREE.BufferGeometry = unitBox) => {
-  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, list.length));
-  list.forEach(({ matrix, color }, i) => {
-    mesh.setMatrixAt(i, matrix);
-    mesh.setColorAt(i, color);
-  });
-  mesh.count = list.length;
-  return mesh;
-};
-
-/**
- * Porto Gordo ficou grande: prédios, árvores e postes são divididos em blocos
- * de TILE metros, e a cena só desenha os blocos perto da câmera (o resto está
- * escondido na neblina de qualquer jeito). `CHUNKS` guarda cada bloco com o
- * centro dele em `userData.center`.
- */
-const TILE = 400;
-export const CHUNKS: THREE.Object3D[] = [];
-
-function byTile<T>(items: T[], position: (item: T) => [number, number]) {
-  const tiles = new Map<string, { center: [number, number]; items: T[] }>();
-  for (const item of items) {
-    const [x, z] = position(item);
-    const tx = Math.floor(x / TILE);
-    const tz = Math.floor(z / TILE);
-    const key = `${tx},${tz}`;
-    let tile = tiles.get(key);
-    if (!tile) tiles.set(key, (tile = { center: [(tx + 0.5) * TILE, (tz + 0.5) * TILE], items: [] }));
-    tile.items.push(item);
-  }
-  return [...tiles.values()];
-}
-
-/**
- * Põe na cena um objeto que pertence a um bloco (a cena esconde quando está
- * longe). `radius`: até onde o conteúdo vai, a partir do centro (padrão: o
- * canto do bloco, com folga para um galpão grande).
- */
-export function addChunk(scene: THREE.Scene, object: THREE.Object3D, center: [number, number], radius = TILE * 0.71 + 40) {
-  object.userData.center = center;
-  object.userData.radius = radius;
-  CHUNKS.push(object);
-  scene.add(object);
-}
-
-const matrixXZ = (m: THREE.Matrix4): [number, number] => [m.elements[12], m.elements[14]];
-
-/** Caixas instanciadas, uma malha por bloco. */
-function addTiledBoxes(scene: THREE.Scene, material: THREE.Material, list: { matrix: THREE.Matrix4; color: THREE.Color }[], geometry?: THREE.BufferGeometry) {
-  for (const tile of byTile(list, (item) => matrixXZ(item.matrix))) {
-    const mesh = instancedBoxes(material, tile.items, geometry);
-    mesh.computeBoundingSphere();
-    addChunk(scene, mesh, tile.center);
-  }
-}
-
-/** Matriz de uma caixa girada do mapa (base no chão). */
-function boxMatrix(b: { x: number; z: number; w: number; d: number; angle: number }, height: number, y = 0, inset = 0) {
-  return new THREE.Matrix4().compose(
-    new THREE.Vector3(b.x, y + height / 2, b.z),
-    new THREE.Quaternion().setFromAxisAngle(Y, b.angle),
-    new THREE.Vector3(b.w - inset, height, b.d - inset),
-  );
-}
-
-/** Telhado de duas águas: um prisma triangular de base 1×1 e altura 1, com a cumeeira ao longo de X. */
-function roofGeometry() {
-  const shape = new THREE.Shape();
-  shape.moveTo(-0.5, 0);
-  shape.lineTo(0.5, 0);
-  shape.lineTo(0, 1);
-  shape.closePath();
-  const geometry = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false });
-  geometry.translate(0, 0, -0.5);
-  // Gira para a cumeeira ficar ao longo do eixo X (o "w" da casa).
-  geometry.rotateY(Math.PI / 2);
-  return geometry;
-}
-
-function buildBuildings(scene: THREE.Scene) {
-  const random = seeded(31);
-  const windowed: { matrix: THREE.Matrix4; color: THREE.Color }[] = [];
-  const plain: { matrix: THREE.Matrix4; color: THREE.Color }[] = [];
-  const awnings: { matrix: THREE.Matrix4; color: THREE.Color }[] = [];
-  const roofs: { matrix: THREE.Matrix4; color: THREE.Color }[] = [];
-  const color = (kind: Exclude<BuildingKind, "landmark">, tint: number) => new THREE.Color(PALETTES[kind][tint % PALETTES[kind].length]);
-
-  for (const b of BUILDINGS) {
-    if (b.kind === "landmark") continue;
-    // No morro, o prédio afunda no lado de baixo até o lado de cima encostar no chão.
-    const ground = heightAt(b.x, b.z);
-    const [sx, sz] = slopeAt(b.x, b.z);
-    const sink = Math.hypot(sx, sz) * (Math.hypot(b.w, b.d) / 2) + 0.4;
-    const base = ground - sink;
-    switch (b.kind) {
-      case "tower":
-      case "office":
-        windowed.push({ matrix: boxMatrix(b, b.height + sink, base), color: color(b.kind, b.tint) });
-        break;
-      case "shop": {
-        windowed.push({ matrix: boxMatrix(b, b.height + sink, base), color: color(b.kind, b.tint) });
-        // Toldo listrado na frente da loja, virado para a rua.
-        const fx = Math.sin(b.angle) * b.front;
-        const fz = Math.cos(b.angle) * b.front;
-        awnings.push({
-          matrix: boxMatrix({ x: b.x + fx * (b.d / 2 + 0.9), z: b.z + fz * (b.d / 2 + 0.9), w: b.w * 0.9, d: 1.8, angle: b.angle }, 0.25, ground + 3.2),
-          color: new THREE.Color(AWNINGS[Math.floor(random() * AWNINGS.length)]),
-        });
-        break;
-      }
-      case "house":
-        plain.push({ matrix: boxMatrix(b, b.height + sink, base), color: color(b.kind, b.tint) });
-        roofs.push({
-          matrix: new THREE.Matrix4().compose(
-            new THREE.Vector3(b.x, ground + b.height, b.z),
-            new THREE.Quaternion().setFromAxisAngle(Y, b.angle),
-            new THREE.Vector3(b.w + 0.8, 2.6, b.d + 0.8),
-          ),
-          color: new THREE.Color(ROOFS[Math.floor(random() * ROOFS.length)]),
-        });
-        break;
-      case "warehouse":
-        plain.push({ matrix: boxMatrix(b, b.height + sink, base), color: color(b.kind, b.tint) });
-        break;
-      case "container": {
-        // Pilha de contêineres: um bloco por andar, com uma frestinha entre eles.
-        const floors = Math.round(b.height / 2.6);
-        for (let f = 0; f < floors; f++) {
-          plain.push({ matrix: boxMatrix(b, 2.5, ground + f * 2.6), color: color("container", b.tint + f) });
-        }
-        break;
-      }
-    }
-  }
-
-  const lambert = new THREE.MeshLambertMaterial({ color: "#ffffff" });
-  addTiledBoxes(scene, buildingMaterial("#ffffff"), windowed);
-  addTiledBoxes(scene, lambert, plain);
-  addTiledBoxes(scene, lambert, awnings);
-  addTiledBoxes(scene, lambert, roofs, roofGeometry());
 }
 
 /** Silhueta de cidade além do muro do mapa (menos para o lado do mar). */
@@ -315,53 +137,14 @@ function buildSkyline(scene: THREE.Scene) {
   scene.add(mesh);
 }
 
-/** Faixa ao longo de uma linha (rua): `half` metros para cada lado. */
-function stripGeometry(points: [number, number][], half: number, y: number) {
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  let travelled = 0;
-  points.forEach(([x, z], i) => {
-    if (i > 0) travelled += Math.hypot(x - points[i - 1][0], z - points[i - 1][1]);
-    // Textura: atravessa a rua de 0 a 1 e repete a cada 8 m ao longo dela.
-    uvs.push(0, travelled / 8, 1, travelled / 8);
-    const [px, pz] = points[Math.max(0, i - 1)];
-    const [nx, nz] = points[Math.min(points.length - 1, i + 1)];
-    const len = Math.hypot(nx - px, nz - pz) || 1;
-    const ox = ((nz - pz) / len) * half;
-    const oz = (-(nx - px) / len) * half;
-    // Acompanha o relevo (cada borda na altura do chão embaixo dela).
-    positions.push(x + ox, heightAt(x + ox, z + oz) + y, z + oz, x - ox, heightAt(x - ox, z - oz) + y, z - oz);
-    if (i > 0) {
-      const a = (i - 1) * 2;
-      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-    }
-  });
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-/** Disco no chão (para tapar a junção das ruas nos cruzamentos). */
-function discGeometry(x: number, z: number, radius: number, y: number) {
-  const geometry = new THREE.CircleGeometry(radius, 24).rotateX(-Math.PI / 2);
-  geometry.translate(x, 0, z);
-  const flat = geometry.toNonIndexed();
-  const positions = flat.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < positions.count; i++) positions.setY(i, heightAt(positions.getX(i), positions.getZ(i)) + y);
-  flat.computeVertexNormals();
-  return flat;
-}
-
 /**
  * Chão com relevo, em blocos (para a cena poder esconder os longe), tingido
  * pela cor de cada bairro. Vai um pouco além dos limites do mapa, sob a neblina.
  */
 function buildTerrain(scene: THREE.Scene) {
-  const material = new THREE.MeshLambertMaterial({ color: "#ffffff", map: groundTexture, vertexColors: true });
+  const material = surface(new THREE.MeshLambertMaterial({ color: "#ffffff", map: groundTexture, vertexColors: true }), {
+    roughness: 0.95, normalMap: grassNormal, normalScale: 0.55,
+  });
   const step = 20;
   const size = 500;
   const margin = 700;
@@ -401,76 +184,6 @@ function buildTerrain(scene: THREE.Scene) {
   }
 }
 
-// --- Texturas "pintadas à mão" (desenhadas em canvas, sem arquivos) ----------
-
-function paintedTexture(size: number, draw: (ctx: CanvasRenderingContext2D, size: number, random: () => number) => void, seed: number) {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  draw(canvas.getContext("2d")!, size, seeded(seed));
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  return texture;
-}
-
-/** Asfalto: grão, remendos mais escuros e rachaduras traçadas a "nanquim". */
-function asphaltTexture() {
-  return paintedTexture(256, (ctx, size, random) => {
-    ctx.fillStyle = "#5c5b63";
-    ctx.fillRect(0, 0, size, size);
-    for (let i = 0; i < 2200; i++) {
-      const v = 70 + Math.floor(random() * 40);
-      ctx.fillStyle = `rgb(${v},${v},${v + 6})`;
-      ctx.fillRect(random() * size, random() * size, 2, 2);
-    }
-    for (let i = 0; i < 4; i++) {
-      ctx.fillStyle = "rgba(25, 24, 28, 0.35)";
-      ctx.beginPath();
-      ctx.ellipse(random() * size, random() * size, 14 + random() * 26, 8 + random() * 14, random() * 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.strokeStyle = "rgba(15, 12, 10, 0.75)";
-    ctx.lineWidth = 1.6;
-    for (let i = 0; i < 5; i++) {
-      let x = random() * size;
-      let y = random() * size;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      for (let k = 0; k < 6; k++) {
-        x += (random() - 0.5) * 30;
-        y += random() * 18;
-        ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-  }, 11);
-}
-
-/** Calçada: lajotas com rejunte escuro e umas manchas. */
-function sidewalkTexture() {
-  return paintedTexture(256, (ctx, size, random) => {
-    ctx.fillStyle = "#a39a8c";
-    ctx.fillRect(0, 0, size, size);
-    for (let i = 0; i < 10; i++) {
-      ctx.fillStyle = `rgba(90, 80, 70, ${0.1 + random() * 0.15})`;
-      ctx.beginPath();
-      ctx.arc(random() * size, random() * size, 6 + random() * 18, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.strokeStyle = "rgba(40, 32, 26, 0.6)";
-    ctx.lineWidth = 2;
-    for (let p = 0; p <= size; p += 64) {
-      ctx.beginPath();
-      ctx.moveTo(p, 0);
-      ctx.lineTo(p, size);
-      ctx.moveTo(0, p);
-      ctx.lineTo(size, p);
-      ctx.stroke();
-    }
-  }, 12);
-}
-
 /** Chão dos bairros (em tons de cinza; a cor do bairro tinge por cima): manchas e tufos. */
 const groundTexture = (() => {
   const texture = paintedTexture(256, (ctx, size, random) => {
@@ -498,6 +211,49 @@ const groundTexture = (() => {
   texture.repeat.set(1 / 24, 1 / 24);
   return texture;
 })();
+
+/** Relevo do chão (realista): tufos de grama e torrões, na mesma escala da textura. */
+const grassNormal = (() => {
+  const texture = normalTexture(256, (ctx, size, random) => {
+    ctx.fillStyle = "#808080";
+    ctx.fillRect(0, 0, size, size);
+    for (let i = 0; i < 2600; i++) {
+      const v = Math.floor(random() * 255);
+      ctx.strokeStyle = `rgba(${v},${v},${v},0.7)`;
+      ctx.lineWidth = 1 + random();
+      const x = random() * size;
+      const y = random() * size;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (random() - 0.5) * 3, y - 3 - random() * 5);
+      ctx.stroke();
+    }
+  }, 14, 2.5);
+  texture.repeat.set(1 / 6, 1 / 6);
+  return texture;
+})();
+
+/** Ondinhas da água (realista): o reflexo do céu fica quebrado, como água de verdade. */
+export const waterNormal = normalTexture(256, (ctx, size, random) => {
+  ctx.fillStyle = "#808080";
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 260; i++) {
+    const x = random() * size;
+    const y = random() * size;
+    const r = 6 + random() * 22;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const v = random() < 0.5 ? 255 : 0;
+    g.addColorStop(0, `rgba(${v},${v},${v},0.35)`);
+    g.addColorStop(1, `rgba(${v},${v},${v},0)`);
+    ctx.fillStyle = g;
+    // Ondas esticadas na horizontal (o vento sopra numa direção).
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(2.2, 0.6);
+    ctx.fillRect(-r, -r, r * 2, r * 2);
+    ctx.restore();
+  }
+}, 15, 3);
 
 /**
  * Nuvens de desenho animado, de volume: cachos de bolhas (esferas achatadas,
@@ -573,73 +329,17 @@ function buildGround(scene: THREE.Scene) {
   // Chão de cada bairro, com a sua cor e o relevo.
   buildTerrain(scene);
 
-  // Calçadas (um pouco mais largas que a rua) e asfalto, uma malha de cada por
-  // bloco da cidade (cada rua vai para o bloco do meio dela).
-  // As camadas ficam separadas na altura e com polygonOffset: com pouca precisão
-  // de profundidade o chão "brigava" com o asfalto e a rua sumia.
-  const nodeRadius = new Map<string, number>();
-  for (const road of ROADS) {
-    for (const id of [road.a, road.b]) nodeRadius.set(id, Math.max(nodeRadius.get(id) ?? 0, road.width / 2));
-  }
-  type Piece = { x: number; z: number; points: [number, number][]; sidewalk: THREE.BufferGeometry; asphalt: THREE.BufferGeometry };
-  const pieces: Piece[] = [];
-  for (const road of ROADS) {
-    const [x, z] = road.points[Math.floor(road.points.length / 2)];
-    pieces.push({
-      x, z, points: road.points,
-      sidewalk: stripGeometry(road.points, road.width / 2 + 3, 0.02).toNonIndexed(),
-      asphalt: stripGeometry(road.points, road.width / 2, 0.05).toNonIndexed(),
-    });
-  }
-  for (const node of NAV) {
-    const radius = nodeRadius.get(node.id);
-    if (!radius) continue;
-    pieces.push({
-      x: node.x, z: node.z, points: [[node.x, node.z]],
-      sidewalk: discGeometry(node.x, node.z, radius + 3, 0.02),
-      asphalt: discGeometry(node.x, node.z, radius, 0.05),
-    });
-  }
-  const offset = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
-  const sidewalkMaterial = new THREE.MeshLambertMaterial({ color: "#ffffff", map: sidewalkTexture() });
-  const asphaltMaterial = new THREE.MeshLambertMaterial({ color: "#ffffff", map: asphaltTexture(), ...offset });
-  for (const tile of byTile(pieces, (p) => [p.x, p.z])) {
-    const [cx, cz] = tile.center;
-    const reach = Math.max(...tile.items.flatMap((p) => p.points.map(([x, z]) => Math.hypot(x - cx, z - cz)))) + 20;
-    const group = new THREE.Group();
-    group.add(
-      new THREE.Mesh(mergeGeometries(tile.items.map((p) => p.sidewalk)), sidewalkMaterial),
-      new THREE.Mesh(mergeGeometries(tile.items.map((p) => p.asphalt)), asphaltMaterial),
-    );
-    addChunk(scene, group, tile.center, reach);
-  }
-
-  // Faixa tracejada no meio das avenidas e ruas (vielas não têm), longe dos cruzamentos.
-  const dashes: THREE.Matrix4[] = [];
-  const quat = new THREE.Quaternion();
-  const one = new THREE.Vector3(1, 1, 1);
-  for (const road of ROADS) {
-    if (road.kind === "viela") continue;
-    const color = road.kind === "avenida" ? 0 : 1;
-    road.points.forEach(([x, z], i) => {
-      if (i % 2 || i < 5 || i > road.points.length - 6) return;
-      const [nx, nz] = road.points[i + 1];
-      // Gira na direção da rua e inclina junto com a ladeira.
-      const run = Math.hypot(nx - x, nz - z) || 1;
-      quat.setFromEuler(new THREE.Euler(-Math.atan2(heightAt(nx, nz) - heightAt(x, z), run), Math.atan2(nx - x, nz - z), 0, "YXZ"));
-      dashes.push(new THREE.Matrix4().compose(new THREE.Vector3(x, heightAt(x, z) + 0.14 + color * 0.001, z), quat, one));
-    });
-  }
-  const dashGeometry = new THREE.PlaneGeometry(0.35, 3.5).rotateX(-Math.PI / 2);
-  const dashMesh = new THREE.InstancedMesh(dashGeometry, new THREE.MeshBasicMaterial({ color: "#e8c547" }), dashes.length);
-  dashes.forEach((m, i) => dashMesh.setMatrixAt(i, m));
-  scene.add(dashMesh);
+  buildStreets(scene);
 
   // O mar, ao sul do cais, e o muro do cais.
   const sea = new THREE.Mesh(
     new THREE.PlaneGeometry(WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 6000, 3000).rotateX(-Math.PI / 2),
-    new THREE.MeshLambertMaterial({ color: "#2b6a8f", emissive: "#3a5a7a", emissiveIntensity: 0.35 }),
+    surface(new THREE.MeshLambertMaterial({ color: "#2b6a8f", emissive: "#3a5a7a", emissiveIntensity: 0.35 }), {
+      roughness: 0.12, normalMap: waterNormal, normalScale: 0.5, envMapIntensity: 1.6,
+    }),
   );
+  // UV em metros: uma onda da textura a cada ~14 m.
+  scaleUv(sea.geometry, (WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 6000) / 14, 3000 / 14);
   sea.position.set(0, -0.6, QUAY_Z - 1500);
   scene.add(sea);
   const quay = new THREE.Mesh(new THREE.BoxGeometry(WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 40, 1.6, 2), new THREE.MeshLambertMaterial({ color: "#6b6258" }));
@@ -652,11 +352,20 @@ function buildGround(scene: THREE.Scene) {
   shore.position.set(LAKE.x, 0.01, LAKE.z);
   const lake = new THREE.Mesh(
     new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2),
-    new THREE.MeshLambertMaterial({ color: "#2f7aa0", emissive: "#3a6a8a", emissiveIntensity: 0.4, ...offset }),
+    surface(new THREE.MeshLambertMaterial({ color: "#2f7aa0", emissive: "#3a6a8a", emissiveIntensity: 0.4, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), {
+      roughness: 0.08, normalMap: waterNormal, normalScale: 0.3, envMapIntensity: 1.6,
+    }),
   );
+  scaleUv(lake.geometry, LAKE.rx / 5, LAKE.rz / 5);
   lake.scale.set(LAKE.rx, 1, LAKE.rz);
   lake.position.set(LAKE.x, 0.03, LAKE.z);
   scene.add(shore, lake);
+}
+
+/** Multiplica o UV de uma geometria (para a textura repetir na escala certa). */
+function scaleUv(geometry: THREE.BufferGeometry, u: number, v: number) {
+  const uv = geometry.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * u, uv.getY(i) * v);
 }
 
 /** Guindastes do porto (só enfeite, na beira do cais). */
@@ -680,9 +389,13 @@ function buildCranes(scene: THREE.Scene) {
   }
 }
 
-/** Postes ao longo das avenidas e ruas, com o brilho das lâmpadas num só Points (barato). */
+/**
+ * Postes ao longo das avenidas e ruas: coluna, braço curvo sobre a rua e a
+ * luminária, com o brilho das lâmpadas num só Points (barato).
+ */
 function buildLamps(scene: THREE.Scene) {
-  const spots: THREE.Vector3[] = [];
+  /** Pé do poste e para onde fica a rua (a luminária aponta para lá). */
+  const spots: { x: number; y: number; z: number; facing: number }[] = [];
   for (const road of ROADS) {
     if (road.kind === "viela") continue;
     let side = 1;
@@ -694,20 +407,37 @@ function buildLamps(scene: THREE.Scene) {
       const offset = side * (road.width / 2 + 1.8);
       const lx = x + ((nz - z) / len) * offset;
       const lz = z - ((nx - x) / len) * offset;
-      spots.push(new THREE.Vector3(lx, heightAt(lx, lz), lz));
+      spots.push({ x: lx, y: heightAt(lx, lz), z: lz, facing: Math.atan2(x - lx, z - lz) });
     }
   }
   // Também em volta do autódromo.
   const track = RACES.autodromo.track;
   for (let dist = 15, i = 0; dist < track.length; dist += 34, i++) {
     const p = pointOnTrack(track, dist, (i % 2 ? 1 : -1) * (track.width / 2 + 2.5));
-    spots.push(new THREE.Vector3(p.x, 0, p.z));
+    const center = pointOnTrack(track, dist, 0);
+    spots.push({ x: p.x, y: 0, z: p.z, facing: Math.atan2(center.x - p.x, center.z - p.z) });
   }
 
-  const poleGeometry = new THREE.CylinderGeometry(0.15, 0.22, 9, 6);
-  const poleMaterial = new THREE.MeshLambertMaterial({ color: "#2c2a2e" });
+  // O poste inteiro numa geometria só (frente da luminária para +Z).
+  const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+  const tube = (from: THREE.Vector3, to: THREE.Vector3, r0: number, r1: number) => {
+    const length = from.distanceTo(to);
+    const g = new THREE.CylinderGeometry(r1, r0, length, 8).translate(0, length / 2, 0);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(v(0, 1, 0), to.clone().sub(from).normalize()));
+    return g.translate(from.x, from.y, from.z);
+  };
+  const poleGeometry = mergeGeometries([
+    new THREE.BoxGeometry(0.5, 0.7, 0.5).translate(0, 0.35, 0),
+    tube(v(0, 0.7, 0), v(0, 8.3, 0), 0.17, 0.11),
+    tube(v(0, 8.3, 0), v(0, 8.85, 0.7), 0.11, 0.08),
+    tube(v(0, 8.85, 0.7), v(0, 9.0, 2.2), 0.08, 0.07),
+    new THREE.BoxGeometry(0.42, 0.2, 1.0).translate(0, 9.02, 2.55),
+  ].map((g) => g.toNonIndexed()));
+  const lensGeometry = new THREE.BoxGeometry(0.32, 0.04, 0.8).translate(0, 8.9, 2.55);
+  const poleMaterial = surface(new THREE.MeshLambertMaterial({ color: "#4a4a4e" }), { roughness: 0.45, metalness: 0.6 });
+  const lensMaterial = surface(new THREE.MeshBasicMaterial({ color: "#ffe2a8" }), { glow: 3 });
   const glowMaterial = new THREE.PointsMaterial({
-    size: 7,
+    size: 3.5,
     map: glowTexture("rgba(255,214,140,1)"),
     blending: THREE.AdditiveBlending,
     depthWrite: false,
@@ -718,17 +448,21 @@ function buildLamps(scene: THREE.Scene) {
   const one = new THREE.Vector3(1, 1, 1);
   for (const tile of byTile(spots, (p) => [p.x, p.z])) {
     const poles = new THREE.InstancedMesh(poleGeometry, poleMaterial, tile.items.length);
+    const lenses = new THREE.InstancedMesh(lensGeometry, lensMaterial, tile.items.length);
     const glowPositions: number[] = [];
     tile.items.forEach((p, i) => {
-      matrix.compose(new THREE.Vector3(p.x, p.y + 4.5, p.z), quat, one);
+      quat.setFromAxisAngle(Y, p.facing);
+      matrix.compose(new THREE.Vector3(p.x, p.y - 0.2, p.z), quat, one);
       poles.setMatrixAt(i, matrix);
-      glowPositions.push(p.x, p.y + 9, p.z);
+      lenses.setMatrixAt(i, matrix);
+      glowPositions.push(p.x + Math.sin(p.facing) * 2.55, p.y + 8.7, p.z + Math.cos(p.facing) * 2.55);
     });
     poles.computeBoundingSphere();
+    lenses.computeBoundingSphere();
     const glowGeometry = new THREE.BufferGeometry();
     glowGeometry.setAttribute("position", new THREE.Float32BufferAttribute(glowPositions, 3));
     const lamps = new THREE.Group();
-    lamps.add(poles, new THREE.Points(glowGeometry, glowMaterial));
+    lamps.add(poles, lenses, new THREE.Points(glowGeometry, glowMaterial));
     addChunk(scene, lamps, tile.center);
   }
 }
@@ -809,45 +543,8 @@ function buildBillboards(scene: THREE.Scene) {
   });
 }
 
-/** Árvores de brócolis, porque toda dieta precisa de um vegetal (de enfeite). */
-function buildTrees(scene: THREE.Scene) {
-  const stemGeometry = new THREE.CylinderGeometry(0.5, 0.8, 3, 5);
-  const stemMaterial = new THREE.MeshLambertMaterial({ color: "#9bc25b" });
-  const crownGeometry = new THREE.IcosahedronGeometry(2.6, 0);
-  const crownMaterial = new THREE.MeshLambertMaterial({ color: "#3d7d2c", flatShading: true });
-  const matrix = new THREE.Matrix4();
-  const scale = new THREE.Vector3();
-  const quat = new THREE.Quaternion();
-  let n = 0;
-  for (const tile of byTile(TREES, (t) => [t.x, t.z])) {
-    const stem = new THREE.InstancedMesh(stemGeometry, stemMaterial, tile.items.length);
-    const crown = new THREE.InstancedMesh(crownGeometry, crownMaterial, tile.items.length * 3);
-    tile.items.forEach((tree, i) => {
-      const s = tree.size;
-      scale.setScalar(s);
-      const ground = heightAt(tree.x, tree.z) - 0.3;
-      matrix.compose(new THREE.Vector3(tree.x, ground + 1.5 * s, tree.z), quat, scale);
-      stem.setMatrixAt(i, matrix);
-      for (let k = 0; k < 3; k++) {
-        const angle = (k / 3) * Math.PI * 2 + n;
-        const pos = new THREE.Vector3(
-          tree.x + Math.cos(angle) * 1.1 * s,
-          ground + (3.4 + (k === 0 ? 0.6 : 0)) * s,
-          tree.z + Math.sin(angle) * 1.1 * s,
-        );
-        matrix.compose(pos, quat, scale);
-        crown.setMatrixAt(i * 3 + k, matrix);
-      }
-      n++;
-    });
-    stem.computeBoundingSphere();
-    crown.computeBoundingSphere();
-    const group = new THREE.Group();
-    group.add(stem, crown);
-    addChunk(scene, group, tile.center);
-  }
-
-  // Hambúrgueres gigantes de estátua: na beira do lago e no meio do autódromo.
+/** Hambúrgueres gigantes de estátua: na beira do lago e no meio do autódromo. */
+function buildStatues(scene: THREE.Scene) {
   for (const [x, z, size] of [[400, 40, 16], [400, 425, 14]] as const) {
     const statue = bake(makeBurger());
     statue.scale.setScalar(size);
@@ -1102,7 +799,8 @@ function buildProps(scene: THREE.Scene) {
 export function buildScenery(scene: THREE.Scene) {
   scene.background = new THREE.Color(FOG_COLOR);
   scene.fog = new THREE.Fog(FOG_COLOR, 160, 620);
-  scene.add(new THREE.HemisphereLight("#ffd9a8", "#4a3b2a", 1.4));
+  const ambient = new THREE.HemisphereLight("#ffd9a8", "#4a3b2a", 1.4);
+  scene.add(ambient);
   const sun = new THREE.DirectionalLight("#ffb36b", 2.4);
   sun.position.copy(SUN_DIRECTION).multiplyScalar(200);
   scene.add(sun, sun.target);
@@ -1127,8 +825,9 @@ export function buildScenery(scene: THREE.Scene) {
   buildLamps(scene);
   buildBillboards(scene);
   buildTrees(scene);
+  buildStatues(scene);
   buildFlags(scene);
   buildProps(scene);
   scene.add(buildTrackMesh(RACES.autodromo.track, { asphalt: true }));
-  return { sky, sun: sunSprite, light: sun, clouds };
+  return { sky, sun: sunSprite, light: sun, clouds, ambient };
 }

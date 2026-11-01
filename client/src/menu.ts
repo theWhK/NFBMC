@@ -183,12 +183,15 @@ export function createMenu(options: MenuOptions) {
   const optQuality = document.getElementById("opt-quality") as HTMLButtonElement;
   const QUALITY_KEY = "nfbmc:quality";
   const qualityOrder = ["", "alto", "medio", "baixo"];
-  const qualityLabel = (choice: string) => ({
-    "": `automático (${scene?.quality === "medio" ? "médio" : scene?.quality ?? "baixo"})`,
-    alto: "alto (contorno + sombras)",
-    medio: "médio (contorno)",
-    baixo: "baixo (mais leve)",
-  } as Record<string, string>)[choice] ?? "automático";
+  const qualityLabel = (choice: string) => {
+    const comic = scene?.look === "quadrinho";
+    return ({
+      "": `automático (${scene?.quality === "medio" ? "médio" : scene?.quality ?? "baixo"})`,
+      alto: comic ? "alto (contorno + sombras)" : "alto (sombras, oclusão e brilho)",
+      medio: comic ? "médio (contorno)" : "médio (reflexos, sem sombras)",
+      baixo: "baixo (mais leve)",
+    } as Record<string, string>)[choice] ?? "automático";
+  };
   let currentQuality = storage.get(QUALITY_KEY);
   if (!qualityOrder.includes(currentQuality)) currentQuality = "";
   const refreshQuality = () => (optQuality.textContent = `Gráficos: ${qualityLabel(currentQuality)}`);
@@ -197,6 +200,19 @@ export function createMenu(options: MenuOptions) {
     currentQuality = qualityOrder[(qualityOrder.indexOf(currentQuality) + 1) % qualityOrder.length];
     storage.set(QUALITY_KEY, currentQuality);
     scene?.setQuality(currentQuality);
+    refreshQuality();
+  });
+  // Visual: realista (materiais físicos, reflexos) ou quadrinho (cel-shading com contorno, o antigo).
+  const optLook = document.getElementById("opt-look") as HTMLButtonElement;
+  const LOOK_KEY = "nfbmc:look";
+  let currentLook = storage.get(LOOK_KEY) === "quadrinho" ? "quadrinho" : "realista";
+  const refreshLook = () => (optLook.textContent = `Visual: ${currentLook === "quadrinho" ? "quadrinho (cel-shading)" : "realista"}`);
+  refreshLook();
+  optLook.addEventListener("click", () => {
+    currentLook = currentLook === "quadrinho" ? "realista" : "quadrinho";
+    storage.set(LOOK_KEY, currentLook);
+    scene?.setLook(currentLook);
+    refreshLook();
     refreshQuality();
   });
   // Jukebox: a tela para ouvir a trilha (client/src/jukebox.ts), item do menu principal.
