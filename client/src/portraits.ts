@@ -1,12 +1,21 @@
 // "Fotos do combo" da Lista Gorda: cada rival de braços cruzados na frente do
 // carro dele, no pôr do sol de Porto Gordo, renderizado uma vez em 3D (com o
-// mesmo cel-shading do jogo) e guardado como imagem. Sem WebGL, devolve null
+// mesmo visual do jogo, realista ou quadrinho) e guardado como imagem. Sem WebGL, devolve null
 // e a tela usa a arte de emoji do roteiro.
 import * as THREE from "three";
 
 import { lookOf, makeFigure } from "./figures.ts";
 import { makeCar } from "./models.ts";
-import { toonify } from "./toon.ts";
+import { applyLook, type Look } from "./look.ts";
+
+/** O visual escolhido nas Opções (o mesmo da cena). */
+function currentLook(): Look {
+  try {
+    return localStorage.getItem("nfbmc:look") === "quadrinho" ? "quadrinho" : "realista";
+  } catch {
+    return "realista";
+  }
+}
 
 const WIDTH = 640;
 const HEIGHT = 400;
@@ -48,7 +57,7 @@ function skyTexture() {
 }
 
 /** Foto já pronta (ou undefined). */
-export const cachedPortrait = (key: string) => cache.get(key);
+export const cachedPortrait = (key: string) => cache.get(`${currentLook()}|${key}`);
 
 /**
  * Foto do rival sem travar a tela: renderiza logo depois do próximo quadro e
@@ -63,10 +72,13 @@ export function portraitLater(key: string, name: string, car: string, color: str
  * Devolve null sem WebGL.
  */
 export function rivalPortrait(key: string, name: string, car: string, color: string): string | null {
+  const look = currentLook();
+  key = `${look}|${key}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const r = getRenderer();
   if (!r) return null;
+  r.toneMapping = look === "realista" ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
 
   const scene = new THREE.Scene();
   scene.background = skyTexture();
@@ -102,7 +114,17 @@ export function rivalPortrait(key: string, name: string, car: string, color: str
   figure.group.rotation.y = 0.35;
   figure.update(0.1, { crossed: true });
   scene.add(figure.group);
-  toonify(scene);
+  applyLook(scene, look);
+  let pmrem: THREE.PMREMGenerator | null = null;
+  if (look === "realista") {
+    // Reflexo do céu da foto na pintura e nos vidros.
+    pmrem = new THREE.PMREMGenerator(r);
+    const sky = (scene.background as THREE.Texture).clone();
+    sky.mapping = THREE.EquirectangularReflectionMapping;
+    scene.environment = pmrem.fromEquirectangular(sky).texture;
+    sky.dispose();
+    scene.environmentIntensity = 0.7;
+  }
 
   // Câmera baixa (de baixo para cima, como pôster de filme).
   const camera = new THREE.PerspectiveCamera(32, WIDTH / HEIGHT, 0.1, 200);
@@ -112,6 +134,8 @@ export function rivalPortrait(key: string, name: string, car: string, color: str
   r.render(scene, camera);
   const url = r.domElement.toDataURL("image/jpeg", 0.86);
   cache.set(key, url);
+  scene.environment?.dispose();
+  pmrem?.dispose();
 
   // Libera a memória da cena (o renderizador fica para as próximas fotos).
   scene.traverse((object) => {

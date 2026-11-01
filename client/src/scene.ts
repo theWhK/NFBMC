@@ -21,8 +21,11 @@ import {
 import { Effects } from "./effects.ts";
 import { forgetFlags, waveFlags } from "./flag.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
+import { LOD_CHUNKS } from "./chunks.ts";
+import { applyLook, type Look } from "./look.ts";
+import { RealPass, skyEnvironment } from "./realism.ts";
 import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture } from "./scenery.ts";
-import { InkPass, toonify, type Quality } from "./toon.ts";
+import { InkPass, type Quality } from "./toon.ts";
 import { animateBarriers, buildBarriers, buildGpsRibbon, buildTrackMesh, gpsDrawFrom } from "./track-mesh.ts";
 
 /** O que a cena precisa saber de cada carro (vem do estado da sala). */
@@ -184,7 +187,25 @@ function chooseQuality(renderer: THREE.WebGLRenderer, choice?: string): Quality 
   return window.matchMedia?.("(pointer: coarse)").matches ? "medio" : "alto";
 }
 
-/** Câmeras de perseguição: distância atrás (negativa = na frente do centro, no capô), alturas e se o carro aparece. */
+/** Visual escolhido nas Opções (padrão: realista). */
+function chooseLook(choice?: string): Look {
+  let saved: string | null = choice ?? null;
+  if (choice === undefined) {
+    try {
+      saved = localStorage.getItem("nfbmc:look");
+    } catch {
+      // Sem localStorage: o padrão.
+    }
+  }
+  return saved === "quadrinho" ? "quadrinho" : "realista";
+}
+
+/**
+ * Até onde (m) os blocos da cidade aparecem com todos os detalhes (casas com
+ * janelas, telhas, sinalização miúda); além disso, a versão simples.
+ */
+const DETAIL_RANGE: Record<Quality, number> = { alto: 340, medio: 190, baixo: 0 };
+
 /**
  * Câmeras (tecla C). `back` negativo = presa ao carro; `seat` = deslocada para
  * o lado do motorista (esquerda), dentro do carro, com o painel e o volante.
@@ -277,9 +298,17 @@ export class GameScene {
   private gpsRoute: THREE.Mesh | null = null;
   private markers: THREE.Group;
   private light: THREE.DirectionalLight;
+  private ambient: THREE.HemisphereLight;
+  private skyMaterial: THREE.Material;
   private clouds: THREE.Object3D;
   quality: Quality;
+  /** Visual: realista (materiais físicos) ou quadrinho (cel-shading com contorno). */
+  look: Look;
   private ink: InkPass | null = null;
+  /** Pós-processamento do realista na qualidade alta (oclusão e brilho). */
+  private real: RealPass | null = null;
+  /** Reflexo do céu (gerado uma vez, na primeira vez que o realista liga). */
+  private environment: THREE.Texture | null = null;
   private sunDirection = SUN_DIRECTION;
   /** Carro de vitrine do menu (girando na reta do autódromo). */
   private showcase: { model: CarModel; key: string } | null = null;
@@ -321,8 +350,10 @@ export class GameScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
 
-    const { sky, sun, light, clouds } = buildScenery(this.scene);
+    const { sky, sun, light, clouds, ambient } = buildScenery(this.scene);
     this.clouds = clouds;
+    this.ambient = ambient;
+    this.skyMaterial = sky.material as THREE.Material;
     this.sky = sky;
     this.sun = sun;
     this.light = light;
@@ -332,13 +363,10 @@ export class GameScene {
     this.markers.visible = false;
     this.scene.add(this.markers);
 
-    // Visual de quadrinho: cel-shading sempre; contorno de tinta e sombras conforme a qualidade.
     this.quality = chooseQuality(this.renderer);
-    toonify(this.scene);
+    this.look = chooseLook();
     this.scene.add(this.cockpit.group);
-    this.dress(this.cockpit.group);
-    if (this.quality !== "baixo") this.ink = new InkPass(this.renderer);
-    if (this.quality === "alto") this.enableShadows();
+    this.configure();
 
     try {
       this.cameraMode = Math.min(CAMERAS.length - 1, Number(localStorage.getItem("nfbmc:camera")) || 0);
@@ -359,12 +387,50 @@ export class GameScene {
     const next = chooseQuality(this.renderer, choice);
     if (next === this.quality) return next;
     this.quality = next;
-    if (next === "baixo") this.ink = null;
-    else if (!this.ink) {
-      this.ink = new InkPass(this.renderer);
-      this.resize();
+    this.configure();
+    return next;
+  }
+
+  /** Troca o visual na hora (Opções): realista ou quadrinho. `choice` vazio = o padrão. */
+  setLook(choice: string) {
+    const next = chooseLook(choice);
+    if (next === this.look) return next;
+    this.look = next;
+    this.configure();
+    return next;
+  }
+
+  /** Realista na qualidade baixa: fica no material mais leve (Lambert), sem reflexo. */
+  private get simple() {
+    return this.look === "realista" && this.quality === "baixo";
+  }
+
+  /**
+   * Monta tudo que depende do visual e da qualidade: materiais, contorno de
+   * tinta (quadrinho), reflexo do céu e pós-processamento (realista), sombras.
+   */
+  private configure() {
+    const real = this.look === "realista";
+    const rich = real && !this.simple;
+    if (!real && this.quality !== "baixo") this.ink ??= new InkPass(this.renderer);
+    else this.ink = null;
+    if (real && this.quality === "alto") this.real ??= new RealPass(this.renderer, this.scene, this.camera);
+    else {
+      this.real?.dispose();
+      this.real = null;
     }
-    if (next === "alto") this.enableShadows();
+    if (rich) this.environment ??= skyEnvironment(this.renderer, this.skyMaterial, "#4a4032");
+    this.scene.environment = rich ? this.environment : null;
+    this.scene.environmentIntensity = 0.55;
+    // Com o reflexo do céu iluminando tudo, a luz ambiente diminui (senão tudo fica lavado).
+    this.ambient.intensity = rich ? 0.75 : 1.4;
+    this.light.intensity = rich ? 2.8 : 2.4;
+    for (const cloud of this.clouds.children) {
+      const textures = cloud.userData.textures as Record<Look, THREE.Texture> | undefined;
+      if (textures) (cloud as THREE.Sprite).material.map = textures[this.look];
+    }
+    applyLook(this.scene, this.look, this.simple);
+    if (this.quality === "alto") this.enableShadows();
     else {
       this.renderer.shadowMap.enabled = false;
       this.light.castShadow = false;
@@ -375,44 +441,54 @@ export class GameScene {
       if (!mesh.isMesh) return;
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) material.needsUpdate = true;
     });
-    return next;
+    this.resize();
   }
 
   private enableShadows() {
+    const real = this.look === "realista";
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.light.castShadow = true;
-    this.light.shadow.mapSize.set(2048, 2048);
+    // No realista, mapa maior e borda macia (o raio espalha a borda da sombra).
+    const size = real ? 4096 : 2048;
+    if (this.light.shadow.mapSize.x !== size) {
+      this.light.shadow.mapSize.set(size, size);
+      this.light.shadow.map?.dispose();
+      this.light.shadow.map = null;
+    }
+    this.light.shadow.radius = real ? 3 : 1;
     const area = this.light.shadow.camera;
-    area.left = area.bottom = -90;
-    area.right = area.top = 90;
+    area.left = area.bottom = real ? -120 : -90;
+    area.right = area.top = real ? 120 : 90;
     area.near = 10;
-    area.far = 500;
-    this.light.shadow.bias = -0.0008;
+    area.far = 600;
+    area.updateProjectionMatrix();
+    this.light.shadow.bias = -0.0006;
     this.light.shadow.normalBias = 0.04;
-    this.scene.traverse((object) => {
-      const mesh = object as THREE.Mesh;
-      if (!mesh.isMesh || !(mesh.material instanceof THREE.MeshToonMaterial)) return;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-    });
+    this.scene.traverse((object) => this.shadowsOn(object));
+  }
+
+  /** Liga as sombras de uma malha (as luzes e o que é transparente não fazem sombra). */
+  private shadowsOn(object: THREE.Object3D) {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || object.userData.noShadow) return;
+    const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material;
+    if (material instanceof THREE.MeshBasicMaterial || material instanceof THREE.ShaderMaterial || material.transparent) return;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
   }
 
   /** Objeto novo na cena (carro, comida): mesmo visual do resto. */
   private dress(object: THREE.Object3D) {
-    toonify(object);
-    if (this.quality === "alto") {
-      object.traverse((o) => {
-        const mesh = o as THREE.Mesh;
-        if (mesh.isMesh && mesh.material instanceof THREE.MeshToonMaterial) mesh.castShadow = mesh.receiveShadow = true;
-      });
-    }
+    applyLook(object, this.look, this.simple);
+    if (this.quality === "alto") object.traverse((o) => this.shadowsOn(o));
   }
 
   private resize() {
     const { innerWidth: w, innerHeight: h } = window;
     this.renderer.setSize(w, h);
     this.ink?.setSize(w, h, this.pixelRatio);
+    this.real?.setSize(w, h, this.pixelRatio);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -425,7 +501,9 @@ export class GameScene {
     this.fpsFrames = 0;
     this.fpsTime = 0;
     // Aba em segundo plano não conta (o navegador pausa os quadros).
-    if (fps < 38 && fps > 3 && this.pixelRatio > 0.5) {
+    // Primeiro sai a oclusão de ambiente (a parte mais pesada); só depois a resolução cai.
+    if (fps < 38 && fps > 3 && this.real?.occlusion) this.real.occlusion = false;
+    else if (fps < 38 && fps > 3 && this.pixelRatio > 0.5) {
       this.pixelRatio = Math.max(0.5, this.pixelRatio * 0.75);
       this.renderer.setPixelRatio(this.pixelRatio);
       this.resize();
@@ -606,6 +684,34 @@ export class GameScene {
     for (const chunk of CHUNKS) {
       const [cx, cz] = chunk.userData.center as [number, number];
       chunk.visible = Math.hypot(cx - x, cz - z) - (chunk.userData.radius as number) < far;
+    }
+    // Blocos com nível de detalhe: perto, a versão detalhada (montada na primeira
+    // vez, no máximo uma por quadro, a mais perto primeiro); longe, a simples. A
+    // detalhada de um bloco que ficou bem longe é descartada (memória).
+    const range = DETAIL_RANGE[this.quality];
+    let pending: (typeof LOD_CHUNKS)[number] | null = null;
+    let pendingDistance = Infinity;
+    for (const chunk of LOD_CHUNKS) {
+      const distance = Math.hypot(chunk.center[0] - x, chunk.center[1] - z) - chunk.radius;
+      chunk.group.visible = distance < far;
+      const wantNear = distance < range;
+      if (wantNear && !chunk.near && distance < pendingDistance) {
+        pending = chunk;
+        pendingDistance = distance;
+      }
+      if (chunk.near && distance > range + 260) {
+        chunk.group.remove(chunk.near);
+        chunk.near.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+        chunk.near = null;
+      }
+      if (chunk.near) chunk.near.visible = wantNear;
+      if (chunk.far) chunk.far.visible = !(wantNear && chunk.near);
+    }
+    if (pending) {
+      pending.near = pending.build();
+      this.dress(pending.near);
+      pending.group.add(pending.near);
+      if (pending.far) pending.far.visible = false;
     }
   }
 
@@ -800,7 +906,8 @@ export class GameScene {
       this.light.target.position.copy(this.cameraTarget).setY(0);
       this.light.position.copy(this.light.target.position).addScaledVector(this.sunDirection, 250);
     }
-    if (this.ink) this.ink.render(this.scene, this.camera);
+    if (this.real) this.real.render();
+    else if (this.ink) this.ink.render(this.scene, this.camera);
     else this.renderer.render(this.scene, this.camera);
     return followed ? { skid: followed.skid, offroad: followed.offroad } : null;
   }

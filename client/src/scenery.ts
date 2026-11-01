@@ -236,8 +236,37 @@ function buildClouds() {
     texture.colorSpace = THREE.SRGBColorSpace;
     return texture;
   };
+  /** Nuvem do visual realista: tufos macios, sem contorno, com a barriga alaranjada e a borda iluminada. */
+  const makeSoftTexture = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    for (let k = 0; k < 70; k++) {
+      const x = 70 + random() * 370;
+      const y = 95 + random() * 90 - Math.sin(((x - 70) / 370) * Math.PI) * 35;
+      const r = 18 + random() * 46;
+      const g = ctx.createRadialGradient(x, y - r * 0.3, 0, x, y, r);
+      const lit = 0.35 + (1 - y / 256) * 0.4;
+      g.addColorStop(0, `rgba(255, ${Math.round(226 + lit * 20)}, ${Math.round(196 + lit * 40)}, ${0.16 + random() * 0.12})`);
+      g.addColorStop(1, "rgba(255, 200, 160, 0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    ctx.globalCompositeOperation = "source-atop";
+    const belly = ctx.createLinearGradient(0, 80, 0, 220);
+    belly.addColorStop(0, "rgba(255, 236, 214, 0)");
+    belly.addColorStop(1, "rgba(214, 112, 76, 0.75)");
+    ctx.fillStyle = belly;
+    ctx.fillRect(0, 0, 512, 256);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  };
   for (let i = 0; i < 9; i++) {
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeTexture(), fog: false, depthWrite: false }));
+    const textures = { quadrinho: makeTexture(), realista: makeSoftTexture() };
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: textures.quadrinho, fog: false, depthWrite: false }));
+    sprite.userData.textures = textures;
     const angle = (i / 9) * Math.PI * 2 + random();
     const radius = 650 + random() * 300;
     sprite.position.set(Math.cos(angle) * radius, 170 + random() * 110, Math.sin(angle) * radius);
@@ -721,7 +750,8 @@ function buildProps(scene: THREE.Scene) {
 export function buildScenery(scene: THREE.Scene) {
   scene.background = new THREE.Color(FOG_COLOR);
   scene.fog = new THREE.Fog(FOG_COLOR, 160, 620);
-  scene.add(new THREE.HemisphereLight("#ffd9a8", "#4a3b2a", 1.4));
+  const ambient = new THREE.HemisphereLight("#ffd9a8", "#4a3b2a", 1.4);
+  scene.add(ambient);
   const sun = new THREE.DirectionalLight("#ffb36b", 2.4);
   sun.position.copy(SUN_DIRECTION).multiplyScalar(200);
   scene.add(sun, sun.target);
@@ -748,5 +778,5 @@ export function buildScenery(scene: THREE.Scene) {
   buildFlags(scene);
   buildProps(scene);
   scene.add(buildTrackMesh(RACES.autodromo.track, { asphalt: true }));
-  return { sky, sun: sunSprite, light: sun, clouds };
+  return { sky, sun: sunSprite, light: sun, clouds, ambient };
 }
