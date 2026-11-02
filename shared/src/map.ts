@@ -279,7 +279,7 @@ export const NODES: Record<string, Point> = {
 
   // --- Serra do Açúcar ---
   SA: [0, 1820], SB: [-380, 1900], SC: [-760, 2030], SD: [-460, 2260], SE: [360, 1940], SF: [170, 2260], SG: [-1100, 1820],
-  SZ1: [-900, 2200], SZ2: [-1060, 2330], SZ3: [-1220, 2420],
+  SZ1: [-900, 2200], SZ2: [-1100, 2300], SZ3: [-1440, 2440],
   // Túnel do Açúcar (a Estrada da Serra atravessa o Pico do Açúcar)
   TS0: [-120, 2080], TS1: [-330, 2600], HNm: [-330, 2708],
 
@@ -441,7 +441,7 @@ export const EDGES: EdgeSpec[] = ([
   { a: "HN4", b: "HE4", kind: "rodovia", curve: [2120, 2620] },
   bent("HE4", "HE3", "rodovia", -0.04), bent("HE3", "AEE", "rodovia", 0.03), bent("AEE", "HE2", "rodovia", -0.03), bent("HE2", "HE1", "rodovia", 0.04),
   // Viaduto da Cebola: o Rodoanel desce em diagonal por cima do Distrito até o mar
-  { a: "HE1", b: "PE3", kind: "rodovia", curve: [2080, -300], structure: "viaduto", name: "Viaduto da Cebola", lift: 8.5, ramp: 170 },
+  { a: "HE1", b: "PE2", kind: "rodovia", curve: [2010, -230], structure: "viaduto", name: "Viaduto da Cebola", lift: 8.5, ramp: 160 },
 
   // ======================= Morro do Torresmo =======================
   bent("PR3", "MB0", "rua", 0.1), bent("MB0", "ME", "rua", -0.15), bent("ME", "MI", "rua", 0.12), bent("MI", "MM", "rua", -0.12),

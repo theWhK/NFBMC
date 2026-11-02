@@ -40,4 +40,6 @@ export interface PlayerSnapshot {
   /** Cilindro de nitro (0 a 1) e se está ligado agora. */
   nitro: number;
   boost: boolean;
+  /** Nível: -1 = chão; senão a ponte, viaduto ou túnel (índice em STRUCTURES). */
+  level: number;
 }

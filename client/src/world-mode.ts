@@ -398,7 +398,7 @@ export class WorldMode {
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
         name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: false, x: p.x, z: p.z, speed: p.speed, racing: false,
-        lap: 0, place: 0, calories: p.calories, finished: false, nitro: p.nitro, boost: p.boost > 0,
+        lap: 0, place: 0, calories: p.calories, finished: false, nitro: p.nitro, boost: p.boost > 0, level: p.level,
       };
     });
     return result;

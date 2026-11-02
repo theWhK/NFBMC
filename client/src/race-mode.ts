@@ -359,7 +359,7 @@ export class RaceMode {
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
         name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: p.bot, x: p.x, z: p.z, speed: p.speed, racing: p.racing,
-        lap: p.lap, place: p.place, calories: p.calories, finished: p.finished, nitro: p.nitro, boost: p.boost > 0,
+        lap: p.lap, place: p.place, calories: p.calories, finished: p.finished, nitro: p.nitro, boost: p.boost > 0, level: p.level,
       };
     });
     return result;

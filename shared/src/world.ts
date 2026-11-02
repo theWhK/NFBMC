@@ -1521,7 +1521,7 @@ const PORTO_ROUTE = ["P2", "P3", "P4", "R1", "SE1", "RT2", "RT3", "C1"];
 const YAKISOBA_ROUTE = ["O0", "O1", "O2", "O3", "O4", "O5", "O6", "O7", "O8", "O9", "O10", "O11"];
 const RODOANEL_ROUTE = [
   "HW1", "HW2", "HW3", "HW4", "HN0", "HN1", "HNm", "HN2", "HN3", "HN4", "HE4", "HE3", "AEE", "HE2", "HE1",
-  "PE3", "PE2", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "BM4", "BM3", "BM2", "BM1", "BM0",
+  "PE2", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "BM4", "BM3", "BM2", "BM1", "BM0",
 ];
 
 export const RACES = {
@@ -1550,7 +1550,7 @@ export const RACES = {
   // Por dentro do morro e de volta pelas ladeiras.
   "tunel-torresmo": { id: "tunel-torresmo", name: "Túnel do Torresmo", laps: 2, track: routeTrack(["TT0", "TT1", "MJ", "MI", "ME", "MB0", "MA"], 18) },
   // O Rodoanel por cima do Distrito e de volta pela Avenida da Gordura.
-  cebola: { id: "cebola", name: "Viaduto da Cebola", laps: 2, track: routeTrack(["HE1", "PE3", "PE2", "I30", "I31", "I41"], 22) },
+  cebola: { id: "cebola", name: "Viaduto da Cebola", laps: 2, track: routeTrack(["HE1", "PE2", "I30", "I31", "I41"], 22) },
   // A Estrada da Serra por dentro do Pico do Açúcar, um pedaço do Rodoanel e a volta pela serra.
   acucar: { id: "acucar", name: "Túnel do Açúcar", laps: 2, track: routeTrack(["SA", "TS0", "TS1", "HNm", "HN2", "SF", "SE"], 18) },
   // Curtinha: atravessa o lago pela ponte e dá a volta pela alameda.
