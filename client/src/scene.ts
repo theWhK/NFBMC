@@ -21,6 +21,7 @@ import {
 
 import { Effects } from "./effects.ts";
 import { forgetFlags, waveFlags } from "./flag.ts";
+import { animateHarbor } from "./harbor.ts";
 import { makeCar, makeFood, type CarModel } from "./models.ts";
 import { LOD_CHUNKS } from "./chunks.ts";
 import { applyLook, surface, type Look } from "./look.ts";
@@ -969,6 +970,7 @@ export class GameScene {
     }
     this.effects.update(dt);
     waveFlags(this.time);
+    animateHarbor(this.time);
     // A água corre devagar (o relevo das ondas desliza).
     waterNormal.offset.set(this.time * 0.004, this.time * 0.011);
 

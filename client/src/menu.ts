@@ -55,6 +55,15 @@ const HEADLINES = [
   "McGordo's e Burger Kilo brigam pelo título de maior lanche da cidade; Subgordo diz que é salada",
   "Outbacon lança cebola explosiva tamanho família; bombeiros de prontidão",
   "Oficinas de Porto Gordo relatam fila para instalar nitro: \"é para levar marmita mais rápido\"",
+  "Scuderia Farofa promete carro novo; torcida pede só que não caia farelo no câmbio",
+  "Merendes-AMG confirma: a sigla quer dizer Almoço Muito Gorduroso",
+  "Red Pão te dá fome: equipe distribui pão na chapa na arquibancada do Autódromo do Colesterol",
+  "McLasanha e Williames disputam o box mais cheiroso do paddock",
+  "Subarroz 555 vence o rali da Serra do Açúcar; feijão vem em segundo, como sempre",
+  "Lanchia Delta volta com as listras da Martíni de Coco; fãs choram",
+  "Navio \"Batata Frita Express\" atraca no cais com 300 contêineres da Mãersk Marmitas",
+  "Guindastes Ketchup & Mostarda batem recorde: 40 marmitas por hora",
+  "Rebocador Torresmo resgata o \"Maionese Princess\" encalhado num banco de creme",
 ];
 
 export function createMenu(options: MenuOptions) {

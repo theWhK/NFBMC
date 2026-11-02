@@ -9,6 +9,7 @@ export * from "./story.ts";
 export * from "./world.ts";
 export * from "./barriers.ts";
 export * from "./tuning.ts";
+export * from "./props.ts";
 
 import type { Tune } from "./tuning.ts";
 

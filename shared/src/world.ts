@@ -357,7 +357,17 @@ function autodromoClearance(x: number, z: number) {
 
 /** O carro está numa rua ou na pista do autódromo? Fora disso é calçada/grama (mais lento). */
 export function isOnRoad(x: number, z: number) {
-  return roadClearance(x, z) <= 1 || autodromoClearance(x, z) <= 1 || onApron(x, z);
+  return roadClearance(x, z) <= 1 || autodromoClearance(x, z) <= 1 || onApron(x, z) || onPaved(x, z);
+}
+
+/** Chão asfaltado que vem de outros arquivos (a pista dos boxes do autódromo, em props.ts). */
+const paved: Box[] = [];
+const onPaved = (x: number, z: number) =>
+  paved.some((b) => Math.abs(b.x - x) < b.w + b.d && Math.abs(b.z - z) < b.w + b.d && insideBox(b, x, z, 0.5));
+
+/** Soma chão asfaltado (conta como rua no `isOnRoad`). Chamar ao carregar o módulo, igual no servidor e no cliente. */
+export function addPaved(boxes: Box[]) {
+  paved.push(...boxes);
 }
 
 const insideLake = (x: number, z: number, margin = 0) =>
@@ -573,7 +583,7 @@ export const LANDMARK_NAMES: Record<LandmarkKind, string> = {
   outbacon: "Outbacon Steakhouse",
 };
 
-type Box = { x: number; z: number; w: number; d: number; angle: number };
+export type Box = { x: number; z: number; w: number; d: number; angle: number };
 
 export interface Landmark extends Box {
   id: string;
@@ -849,10 +859,39 @@ for (const tree of TREES) {
   else treeGrid.set(key, [tree]);
 }
 
+/**
+ * Tira as árvores de dentro das caixas (com folga), para outros arquivos
+ * abrirem espaço (a área dos boxes do autódromo, em props.ts). Chamar ao
+ * carregar o módulo, antes de o cliente desenhar as árvores.
+ */
+export function clearTrees(boxes: Box[], margin = 2) {
+  const doomed = new Set(TREES.filter((t) => boxes.some((b) => insideBox(b, t.x, t.z, margin + 0.7 * t.size))));
+  if (!doomed.size) return;
+  const kept = TREES.filter((t) => !doomed.has(t));
+  TREES.length = 0;
+  TREES.push(...kept);
+  for (const [key, list] of treeGrid) treeGrid.set(key, list.filter((t) => !doomed.has(t)));
+}
+
 function nearbyBuildings(x: number, z: number) {
   const out: Building[] = [];
   for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) out.push(...(city.buildingGrid.get(cellKey(x + i * CELL, z + j * CELL)) ?? []));
   return out;
+}
+
+/**
+ * Caixas sólidas que vêm de outros arquivos (arquibancadas, caminhões das
+ * equipes, pés dos guindastes do cais: shared/src/props.ts). Entram na colisão
+ * e na linha de visão, mas não no desenho dos prédios (BUILDINGS).
+ */
+export function addObstacles(boxes: (Box & { height: number })[]) {
+  for (const box of boxes) {
+    const b: Building = { ...box, kind: "landmark", tint: 0, front: 1 };
+    const key = cellKey(b.x, b.z);
+    const list = city.buildingGrid.get(key);
+    if (list) list.push(b);
+    else city.buildingGrid.set(key, [b]);
+  }
 }
 
 /** O ponto está dentro de algum prédio? (Usado para ver se há linha de visão.) */
