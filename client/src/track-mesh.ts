@@ -4,7 +4,10 @@
 import * as THREE from "three";
 
 import { makeFlag } from "./flag.ts";
-import { heightAt, trackCorridor, type Track } from "@nfbmc/shared";
+import { GROUND, pathLevels, surfaceY, trackCorridor, type Track } from "@nfbmc/shared";
+
+/** Altura da superfície numa amostra do traçado (em cima da ponte, no tabuleiro). */
+const trackY = (track: Track, i: number, x: number, z: number) => surfaceY(x, z, track.levels?.[i % track.samples.length] ?? GROUND);
 
 /** Faixa ao longo da pista, entre `inner` e `outer` metros do centro (negativo = lado direito). */
 function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?: (i: number) => THREE.Color) {
@@ -20,7 +23,7 @@ function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?:
     const iz = s.z - s.tx * inner;
     const ox = s.x + s.tz * outer;
     const oz = s.z - s.tx * outer;
-    positions.push(ix, heightAt(ix, iz) + y, iz, ox, heightAt(ox, oz) + y, oz);
+    positions.push(ix, trackY(track, i, ix, iz) + y, iz, ox, trackY(track, i, ox, oz) + y, oz);
     if (colorAt) {
       const c = colorAt(i);
       colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
@@ -85,7 +88,7 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
   // Com o plano deitado, o eixo X dele vira (cos, 0, -sin) do ângulo: igual ao pórtico, atravessando a pista.
   line.rotation.z = heading;
   // Um pouco mais alta: na ladeira, o meio da linha não pode afundar no asfalto.
-  line.position.set(start.x, heightAt(start.x, start.z) + 0.25, start.z);
+  line.position.set(start.x, trackY(track, 0, start.x, start.z) + 0.25, start.z);
   group.add(line);
 
   // Pórtico de largada: duas colunas e uma faixa em cima.
@@ -103,7 +106,7 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
     gate.add(flag);
   }
   gate.rotation.y = heading;
-  gate.position.set(start.x, heightAt(start.x, start.z), start.z);
+  gate.position.set(start.x, trackY(track, 0, start.x, start.z), start.z);
   group.add(gate);
 
   return group;
@@ -166,7 +169,7 @@ export function buildBarriers(track: Track) {
       const offset = (panel.side > 0 ? corridor.left[k % n] : corridor.right[k % n]) - 0.3;
       const x = s.x + s.tz * offset * panel.side;
       const z = s.z - s.tx * offset * panel.side;
-      const y = heightAt(x, z);
+      const y = trackY(track, k, x, z);
       const u = ((k - panel.from) * spacing) / 4;
       positions.push(x, y + 0.05, z, x, y + BARRIER_HEIGHT, z);
       uvs.push(u, 0, u, 1);
@@ -223,7 +226,9 @@ function gpsTexture() {
  * pontos da rota são 6 índices, então dá para esconder o que já passou com o
  * `drawRange` (`gpsDrawFrom`).
  */
-export function buildGpsRibbon(route: [number, number][]) {
+export function buildGpsRibbon(route: [number, number][], startLevel = GROUND) {
+  // Nível de cada ponto (a rota passa por cima das pontes e por dentro dos túneis).
+  const levels = pathLevels(route.map(([x, z]) => ({ x, z })), false, startLevel);
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -240,7 +245,7 @@ export function buildGpsRibbon(route: [number, number][]) {
     for (const side of [1, -1]) {
       const px = x + nx * half * side;
       const pz = z + nz * half * side;
-      positions.push(px, heightAt(px, pz) + 0.22, pz);
+      positions.push(px, surfaceY(px, pz, levels[i]) + 0.22, pz);
       uvs.push(u, side > 0 ? 1 : 0);
     }
     if (i < route.length - 1) {

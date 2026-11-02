@@ -197,19 +197,19 @@ export class WorldMode {
     const alone = !!room.state.solo;
     room.state.players?.forEach((p, id) => {
       const name = alone && id === room.sessionId ? "" : p.name;
-      cars.set(id, { name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible: true });
+      cars.set(id, { name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible: true, level: p.level });
     });
     room.state.traffic?.forEach((n, id) => {
       cars.set(`npc:${id}`, {
         name: "", color: n.color, x: n.x, z: n.z, heading: n.heading,
-        speed: n.speed, boost: 0, visible: true, traffic: n.kind as TrafficKind,
+        speed: n.speed, boost: 0, visible: true, traffic: n.kind as TrafficKind, level: n.level,
       });
     });
     room.state.cops?.forEach((c, id) => {
       const crossfit = c.car === CROSSFIT_CAR;
       cars.set(`cop:${id}`, {
         name: crossfit ? "🏋️ Sgt. Cross-fit" : "🚨 Vigilância", color: crossfit ? "#9be22d" : "#f4f4f0", x: c.x, z: c.z, heading: c.heading,
-        speed: c.speed, boost: c.boost, visible: true, cop: true, car: c.car,
+        speed: c.speed, boost: c.boost, visible: true, cop: true, car: c.car, level: c.level,
       });
     });
     const me = room.state.players?.get(room.sessionId);

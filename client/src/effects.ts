@@ -1,6 +1,6 @@
 // Efeitos visuais baratos: fumaça/poeira, faíscas e marcas de pneu no asfalto.
 import * as THREE from "three";
-import { gradeAt, heightAt } from "@nfbmc/shared";
+import { GROUND, gradeAt, heightAt, surfaceGrade, surfaceY } from "@nfbmc/shared";
 
 function softDot() {
   const canvas = document.createElement("canvas");
@@ -118,7 +118,8 @@ export class Effects {
   }
 
   /** Rastros das rodas traseiras. `amount` de 0 a 1 controla a fumaça. */
-  wheelTrail(x: number, z: number, heading: number, amount: number, offroad: boolean) {
+  /** `level`: nível do carro (em cima da ponte, a marca fica no tabuleiro). */
+  wheelTrail(x: number, z: number, heading: number, amount: number, offroad: boolean, level = GROUND) {
     const fx = Math.sin(heading);
     const fz = Math.cos(heading);
     for (const side of [-1, 1]) {
@@ -127,14 +128,14 @@ export class Effects {
       const wz = z - fz * 1.3 - fx * side * 1.1;
       if (!offroad) {
         // Deitada no chão, inclinada junto com a ladeira.
-        this.quat.setFromEuler(new THREE.Euler(-Math.atan(gradeAt(wx, wz, heading)), heading, 0, "YXZ"));
-        this.matrix.compose(new THREE.Vector3(wx, heightAt(wx, wz) + 0.16, wz), this.quat, new THREE.Vector3(1, 1, 1));
+        this.quat.setFromEuler(new THREE.Euler(-Math.atan(surfaceGrade(wx, wz, heading, level, () => gradeAt(wx, wz, heading))), heading, 0, "YXZ"));
+        this.matrix.compose(new THREE.Vector3(wx, surfaceY(wx, wz, level) + 0.16, wz), this.quat, new THREE.Vector3(1, 1, 1));
         this.skids.setMatrixAt(this.nextSkid, this.matrix);
         this.nextSkid = (this.nextSkid + 1) % MAX_SKIDS;
       }
       if (Math.random() < amount) {
         this.smoke.emit(
-          wx, heightAt(wx, wz) + 0.4, wz,
+          wx, surfaceY(wx, wz, level) + 0.4, wz,
           (Math.random() - 0.5) * 2, 0.8 + Math.random(), (Math.random() - 0.5) * 2,
           0.8 + Math.random() * 0.6, offroad ? DUST : SMOKE,
         );

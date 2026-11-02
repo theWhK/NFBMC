@@ -414,13 +414,14 @@ export function collideLevel(car: CarState, level: number, halfLength: number, h
 }
 
 /**
- * Nível em cada amostra de um traçado (corrida), andando por ele como um carro
- * (duas voltas, para o começo já sair certo). `closed`: o traçado fecha.
+ * Nível em cada amostra de um traçado (corrida, rota do GPS), andando por ele
+ * como um carro (duas voltas se fecha, para o começo já sair certo). `start`:
+ * o nível no primeiro ponto (o do carro, para a rota do GPS).
  */
-export function pathLevels(points: { x: number; z: number }[], closed = true): Int8Array {
+export function pathLevels(points: { x: number; z: number }[], closed = true, start = GROUND): Int8Array {
   const n = points.length;
   const levels = new Int8Array(n).fill(GROUND);
-  let level = GROUND;
+  let level = start;
   const rounds = closed ? 2 : 1;
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < n; i++) {

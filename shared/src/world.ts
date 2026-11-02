@@ -1360,9 +1360,11 @@ const routeLength = (nodes: number[]) =>
  * Caminho pelas ruas de A até B, como lista de pontos. Considera a rua em que
  * cada ponta está e sai por qualquer uma das duas pontas dessa rua (sem isso,
  * o "cruzamento mais perto em linha reta" podia ficar atrás de um prédio).
+ * `fromLevel`: o nível de quem sai de A (ver `nearestRoad`).
  */
-export function routeBetween(ax: number, az: number, bx: number, bz: number): Point[] {
-  const from = nearestRoad(ax, az);
+export function routeBetween(ax: number, az: number, bx: number, bz: number, fromLevel?: number): Point[] {
+  // Saindo de cima de uma ponte, a rua de partida é a própria ponte (não a de baixo).
+  const from = nearestRoad(ax, az, fromLevel);
   const to = nearestRoad(bx, bz);
   const fromRoad = ROADS[from.road];
   const toRoad = ROADS[to.road];

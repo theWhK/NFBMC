@@ -102,6 +102,7 @@ export class RaceMode {
         boost: p.boost,
         rpm: p.rpm,
         visible: showAll || p.racing,
+        level: p.level,
       });
     });
     return views;

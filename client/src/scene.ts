@@ -7,8 +7,14 @@ import {
   pointOnTrack,
   RACE_IDS,
   carSpec,
+  GROUND,
+  STRUCTURES,
+  TUNNEL_HEIGHT,
   heightAt,
+  locate,
   slopeAt,
+  surfaceSlope,
+  surfaceY,
   isOnRoad,
   rampSteer,
   yawRate,
@@ -47,6 +53,8 @@ export interface CarView {
   cop?: boolean;
   /** Carro do trânsito, e de que tipo. */
   traffic?: TrafficKind;
+  /** Nível (-1 = chão; senão a ponte, viaduto ou túnel em STRUCTURES). */
+  level?: number;
 }
 
 export interface FoodView {
@@ -74,8 +82,10 @@ interface CarEntry {
   receivedAt: number;
   /** Volante previsto do próprio carro (o mesmo `rampSteer` do servidor). */
   steer: number;
-  /** Altura do chão embaixo do carro (relevo). */
+  /** Altura do chão embaixo do carro (relevo, ou o tabuleiro da ponte/túnel em que ele está). */
   y: number;
+  /** Nível do carro (GROUND ou a obra de arte), como o servidor mandou. */
+  level: number;
 }
 
 /**
@@ -382,6 +392,8 @@ export class GameScene {
   private barriers: { mesh: THREE.Mesh; texture: THREE.Texture } | null = null;
   /** Rota do GPS no chão (mundo aberto). */
   private gpsRoute: THREE.Mesh | null = null;
+  /** Nível do carro seguido (para a rota do GPS sair do tabuleiro, se ele está numa ponte). */
+  private followLevel = GROUND;
   private markers: THREE.Group;
   private light: THREE.DirectionalLight;
   private ambient: THREE.HemisphereLight;
@@ -646,6 +658,16 @@ export class GameScene {
   }
 
   /** Rota do GPS no chão (lista vazia apaga). */
+  /** Altura do teto (menos uma folga) se o carro seguido está dentro de um túnel; senão null. */
+  private tunnelCeiling(entry: CarEntry) {
+    if (entry.level < 0) return null;
+    const st = STRUCTURES[entry.level];
+    if (st.kind !== "tunel") return null;
+    const loc = locate(st, entry.x, entry.z, 20);
+    if (!loc || loc.ground - loc.y < 1) return null;
+    return loc.y + TUNNEL_HEIGHT - 1.2;
+  }
+
   setGpsRoute(route: [number, number][]) {
     if (this.gpsRoute) {
       this.scene.remove(this.gpsRoute);
@@ -656,7 +678,8 @@ export class GameScene {
       this.gpsRoute = null;
     }
     if (route.length < 2) return;
-    this.gpsRoute = buildGpsRibbon(route);
+    // A rota começa no nível do carro (se ele está na ponte, a rota sai do tabuleiro).
+    this.gpsRoute = buildGpsRibbon(route, this.followLevel);
     this.scene.add(this.gpsRoute);
   }
 
@@ -764,7 +787,8 @@ export class GameScene {
         model.group.rotation.order = "YXZ";
         entry = {
           model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false,
-          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0, y: heightAt(car.x, car.z),
+          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0,
+          y: surfaceY(car.x, car.z, car.level ?? GROUND), level: car.level ?? GROUND,
         };
         this.scene.add(model.group);
         this.cars.set(id, entry);
@@ -939,16 +963,18 @@ export class GameScene {
       const turnRate = dt > 0 ? Math.atan2(Math.sin(entry.heading - previousHeading), Math.cos(entry.heading - previousHeading)) / dt : 0;
       const lateral = turnRate * car.speed;
       entry.skid = damp(entry.skid, Math.min(1, Math.max(0, (Math.abs(lateral) - 30) / 25)), 12, dt);
-      entry.offroad = !isOnRoad(entry.x, entry.z);
+      entry.level = car.level ?? GROUND;
+      entry.offroad = !isOnRoad(entry.x, entry.z, entry.level);
       entry.lean = damp(entry.lean, Math.max(-0.12, Math.min(0.12, lateral * 0.0025)), 8, dt);
 
       const { group, flame, wheels } = entry.model;
       group.visible = car.visible;
       // No morro, o carro sobe e desce com o chão e inclina junto (frente/trás e de lado).
-      const [sx, sz] = slopeAt(entry.x, entry.z);
+      // Em cima da ponte (ou dentro do túnel), segue o tabuleiro.
+      const [sx, sz] = surfaceSlope(entry.x, entry.z, entry.level) ?? slopeAt(entry.x, entry.z);
       const fx = Math.sin(entry.heading);
       const fz = Math.cos(entry.heading);
-      entry.y = heightAt(entry.x, entry.z);
+      entry.y = surfaceY(entry.x, entry.z, entry.level);
       group.position.set(entry.x, entry.y, entry.z);
       group.rotation.set(-Math.atan(sx * fx + sz * fz), entry.heading, entry.lean + Math.atan(sx * fz - sz * fx), "YXZ");
       for (const wheel of wheels) wheel.rotation.x += (car.speed * dt) / ((wheel.userData.radius as number | undefined) ?? 0.45);
@@ -964,7 +990,7 @@ export class GameScene {
       if (car.visible) {
         const dusty = entry.offroad && Math.abs(car.speed) > 6;
         const amount = dusty ? Math.min(1, Math.abs(car.speed) / 25) * 0.6 : entry.skid;
-        if (amount > 0.15) this.effects.wheelTrail(entry.x, entry.z, entry.heading, amount, entry.offroad);
+        if (amount > 0.15) this.effects.wheelTrail(entry.x, entry.z, entry.heading, amount, entry.offroad, entry.level);
       }
     }
     this.effects.update(dt);
@@ -991,6 +1017,7 @@ export class GameScene {
     }
 
     const followed = followId ? this.cars.get(followId) : undefined;
+    this.followLevel = followed?.level ?? GROUND;
     const followedCar = followId ? cars.get(followId) : undefined;
     if (this.director) {
       this.director(dt, this.camera, this.cameraTarget);
@@ -1020,8 +1047,12 @@ export class GameScene {
       // A câmera acompanha a altura do carro (e não entra no morro atrás dele numa subida).
       const camX = followed.x - forwardX * view.back + sideX;
       const camZ = followed.z - forwardZ * view.back + sideZ;
-      const camHeight = view.seat ? followed.y : Math.max(followed.y, heightAt(camX, camZ) + 1);
+      // Em cima da ponte ou do viaduto, o chão lá embaixo não conta.
+      const camHeight = view.seat || followed.level >= 0 ? followed.y : Math.max(followed.y, heightAt(camX, camZ) + 1);
       const desired = new THREE.Vector3(camX, camHeight + view.height, camZ);
+      // Dentro do túnel a câmera não passa do teto.
+      const ceiling = this.tunnelCeiling(followed);
+      if (ceiling !== null) desired.y = Math.min(desired.y, ceiling);
       // No capô e no banco a câmera vai presa ao carro; nas outras, ela vem atrás com um pouco de atraso.
       if (view.back < 0 || view.seat) this.camera.position.copy(desired);
       else this.camera.position.lerp(desired, 1 - Math.exp(-6 * dt));

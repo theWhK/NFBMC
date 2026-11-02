@@ -185,7 +185,7 @@ export const AIRPORT = {
   runway: { a: [720, 1180] as Point, b: [2020, 1180] as Point, width: 46 },
   taxiway: { a: [820, 1310] as Point, b: [1920, 1310] as Point, width: 23 },
   /** Pátio dos aviões (retângulo alinhado aos eixos): x e z mínimos e máximos. */
-  apron: { minX: 1060, maxX: 1700, minZ: 1340, maxZ: 1480 },
+  apron: { minX: 1060, maxX: 1700, minZ: 1318, maxZ: 1480 },
   /** Terreno do terminal (o prédio fica aqui, de frente para o pátio ao sul e para o embarque ao norte). */
   terminal: { minX: 1140, maxX: 1620, minZ: 1496, maxZ: 1566 },
   /** Hangares: faixa ao sul da pista. */
