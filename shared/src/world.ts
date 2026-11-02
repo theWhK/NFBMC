@@ -1107,17 +1107,34 @@ export function findRoute(from: number, to: number): number[] {
 export type RaceId =
   | "autodromo" | "centro" | "porto" | "pastel" | "parque"
   | "praia" | "picanha" | "yakisoba" | "aeroporto" | "serra" | "gordura" | "roca" | "morro" | "rodoanel" | "serpentina"
-  | "radar-porto" | "radar-yakisoba" | "radar-rodoanel";
+  | "radar-porto" | "radar-yakisoba" | "radar-rodoanel"
+  | "arrancada";
+
+/** Arrancada: onde fica a linha de largada no traçado, a distância e as faixas. */
+export interface DragInfo {
+  /** Metros do começo do traçado até a linha de largada. */
+  start: number;
+  /** Distância da prova (402 m, o quarto de milha, se couber na pista). */
+  distance: number;
+  /** Deslocamento lateral (m) de cada faixa (positivo = esquerda). */
+  lanes: number[];
+}
 
 export interface RaceInfo {
   id: RaceId;
   name: string;
   laps: number;
   track: Track;
-  /** Circuito (vence quem chega primeiro) ou radar (speedtrap: vence quem soma mais velocidade nos radares). */
-  kind?: "circuito" | "radar";
+  /**
+   * Circuito (vence quem chega primeiro), radar (speedtrap: desafio solo com
+   * metas de velocidade somada nos radares) ou drag (arrancada em linha reta,
+   * câmbio manual, dois carros lado a lado).
+   */
+  kind?: "circuito" | "radar" | "drag";
   /** Radares: distância (m) de cada um desde a largada, numa volta. */
   radars?: number[];
+  /** Arrancada: largada, distância e faixas (o traçado é aberto, uma reta). */
+  drag?: DragInfo;
 }
 
 /**
@@ -1217,10 +1234,56 @@ speedtrap("radar-porto", "Radar do Porto", ["P2", "P3", "R1", "M3", "C1", "D1", 
 speedtrap("radar-yakisoba", "Radar da Liberdade", ["Y10", "Y20", "Y30", "Y31", "Y32", "Y33", "Y23", "Y22", "Y11"], 18, 1, 4);
 speedtrap("radar-rodoanel", "Radar do Rodoanel", ["HW1", "HW2", "HW3", "HN0", "HN1", "HN2", "HN3", "HE3", "HE2", "HE1", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "P0", "BA0", "BA1"], 24, 1, 6);
 
+// Arrancada: a reta de tipo "pista" da planta (a do Aeroporto do Pastel). Tudo
+// sai da rua (nós e pontos), sem coordenada fixa: se a pista mudar de lugar ou
+// de tamanho, a arrancada vai junto.
+/** Espaço depois da chegada para frear (m). */
+const DRAG_RUNOFF = 170;
+function dragStrip(): { track: Track; drag: DragInfo } {
+  const strip = ROADS.filter((r) => r.kind === "pista").sort((a, b) => b.length - a.length)[0];
+  if (!strip) throw new Error("Arrancada: não há rua de tipo pista na planta");
+  // Larga depois do cruzamento da ponta (a rua mais larga que chega nela) e do tamanho do carro.
+  const crossing = Math.max(0, ...ROADS.filter((r) => r !== strip && (r.a === strip.a || r.b === strip.a)).map((r) => r.width / 2));
+  const start = crossing + 12;
+  const room = strip.length - start - DRAG_RUNOFF;
+  const distance = room >= 402 ? 402 : room >= 201 ? 201 : Math.max(100, Math.floor(room / 10) * 10);
+  // Amostras a cada ~1,6 m ao longo da rua (aberta: sem fechar o circuito).
+  const cumulative = [0];
+  for (let i = 1; i < strip.points.length; i++) {
+    const [ax, az] = strip.points[i - 1];
+    const [bx, bz] = strip.points[i];
+    cumulative.push(cumulative[i - 1] + Math.hypot(bx - ax, bz - az));
+  }
+  const length = cumulative[cumulative.length - 1];
+  const count = Math.max(2, Math.round(length / 1.6));
+  const positions: Point[] = [];
+  let seg = 0;
+  for (let k = 0; k <= count; k++) {
+    const target = (k / count) * length;
+    while (seg < cumulative.length - 2 && cumulative[seg + 1] < target) seg++;
+    const [ax, az] = strip.points[seg];
+    const [bx, bz] = strip.points[seg + 1];
+    const t = (target - cumulative[seg]) / (cumulative[seg + 1] - cumulative[seg] || 1);
+    positions.push([ax + (bx - ax) * t, az + (bz - az) * t]);
+  }
+  const samples = positions.map(([x, z], i) => {
+    const [px, pz] = positions[Math.max(0, i - 1)];
+    const [nx, nz] = positions[Math.min(positions.length - 1, i + 1)];
+    const len = Math.hypot(nx - px, nz - pz) || 1;
+    return { x, z, tx: (nx - px) / len, tz: (nz - pz) / len, dist: (i / count) * length };
+  });
+  const lane = Math.min(4.5, strip.width / 4);
+  return { track: { samples, length, width: strip.width }, drag: { start, distance, lanes: [lane, -lane] } };
+}
+{
+  const { track, drag } = dragStrip();
+  RACES.arrancada = { id: "arrancada", name: "Arrancada do Aeroporto", laps: 1, track, kind: "drag", drag };
+}
+
 export const RACE_IDS = Object.keys(RACES) as RaceId[];
 
 /** Nome da corrida com a preposição certa: "no Circuito do Centro", "na Volta do Lago". */
-export const atRace = (id: RaceId) => `${/^(Volta|Rota|Ladeira|Subida|Pista|Estrada|Rodovia|Serpentina)\b/.test(RACES[id].name) ? "na" : "no"} ${RACES[id].name}`;
+export const atRace = (id: RaceId) => `${/^(Volta|Rota|Ladeira|Subida|Pista|Estrada|Rodovia|Serpentina|Arrancada)\b/.test(RACES[id].name) ? "na" : "no"} ${RACES[id].name}`;
 
 export const isRaceId = (value: unknown): value is RaceId =>
   typeof value === "string" && value in RACES;
@@ -1231,6 +1294,14 @@ export const MARKER_RADIUS = 18;
 /** Onde fica o ponto de encontro: um pouco antes da linha de largada. */
 export function raceMarker(id: RaceId) {
   const track = RACES[id].track;
+  const drag = RACES[id].drag;
+  if (drag) {
+    // Arrancada: do lado da linha de largada, fora das faixas (a reta é aberta).
+    const i = Math.min(track.samples.length - 1, Math.round((drag.start / track.length) * (track.samples.length - 1)));
+    const s = track.samples[i];
+    const side = Math.min(track.width / 2 - 4, 14);
+    return { x: s.x + s.tz * side, z: s.z - s.tx * side, heading: Math.atan2(s.tx, s.tz) };
+  }
   const s = track.samples[track.samples.length - Math.round(30 / (track.length / track.samples.length))];
   return { x: s.x, z: s.z, heading: Math.atan2(s.tx, s.tz) };
 }

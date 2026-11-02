@@ -700,7 +700,8 @@ function sendInput() {
 
 /** Troca de marcha no câmbio manual (teclado ou botões da tela). */
 function shift(direction: number) {
-  if (!mode || !menu.manual()) return;
+  // Na arrancada o câmbio é sempre manual (e o E solta a embreagem na largada).
+  if (!mode || (!menu.manual() && !(mode instanceof RaceMode && mode.manualOnly()))) return;
   mode.sendShift(direction);
 }
 
@@ -1056,7 +1057,9 @@ async function start(entry: MenuEntry) {
     const spawn = new URLSearchParams(location.search).get("spawn");
     await enterWorld(isRaceId(spawn) ? spawn : undefined);
   } else {
-    const room = await joinQuickRace({ ...carOptions(), raceId: menu.quickTrack() }, entry === "solo");
+    // Speedtrap é sempre desafio solo (o servidor também garante).
+    const raceId = menu.quickTrack();
+    const room = await joinQuickRace({ ...carOptions(), raceId }, entry === "solo" || RACES[raceId].kind === "radar");
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });

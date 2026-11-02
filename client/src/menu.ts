@@ -4,6 +4,7 @@
 import {
   RACES,
   RACE_IDS,
+  raceSummary,
   isRaceId,
   type RaceId,
 } from "@nfbmc/shared";
@@ -150,8 +151,12 @@ export function createMenu(options: MenuOptions) {
   const savedTrack = storage.get("nfbmc:quick-track");
   trackSelect.value = isRaceId(savedTrack) ? savedTrack : "autodromo";
   const describeTrack = () => {
-    const race = RACES[trackSelect.value as RaceId];
-    trackInfo.textContent = `${race.laps} ${race.laps === 1 ? "volta" : "voltas"} · ${(race.track.length / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km por volta`;
+    const id = trackSelect.value as RaceId;
+    const kind = RACES[id].kind;
+    trackInfo.textContent = raceSummary(id);
+    // Speedtrap é desafio solo (contra as metas); a arrancada é de dois carros.
+    ui.quick.hidden = kind === "radar";
+    ui.solo.textContent = kind === "radar" ? "Desafio solo" : kind === "drag" ? "Sozinho contra um bot" : "Sozinho contra bots";
   };
   describeTrack();
   trackSelect.addEventListener("change", () => {

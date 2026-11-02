@@ -7,6 +7,7 @@ import {
   cornerSpeed,
   nearestSample,
   pointOnTrack,
+  trackRadii,
   type CarSpec,
   type CarState,
   type Difficulty,
@@ -45,26 +46,6 @@ export function createBrain(difficulty: Difficulty, random: () => number = Math.
     stuckFor: 0,
     reverseFor: 0,
   };
-}
-
-/** Raio da curva (m) em cada ponto da pista, calculado uma vez por pista. */
-const radiusCache = new WeakMap<Track, Float32Array>();
-function trackRadii(track: Track) {
-  let radii = radiusCache.get(track);
-  if (radii) return radii;
-  const samples = track.samples;
-  const n = samples.length;
-  const spacing = track.length / n;
-  const span = 4; // ±4 amostras ≈ ±6,4 m
-  radii = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const a = samples[(i - span + n) % n];
-    const b = samples[(i + span) % n];
-    const turn = Math.abs(Math.atan2(a.tx * b.tz - a.tz * b.tx, a.tx * b.tx + a.tz * b.tz));
-    radii[i] = turn < 1e-3 ? 9999 : (span * 2 * spacing) / turn;
-  }
-  radiusCache.set(track, radii);
-  return radii;
 }
 
 /**

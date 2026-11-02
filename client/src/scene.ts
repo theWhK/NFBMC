@@ -6,6 +6,7 @@ import {
   RACES,
   pointOnTrack,
   RACE_IDS,
+  raceSummary,
   carSpec,
   heightAt,
   slopeAt,
@@ -27,7 +28,7 @@ import { applyLook, surface, type Look } from "./look.ts";
 import { RealPass, skyEnvironment } from "./realism.ts";
 import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture, waterNormal } from "./scenery.ts";
 import { InkPass, type Quality } from "./toon.ts";
-import { animateBarriers, buildBarriers, buildGpsRibbon, buildTrackMesh, gpsDrawFrom } from "./track-mesh.ts";
+import { animateBarriers, buildBarriers, buildDragStrip, buildGpsRibbon, buildTrackMesh, gpsDrawFrom } from "./track-mesh.ts";
 
 /** O que a cena precisa saber de cada carro (vem do estado da sala). */
 export interface CarView {
@@ -162,8 +163,7 @@ function makeMarker(id: RaceId) {
   glow.scale.setScalar(26);
   glow.position.y = 3;
   group.add(glow);
-  const km = (race.track.length / 1000).toFixed(1).replace(".", ",");
-  const label = markerLabel(race.name, `${race.laps} voltas · ${km} km`);
+  const label = markerLabel(race.name, raceSummary(id));
   label.position.y = 22;
   group.add(label);
   group.position.set(spot.x, heightAt(spot.x, spot.z), spot.z);
@@ -622,7 +622,13 @@ export class GameScene {
       this.barriers.texture.dispose();
       this.barriers = null;
     }
-    if (raceId && raceId !== "autodromo") {
+    const dragInfo = raceId ? RACES[raceId].drag : undefined;
+    if (raceId && dragInfo) {
+      // Arrancada: faixas, largada com o semáforo e chegada (sem barreiras: a direção é automática).
+      this.raceOverlay = buildDragStrip(RACES[raceId].track, dragInfo);
+      this.dress(this.raceOverlay);
+      this.scene.add(this.raceOverlay);
+    } else if (raceId && raceId !== "autodromo") {
       const race = RACES[raceId];
       this.raceOverlay = buildTrackMesh(race.track, { asphalt: false, bannerColor: race.kind === "radar" ? "#2a6bff" : "#ff7a00" });
       // Speedtrap: um poste de radar na beira da pista em cada ponto de medição.
@@ -633,7 +639,7 @@ export class GameScene {
       this.dress(this.raceOverlay);
       this.scene.add(this.raceOverlay);
     }
-    if (raceId) {
+    if (raceId && !dragInfo) {
       // Barreiras nas saídas e nas curvas (o autódromo também tem).
       this.barriers = buildBarriers(RACES[raceId].track);
       this.scene.add(this.barriers.mesh);
