@@ -276,20 +276,20 @@
       <div class="pause-main">
         <h2>Pausa</h2>
         <p class="hint" id="pause-note" data-testid="pause-note">O jogo continua rodando para a galera enquanto este menu está aberto.</p>
-        <div class="mw-list sub">
+        <div class="mw-list sub" id="pause-list">
           <button type="button" id="pause-resume" data-testid="pause-resume">Continuar</button>
           <button type="button" id="pause-map" data-testid="pause-map">Mapa da cidade</button>
           <button type="button" id="pause-help" data-testid="pause-help">Controles</button>
-          <button type="button" id="pause-music">Música</button>
-          <button type="button" id="pause-sfx">Efeitos</button>
+          <button type="button" id="pause-options" data-testid="pause-options">Opções</button>
           <button type="button" id="pause-quit" data-testid="pause-quit">Voltar ao menu principal</button>
+        </div>
+        <!-- "Opções": o mesmo painel das Opções do menu principal vem para cá enquanto estiver aberto. -->
+        <div id="pause-options-slot" hidden>
+          <div class="mw-list sub"><button type="button" id="pause-options-back" data-testid="pause-options-back">← Voltar para a pausa</button></div>
         </div>
       </div>
       <aside class="pause-card" id="pause-card" data-testid="pause-card"></aside>
     </div>
-
-    <!-- Volta da pausa jogando sozinho: 3, 2, 1 antes de o jogo andar de novo. -->
-    <div id="resume-count" data-testid="resume-count" hidden></div>
 
     <!-- Lista de comandos (F1). -->
     <div id="help" class="panel center help" data-testid="help" hidden>

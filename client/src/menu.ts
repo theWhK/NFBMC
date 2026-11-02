@@ -33,6 +33,8 @@ interface MenuOptions {
   token: () => string | undefined;
   onEnter: (entry: MenuEntry) => void;
   onAudioChange: () => void;
+  /** Câmbio trocado nas Opções (também na pausa, com o jogo rodando). */
+  onGearbox?: (manual: boolean) => void;
   /** Uma tela do menu foi aberta (ex.: a Lista Gorda, para atualizar o cardápio). */
   onScreen?: (id: string) => void;
   /** Combo do cardápio em destaque (setas, mouse ou toque). */
@@ -229,6 +231,7 @@ export function createMenu(options: MenuOptions) {
     manual = !manual;
     storage.set(GEARBOX_KEY, manual ? "1" : "0");
     refreshOptions();
+    options.onGearbox?.(manual);
   });
   refreshOptions();
   optMusic.addEventListener("click", () => {
@@ -349,12 +352,18 @@ export function createMenu(options: MenuOptions) {
   document.getElementById("board-close")!.addEventListener("click", () => back());
 
   // Volume da música e dos efeitos (0 a 100%).
+  const refreshVolumes = () => {
+    for (const kind of ["music", "sfx"] as const) {
+      const slider = document.getElementById(`vol-${kind}`) as HTMLInputElement;
+      const value = kind === "music" ? sound.prefs.musicVolume : sound.prefs.sfxVolume;
+      slider.value = String(Math.round(value * 100));
+      document.getElementById(`vol-${kind}-out`)!.textContent = `${slider.value}%`;
+    }
+  };
+  refreshVolumes();
   for (const kind of ["music", "sfx"] as const) {
     const slider = document.getElementById(`vol-${kind}`) as HTMLInputElement;
     const out = document.getElementById(`vol-${kind}-out`)!;
-    const value = kind === "music" ? sound.prefs.musicVolume : sound.prefs.sfxVolume;
-    slider.value = String(Math.round(value * 100));
-    out.textContent = `${slider.value}%`;
     slider.addEventListener("input", () => {
       sound.setVolume(kind, Number(slider.value) / 100);
       out.textContent = `${slider.value}%`;
@@ -368,6 +377,14 @@ export function createMenu(options: MenuOptions) {
     color: () => garage.color(),
     car: () => garage.car(),
     manual: () => manual,
+    /** Reescreve os rótulos das Opções (a pausa mostra o mesmo painel; a música pode ter mudado no N). */
+    refreshOptions: () => {
+      refreshOptions();
+      refreshLook();
+      refreshQuality();
+      refreshIntro();
+      refreshVolumes();
+    },
     /** Pista escolhida na corrida rápida. */
     quickTrack: () => trackSelect.value as RaceId,
     /** Abre o cardápio da Lista Gorda (depois de um duelo ou da fuga final: mostra como ficou a carreira). */
