@@ -90,6 +90,7 @@ const HORNS: Record<string, HornProfile> = {
   fusca: { notes: [470], formant: 2400 },
   uno: { notes: [440, 554], formant: 2000 },
   gol: { notes: [415, 523], formant: 1900 },
+  etios: { notes: [440, 523], formant: 2000 },
   civic: { notes: [466, 587], formant: 2100 },
   golf: { notes: [440, 554], formant: 2000 },
   opala: { notes: [330, 415], formant: 1500 },

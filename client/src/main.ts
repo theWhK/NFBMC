@@ -561,13 +561,15 @@ function duelFinished(result: RaceFinish) {
   const bet = won ? duelCash(rival.rank) : 0;
   racePrize(result, bet);
   if (won) {
+    const before = new Set(story.story.unlocked);
     story.defeat();
-    const prizes = [carSpec(rival.car).name, ...(rival.bonusCar ? [carSpec(rival.bonusCar).name] : [])];
+    // Os carros que entraram na garagem agora (do rival, o brinde e os de avanço).
+    const prizes = story.story.unlocked.filter((car) => !before.has(car)).map((car) => carSpec(car).name);
     stamp.textContent = "Nota fiscal";
     $("duel-title").textContent = `Você derrotou ${rival.name}!`;
     $("duel-text").textContent = (rival.rank === 1
       ? "Você é o novo Número 1 da Lista Gorda."
-      : `Na sua garagem agora: ${prizes.join(" e ")}. Próximo alvo: #${rival.rank - 1}.`) + ` A aposta: ${money(bet)}.`;
+      : `Na sua garagem agora: ${prizes.slice(0, -1).join(", ")}${prizes.length > 1 ? " e " : ""}${prizes.at(-1)}. Próximo alvo: #${rival.rank - 1}.`) + ` A aposta: ${money(bet)}.`;
     sound.finish();
   } else {
     stamp.textContent = "Derrota";
