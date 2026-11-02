@@ -861,6 +861,23 @@ button.link {
   font-size: 1.15rem;
 }
 
+/* Gráficos avançados (Opções): os ajustes um pouco recuados e menores. */
+.gfx-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 14px;
+  border-left: 2px solid rgba(255, 122, 0, 0.5);
+}
+
+.gfx-advanced[hidden] {
+  display: none;
+}
+
+.mw-list.sub .gfx-advanced button {
+  font-size: 0.95rem;
+}
+
 .mw-hint {
   position: absolute;
   left: 36px;

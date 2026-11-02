@@ -165,3 +165,27 @@ test("3D: visual realista com detalhes de perto e troca para o quadrinho", async
 
   expect(errors).toEqual([]);
 });
+
+test("3D: gráficos avançados mexem num ajuste por vez e o preset desfaz", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(() => localStorage.setItem("nfbmc:quality", "alto"));
+  await page.goto("/");
+  await page.getByTestId("options-menu").click();
+  await expect(page.getByTestId("opt-quality")).toContainText("alto (sombras e brilho)");
+  await page.getByTestId("opt-advanced").click();
+  await expect(page.getByTestId("gfx-shadows")).toHaveText("Sombras: médias");
+  await expect(page.getByTestId("gfx-speedBlur")).toHaveText("Borrão de velocidade: ligado");
+  // Sombras: médias → altas; o preset vira "personalizado" e fica salvo.
+  await page.getByTestId("gfx-shadows").click();
+  await expect(page.getByTestId("gfx-shadows")).toHaveText("Sombras: altas");
+  await expect(page.getByTestId("opt-quality")).toContainText("personalizado");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nfbmc:graphics")!))).toEqual({ shadows: 4096 });
+  // Escolher um preset (alto → médio) desfaz os ajustes.
+  await page.getByTestId("opt-quality").click();
+  await expect(page.getByTestId("opt-quality")).toContainText("médio");
+  await expect(page.getByTestId("opt-quality")).not.toContainText("personalizado");
+  await expect(page.getByTestId("gfx-shadows")).toHaveText("Sombras: desligadas");
+  expect(await page.evaluate(() => localStorage.getItem("nfbmc:graphics"))).toBeNull();
+  expect(errors).toEqual([]);
+});
