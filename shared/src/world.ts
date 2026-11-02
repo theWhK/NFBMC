@@ -3,23 +3,41 @@
 // ruas, prédios e casas (com colisão), árvores, comida, corridas e o grafo de
 // ruas que as viaturas usam para navegar.
 import {
+  AIRPORT,
+  BOUNDS,
   DISTRICTS,
   EDGES,
   LAKE,
   NODES,
   QUAY_Z,
+  RIVER,
   ROAD_WIDTH,
+  ROUNDABOUTS,
   type DistrictId,
   type EdgeSpec,
   type RoadKind,
 } from "./map.ts";
 import { CAR, type CarMotion, type CarState } from "./physics.ts";
 import { buildTrack, nearestSample, splinePath, type Track } from "./track.ts";
+import { gradeAt, inRiver } from "./terrain.ts";
+import {
+  GROUND,
+  STRUCTURES,
+  UNDER_CLEARANCE,
+  collideLevel,
+  locate,
+  nextLevel,
+  pathLevels,
+  polylineLength,
+  sampleEdge,
+  structureOf,
+  surfaceGrade,
+} from "./levels.ts";
 
-export { DISTRICTS, LAKE, QUAY_Z, type DistrictId } from "./map.ts";
+export { AIRPORT, DISTRICTS, LAKE, QUAY_Z, RIVER, ROUNDABOUTS, type DistrictId } from "./map.ts";
 
 /** Limites do mapa: muro invisível nas bordas e o cais ao sul. */
-export const WORLD_BOUNDS = { minX: -1740, maxX: 1740, minZ: QUAY_Z, maxZ: 2640 } as const;
+export const WORLD_BOUNDS = { minX: BOUNDS.minX + 10, maxX: BOUNDS.maxX - 10, minZ: QUAY_Z, maxZ: BOUNDS.maxZ - 10 } as const;
 
 /** Gerador pseudoaleatório com semente. */
 export function seeded(seed: number) {
@@ -57,26 +75,26 @@ export interface Road {
   /** Pontos ao longo da rua, de A para B, a cada ~4 m. */
   points: Point[];
   length: number;
+  /** Obra de arte (índice em STRUCTURES) ou GROUND (-1): rua comum, no chão. */
+  structure: number;
 }
 
-function sampleEdge(a: Point, b: Point, curve?: Point): Point[] {
-  const control = curve ?? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-  const approx = Math.hypot(control[0] - a[0], control[1] - a[1]) + Math.hypot(b[0] - control[0], b[1] - control[1]);
-  const steps = Math.max(2, Math.ceil(approx / 4));
-  const points: Point[] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const u = 1 - t;
-    points.push([
-      u * u * a[0] + 2 * u * t * control[0] + t * t * b[0],
-      u * u * a[1] + 2 * u * t * control[1] + t * t * b[1],
-    ]);
+/** Dentro da área cercada do aeroporto (sem prédios gerados nem ruas de ligação). */
+export const insideAirport = (x: number, z: number, margin = 0) =>
+  x > AIRPORT.area.minX - margin && x < AIRPORT.area.maxX + margin && z > AIRPORT.area.minZ - margin && z < AIRPORT.area.maxZ + margin;
+
+/** No pátio dos aviões (asfalto: conta como rua). */
+export const onAirportApron = (x: number, z: number) =>
+  x > AIRPORT.apron.minX && x < AIRPORT.apron.maxX && z > AIRPORT.apron.minZ && z < AIRPORT.apron.maxZ;
+
+/** Ilha no meio de uma rotatória (jardim com estátua: nada de prédio nem de rua). */
+export function roundaboutIsland(x: number, z: number, margin = 0) {
+  for (const ra of ROUNDABOUTS) {
+    const island = ra.r - ROAD_WIDTH[ra.kind] / 2 - 1.5;
+    if (Math.hypot(x - ra.x, z - ra.z) < island + margin) return ra;
   }
-  return points;
+  return null;
 }
-
-const polylineLength = (points: Point[]) =>
-  points.slice(1).reduce((sum, p, i) => sum + Math.hypot(p[0] - points[i][0], p[1] - points[i][1]), 0);
 
 // --- Cidade densa: cruzamentos novos e ruas de ligação geradas ---------------
 //
@@ -89,11 +107,13 @@ const polylineLength = (points: Point[]) =>
 
 /** Bairros sem ruas de ligação (natureza, pista, parque) e o passo dos cruzamentos novos por bairro. */
 const NO_CONNECTORS = new Set<DistrictId>(["aeroporto", "autodromo", "parque"]);
-const SPLIT_STEP: Partial<Record<DistrictId, number>> = { serra: 260, roca: 280, aeroporto: Infinity, autodromo: Infinity, parque: 300 };
+const SPLIT_STEP: Partial<Record<DistrictId, number>> = { centro: 70, serra: 260, roca: 280, aeroporto: Infinity, autodromo: Infinity, parque: 300 };
 /** Bairros de ruas tortas: ladeiras, vielas e estradas de terra. */
-const WINDING = new Set<DistrictId>(["morro", "vila", "jardim", "picanha", "praia", "serra", "roca"]);
+const WINDING = new Set<DistrictId>(["morro", "vila", "jardim", "picanha", "praia", "serra", "roca", "centro", "liberdade"]);
 /** Na roça e na serra as ligações são estradas compridas, longe umas das outras. */
 const RURAL = new Set<DistrictId>(["serra", "roca"]);
+/** Comprimento máximo das ligações (m) por bairro (o padrão é 240). */
+const MAX_LINK: Partial<Record<DistrictId, number>> = { centro: 150, liberdade: 200 };
 
 /** Ponto e "tangente/2" de uma curva quadrática (para cortar em pedaços sem mudar o desenho). */
 function bezier(a: Point, c: Point, b: Point, t: number): { p: Point; d: Point } {
@@ -109,8 +129,129 @@ function blocked(x: number, z: number) {
   if (x < minX + 25 || x > maxX - 25 || z < minZ + 40 || z > maxZ - 25) return true;
   if (((x - LAKE.x) / (LAKE.rx + 25)) ** 2 + ((z - LAKE.z) / (LAKE.rz + 25)) ** 2 < 1) return true;
   if (Math.hypot(x - 400, z - 405) < 190) return true; // autódromo
-  if (x > 690 && x < 1430 && z > 690 && z < 1560) return true; // aeroporto
+  if (insideAirport(x, z, 20)) return true;
+  if (inRiver(x, z, 22)) return true;
+  if (roundaboutIsland(x, z, 10)) return true;
   return false;
+}
+
+/**
+ * Cruzamentos que o desenho não marcou: onde duas ruas comuns da planta se
+ * cruzam, as duas ganham um nó ali (a planta pode ter avenidas cortando o
+ * bairro em qualquer ângulo). Uma ponta que cai no meio de outra rua vira
+ * esquina em "T". As obras de arte ficam de fora (passam por cima ou por baixo).
+ * Devolve, para cada aresta da planta, os cortes (parâmetro t da curva e o nó).
+ */
+function planarize(nodes: Record<string, Point>) {
+  const cuts: { t: number; id: string }[][] = EDGES.map(() => []);
+  const samples = EDGES.map((e) => sampleEdge(nodes[e.a], nodes[e.b], e.curve));
+  const near = (p: Point, q: Point, d: number) => Math.hypot(p[0] - q[0], p[1] - q[1]) < d;
+  let count = 0;
+  /** Corta a aresta `i` no ponto mais perto de `p` (parâmetro t), com o nó `id`. */
+  const cutAt = (i: number, p: Point, id: string) => {
+    const pts = samples[i];
+    let best = Infinity;
+    let bt = 0;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const [ax, az] = pts[k];
+      const [bx, bz] = pts[k + 1];
+      const dx = bx - ax;
+      const dz = bz - az;
+      const f = Math.max(0, Math.min(1, ((p[0] - ax) * dx + (p[1] - az) * dz) / (dx * dx + dz * dz || 1)));
+      const d = Math.hypot(p[0] - ax - dx * f, p[1] - az - dz * f);
+      if (d < best) {
+        best = d;
+        bt = (k + f) / (pts.length - 1);
+      }
+    }
+    if (bt < 0.002 || bt > 0.998) return;
+    if (cuts[i].some((c) => c.id === id)) return;
+    cuts[i].push({ t: bt, id });
+  };
+  // Grade com os trechos de todas as ruas comuns (as obras de arte não cruzam ninguém).
+  const G = 50;
+  const grid = new Map<string, [number, number][]>();
+  samples.forEach((pts, i) => {
+    if (EDGES[i].structure) return;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const keys = new Set<string>();
+      for (const [x, z] of [pts[k], pts[k + 1]]) keys.add(`${Math.floor(x / G)},${Math.floor(z / G)}`);
+      for (const key of keys) {
+        const list = grid.get(key);
+        if (list) list.push([i, k]);
+        else grid.set(key, [[i, k]]);
+      }
+    }
+  });
+  // Ponta de uma rua no meio da outra: esquina em "T".
+  EDGES.forEach((e, i) => {
+    if (e.structure) return;
+    for (const end of [e.a, e.b]) {
+      const q = nodes[end];
+      const gx = Math.floor(q[0] / G);
+      const gz = Math.floor(q[1] / G);
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          for (const [j, k] of grid.get(`${gx + di},${gz + dj}`) ?? []) {
+            if (j === i) continue;
+            const other = EDGES[j];
+            if (end === other.a || end === other.b) continue;
+            const [ax, az] = samples[j][k];
+            const [bx, bz] = samples[j][k + 1];
+            const dx = bx - ax;
+            const dz = bz - az;
+            const f = Math.max(0, Math.min(1, ((q[0] - ax) * dx + (q[1] - az) * dz) / (dx * dx + dz * dz || 1)));
+            if (Math.hypot(q[0] - ax - dx * f, q[1] - az - dz * f) < 9) cutAt(j, q, end);
+          }
+        }
+      }
+    }
+  });
+  // Cruzamento de verdade: duas ruas se cortam longe das pontas.
+  const seen = new Set<string>();
+  const found: { i: number; j: number; p: Point }[] = [];
+  for (const list of grid.values()) {
+    for (let m = 0; m < list.length; m++) {
+      for (let n = m + 1; n < list.length; n++) {
+        let [i, a] = list[m];
+        let [j, b] = list[n];
+        if (i === j) continue;
+        if (i > j) [i, a, j, b] = [j, b, i, a];
+        const key = `${i}:${a}:${j}:${b}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const [p0x, p0z] = samples[i][a];
+        const [p1x, p1z] = samples[i][a + 1];
+        const [q0x, q0z] = samples[j][b];
+        const [q1x, q1z] = samples[j][b + 1];
+        const rx = p1x - p0x;
+        const rz = p1z - p0z;
+        const sx = q1x - q0x;
+        const sz = q1z - q0z;
+        const den = rx * sz - rz * sx;
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((q0x - p0x) * sz - (q0z - p0z) * sx) / den;
+        const u = ((q0x - p0x) * rz - (q0z - p0z) * rx) / den;
+        if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+        const hit: Point = [p0x + rx * t, p0z + rz * t];
+        const ei = EDGES[i];
+        const ej = EDGES[j];
+        if ([nodes[ei.a], nodes[ei.b], nodes[ej.a], nodes[ej.b]].some((e) => near(e, hit, 9))) continue;
+        if (found.some((f) => f.i === i && f.j === j && near(f.p, hit, 10))) continue;
+        found.push({ i, j, p: hit });
+      }
+    }
+  }
+  // Ordem fixa (a mesma no servidor e no cliente): pelas arestas e pela posição.
+  found.sort((p, q) => p.i - q.i || p.j - q.j || p.p[0] - q.p[0] || p.p[1] - q.p[1]);
+  for (const { i, j, p } of found) {
+    const id = `x${count++}`;
+    nodes[id] = p;
+    cutAt(i, p, id);
+    cutAt(j, p, id);
+  }
+  for (const list of cuts) list.sort((p, q) => p.t - q.t);
+  return cuts;
 }
 
 function densify() {
@@ -119,38 +260,54 @@ function densify() {
   const edges: EdgeSpec[] = [];
   /** Original "a|b" → sequência de nós depois de cortar (as corridas seguem por ela). */
   const chains = new Map<string, string[]>();
+  const crossings = planarize(nodes);
 
-  // 1. Cruzamentos novos no meio das ruas compridas (a rodovia e a pista ficam inteiras).
-  for (const e of EDGES) {
+  // 1. Cruzamentos novos no meio das ruas compridas (a rodovia, a pista e as obras ficam inteiras).
+  EDGES.forEach((e, index) => {
     const a = NODES[e.a];
     const b = NODES[e.b];
     const c: Point = e.curve ?? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    const length = polylineLength(sampleEdge(a, b, e.curve));
     const district = districtAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
-    const step = e.kind === "rodovia" || e.kind === "pista" ? Infinity : SPLIT_STEP[district] ?? 100;
-    const parts = Number.isFinite(step) ? Math.max(1, Math.round(length / step)) : 1;
+    const whole = e.kind === "rodovia" || e.kind === "pista" || e.kind === "taxiway" || !!e.structure;
+    const step = whole ? Infinity : SPLIT_STEP[district] ?? 100;
+    // Pedaços entre os cruzamentos achados (e as pontas); cada um se corta de novo a cada `step`.
+    const stops = [{ t: 0, id: e.a }, ...crossings[index], { t: 1, id: e.b }];
+    const params: { t: number; id: string }[] = [stops[0]];
+    for (let k = 0; k < stops.length - 1; k++) {
+      const t0 = stops[k].t;
+      const t1 = stops[k + 1].t;
+      const length = polylineLength(sampleEdge(bezier(a, c, b, t0).p, bezier(a, c, b, t1).p, [
+        bezier(a, c, b, t0).p[0] + (t1 - t0) * bezier(a, c, b, t0).d[0],
+        bezier(a, c, b, t0).p[1] + (t1 - t0) * bezier(a, c, b, t0).d[1],
+      ]));
+      const parts = Number.isFinite(step) ? Math.max(1, Math.round(length / step)) : 1;
+      for (let i = 1; i < parts; i++) {
+        const t = t0 + ((t1 - t0) * i) / parts;
+        const id = `${e.a}~${e.b}~${params.length}`;
+        nodes[id] = bezier(a, c, b, t).p;
+        params.push({ t, id });
+      }
+      params.push(stops[k + 1]);
+    }
     const chain = [e.a];
-    for (let i = 0; i < parts; i++) {
-      const t0 = i / parts;
-      const t1 = (i + 1) / parts;
-      const from = chain[chain.length - 1];
-      const to = i === parts - 1 ? e.b : `${e.a}~${e.b}~${i + 1}`;
-      if (to !== e.b) nodes[to] = bezier(a, c, b, t1).p;
+    for (let i = 1; i < params.length; i++) {
+      const t0 = params[i - 1].t;
+      const t1 = params[i].t;
       const start = bezier(a, c, b, t0);
       const curve: Point | undefined = e.curve ? [start.p[0] + (t1 - t0) * start.d[0], start.p[1] + (t1 - t0) * start.d[1]] : undefined;
-      edges.push({ a: from, b: to, kind: e.kind, curve });
-      chain.push(to);
+      edges.push({ ...e, a: params[i - 1].id, b: params[i].id, curve });
+      chain.push(params[i].id);
     }
     chains.set(`${e.a}|${e.b}`, chain);
-  }
+  });
 
   // Grade com os pedaços de todas as ruas, para checar se uma rua nova encosta em outra.
-  type Piece = { ax: number; az: number; bx: number; bz: number; half: number };
+  type Piece = { ax: number; az: number; bx: number; bz: number; half: number; a: string; b: string };
   const grid = new Map<string, Piece[]>();
   const G = 60;
-  const addPieces = (points: Point[], half: number) => {
+  const addPieces = (points: Point[], half: number, a: string, b: string) => {
     for (let i = 1; i < points.length; i++) {
-      const piece = { ax: points[i - 1][0], az: points[i - 1][1], bx: points[i][0], bz: points[i][1], half };
+      const piece = { ax: points[i - 1][0], az: points[i - 1][1], bx: points[i][0], bz: points[i][1], half, a, b };
       const keys = new Set([`${Math.floor(piece.ax / G)},${Math.floor(piece.az / G)}`, `${Math.floor(piece.bx / G)},${Math.floor(piece.bz / G)}`]);
       for (const key of keys) {
         const list = grid.get(key);
@@ -188,7 +345,31 @@ function densify() {
     const [bx, bz] = nodes[e.b];
     directions.set(e.a, [...(directions.get(e.a) ?? []), Math.atan2(start[0] - ax, start[1] - az)]);
     directions.set(e.b, [...(directions.get(e.b) ?? []), Math.atan2(end[0] - bx, end[1] - bz)]);
-    addPieces(points, ROAD_WIDTH[e.kind] / 2);
+    addPieces(points, ROAD_WIDTH[e.kind] / 2, e.a, e.b);
+  };
+  /** A rua nova (pontos de A até B) corta alguma rua que não sai de A nem de B? */
+  const cuts = (points: Point[], ia: string, ib: string) => {
+    for (let k = 1; k < points.length; k++) {
+      const [p0x, p0z] = points[k - 1];
+      const [p1x, p1z] = points[k];
+      const seen = new Set<Piece>();
+      for (const [x, z] of [points[k - 1], points[k]]) {
+        for (const piece of grid.get(`${Math.floor(x / G)},${Math.floor(z / G)}`) ?? []) {
+          if (seen.has(piece) || piece.a === ia || piece.b === ia || piece.a === ib || piece.b === ib) continue;
+          seen.add(piece);
+          const rx = p1x - p0x;
+          const rz = p1z - p0z;
+          const sx = piece.bx - piece.ax;
+          const sz = piece.bz - piece.az;
+          const den = rx * sz - rz * sx;
+          if (Math.abs(den) < 1e-9) continue;
+          const t = ((piece.ax - p0x) * sz - (piece.az - p0z) * sx) / den;
+          const u = ((piece.ax - p0x) * rz - (piece.az - p0z) * rx) / den;
+          if (t >= 0 && t <= 1 && u >= 0 && u <= 1) return true;
+        }
+      }
+    }
+    return false;
   };
   for (const e of edges) link(e, sampleEdge(nodes[e.a], nodes[e.b], e.curve));
 
@@ -211,7 +392,7 @@ function densify() {
     if (NO_CONNECTORS.has(district)) continue;
     // Na cidade, ligação curta (quarteirão); na roça e na serra, estrada comprida.
     const span = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (RURAL.has(district) ? span < 150 : span > 240) continue;
+    if (RURAL.has(district) ? span < 150 : span > (MAX_LINK[district] ?? 240)) continue;
     const winding = WINDING.has(district);
     const kind: RoadKind = winding && random() < 0.6 ? "viela" : "rua";
     // Curva: um pouco para um lado (bem mais nos bairros de ladeira).
@@ -229,7 +410,7 @@ function densify() {
         break;
       }
     }
-    if (!ok) continue;
+    if (!ok || cuts(points, ia, ib)) continue;
     // Chega nas ruas que já existem com um ângulo de esquina (nada de "rabo de peixe").
     const startDir = Math.atan2(points[3][0] - a[0], points[3][1] - a[1]);
     const endDir = Math.atan2(points[points.length - 4][0] - b[0], points[points.length - 4][1] - b[1]);
@@ -253,6 +434,7 @@ function densify() {
       // Perto das pontas a rua ainda está saindo da rua-mãe: ali não conta.
       if (blocked(x, z) || districtAt(x, z) !== district || (nearEnd > 45 && clearance(x, z) < half + 9)) return false;
     }
+    if (cuts(points, ia, ib)) return false;
     const startDir = Math.atan2(points[3][0] - a[0], points[3][1] - a[1]);
     const endDir = Math.atan2(points[points.length - 4][0] - b[0], points[points.length - 4][1] - b[1]);
     if ((directions.get(ia) ?? []).some((d) => angleGap(d, startDir) < 0.5)) return false;
@@ -291,7 +473,8 @@ export const PLAN_NODES = PLAN.nodes;
 
 export const ROADS: Road[] = PLAN.edges.map((e) => {
   const points = sampleEdge(PLAN.nodes[e.a], PLAN.nodes[e.b], e.curve);
-  return { a: e.a, b: e.b, kind: e.kind, width: ROAD_WIDTH[e.kind], points, length: polylineLength(points) };
+  const structure = e.structure ? structureOf(e.a, e.b) : GROUND;
+  return { a: e.a, b: e.b, kind: e.kind, width: ROAD_WIDTH[e.kind], points, length: polylineLength(points), structure };
 });
 
 /** Grade espacial: para cada célula de 25 m, os pedaços de rua que passam perto. */
@@ -307,6 +490,8 @@ interface Segment {
   /** Rua e trecho (índice do ponto inicial) a que o segmento pertence. */
   road: number;
   index: number;
+  /** Nível do trecho: GROUND, ou a obra de arte (onde ela está fora do chão). */
+  level: number;
 }
 
 const roadGrid = new Map<string, Segment[]>();
@@ -314,7 +499,13 @@ for (const [r, road] of ROADS.entries()) {
   for (let i = 1; i < road.points.length; i++) {
     const [ax, az] = road.points[i - 1];
     const [bx, bz] = road.points[i];
-    const segment = { ax, az, bx, bz, half: road.width / 2, road: r, index: i - 1 };
+    let level = GROUND;
+    if (road.structure >= 0) {
+      const st = STRUCTURES[road.structure];
+      const off = (k: number) => Math.abs(st.y[k] - st.ground[k]) > 0.3;
+      if (off(i - 1) || off(i)) level = road.structure;
+    }
+    const segment = { ax, az, bx, bz, half: road.width / 2, road: r, index: i - 1, level };
     const reach = road.width / 2 + 4;
     for (let x = Math.min(ax, bx) - reach; x <= Math.max(ax, bx) + reach + CELL; x += CELL) {
       for (let z = Math.min(az, bz) - reach; z <= Math.max(az, bz) + reach + CELL; z += CELL) {
@@ -335,11 +526,34 @@ function distanceToSegment(px: number, pz: number, s: Segment) {
   return Math.hypot(px - (s.ax + dx * t), pz - (s.az + dz * t));
 }
 
-/** Distância até a borda da rua mais próxima (negativa = em cima da rua). */
-function roadClearance(x: number, z: number) {
+/**
+ * Distância até a borda da rua mais próxima (negativa = em cima da rua). Com
+ * `level`, só as ruas daquele nível (GROUND: as do chão, sem os trechos
+ * elevados das obras); sem ele, todas (para os prédios não ficarem embaixo
+ * de um viaduto nem em cima de um túnel).
+ */
+function roadClearance(x: number, z: number, level?: number) {
   let best = Infinity;
-  for (const s of roadGrid.get(cellKey(x, z)) ?? []) best = Math.min(best, distanceToSegment(x, z, s) - s.half);
+  for (const s of roadGrid.get(cellKey(x, z)) ?? []) {
+    if (level !== undefined && s.level !== level) continue;
+    best = Math.min(best, distanceToSegment(x, z, s) - s.half);
+  }
   return best;
+}
+
+// Pilares das pontes e dos viadutos: um a cada ~30 m onde dá para passar por
+// baixo, fora das ruas de baixo (o vão fica livre para quem passa).
+for (const st of STRUCTURES) {
+  if (st.kind === "tunel") continue;
+  let last = -Infinity;
+  for (let i = 0; i < st.points.length; i++) {
+    const gapHere = st.y[i] - st.ground[i];
+    if (st.s[i] < st.sIn || st.s[i] > st.sOut || gapHere < UNDER_CLEARANCE || st.s[i] - last < 30) continue;
+    const [x, z] = st.points[i];
+    if (roadClearance(x, z, GROUND) < 2.5) continue;
+    st.pillars.push({ x, z, r: st.width > 18 ? 1.6 : 1.1 });
+    last = st.s[i];
+  }
 }
 
 const AUTODROMO_CENTER: Point = [400, 405];
@@ -355,13 +569,20 @@ function autodromoClearance(x: number, z: number) {
   return nearestSample(AUTODROMO_TRACK, x, z).distance - AUTODROMO_TRACK.width / 2;
 }
 
-/** O carro está numa rua ou na pista do autódromo? Fora disso é calçada/grama (mais lento). */
-export function isOnRoad(x: number, z: number) {
-  return roadClearance(x, z) <= 1 || autodromoClearance(x, z) <= 1 || onApron(x, z);
+/**
+ * O carro está numa rua ou na pista do autódromo? Fora disso é calçada/grama
+ * (mais lento). Em cima de uma obra de arte é sempre rua (o guarda-corpo segura).
+ */
+export function isOnRoad(x: number, z: number, level: number = GROUND) {
+  if (level >= 0) return true;
+  return roadClearance(x, z, GROUND) <= 1 || autodromoClearance(x, z) <= 1 || onApron(x, z) || onAirportApron(x, z);
 }
 
 const insideLake = (x: number, z: number, margin = 0) =>
   ((x - LAKE.x) / (LAKE.rx + margin)) ** 2 + ((z - LAKE.z) / (LAKE.rz + margin)) ** 2 < 1;
+
+/** Lago, rio ou mar. */
+export const insideWater = (x: number, z: number, margin = 0) => insideLake(x, z, margin) || inRiver(x, z, margin) || z < QUAY_Z + margin;
 
 // --- Prédios, casas, galpões e contêineres ----------------------------------
 
@@ -437,15 +658,17 @@ interface LotStyle {
 const between = (random: () => number, [min, max]: [number, number]) => min + random() * (max - min);
 
 const STYLES: Partial<Record<DistrictId, LotStyle>> = {
+  // Centro: quarteirões cheios, torres altas perto da Rotatória do Hambúrguer.
   centro: {
-    kind: (r, dist) => (dist < 160 && r() < 0.75 ? "tower" : r() < 0.3 ? "shop" : "office"),
-    width: [16, 30],
-    depth: [16, 28],
-    height: (kind, r, dist) => (kind === "tower" ? 45 + r() ** 1.4 * 90 * (1 - dist / 400) : kind === "shop" ? 7 + r() * 4 : 16 + r() * 30),
-    gap: [3, 7],
-    setback: 5,
-    rows: 2,
+    kind: (r, dist) => (dist < 230 && r() < 0.8 ? "tower" : r() < 0.25 ? "shop" : "office"),
+    width: [12, 24],
+    depth: [12, 22],
+    height: (kind, r, dist) => (kind === "tower" ? 50 + r() ** 1.3 * 130 * Math.max(0.25, 1 - dist / 420) : kind === "shop" ? 8 + r() * 5 : 20 + r() * 38),
+    gap: [1, 3],
+    setback: 3,
+    rows: 3,
     tints: 4,
+    center: [-20, -20],
   },
   porto: {
     kind: () => "warehouse",
@@ -529,7 +752,7 @@ const STYLES: Partial<Record<DistrictId, LotStyle>> = {
     setback: 5,
     rows: 2,
     tints: 4,
-    center: [0, 1100],
+    center: [0, 1180],
   },
   // Hangares longe da pista.
   aeroporto: {
@@ -643,7 +866,8 @@ function generateCity() {
     const c = corners(b);
     for (let i = 0; i < 4; i++) points.push([(c[i][0] + c[(i + 1) % 4][0]) / 2, (c[i][1] + c[(i + 1) % 4][1]) / 2]);
     for (const [x, z] of points) {
-      if (!insideWorld(x, z, 4) || roadClearance(x, z) < roadMargin || autodromoClearance(x, z) < 10 || insideLake(x, z, 6)) return false;
+      if (!insideWorld(x, z, 4) || roadClearance(x, z) < roadMargin || autodromoClearance(x, z) < 10 || insideWater(x, z, 6)) return false;
+      if (insideAirport(x, z, 4) || roundaboutIsland(x, z, 4)) return false;
     }
     return !nearby(b.x, b.z).some((other) => overlaps(b, other, 2)) && !reserved.some((r) => overlaps(b as Building, r as Building, 2));
   };
@@ -657,7 +881,7 @@ function generateCity() {
 
   // Lanchonetes e garagens primeiro (elas escolhem o lugar; os lotes comuns desviam).
   const spotRandom = seeded(4242);
-  const candidates = ROADS.filter((r) => (r.kind === "avenida" || r.kind === "rua") && r.length > 90);
+  const candidates = ROADS.filter((r) => (r.kind === "avenida" || r.kind === "rua") && r.length > 90 && r.structure < 0);
   for (const [kind, district, name] of LANDMARK_WISHES) {
     const size = LANDMARK_SIZE[kind];
     const roads = candidates.filter((r) => districtAt(...r.points[Math.floor(r.points.length / 2)]) === district);
@@ -706,7 +930,7 @@ function generateCity() {
   for (const road of ROADS) {
     const total = road.length;
     for (const side of [-1, 1]) {
-      for (let row = 0; row < 2; row++) {
+      for (let row = 0; row < 3; row++) {
         let s = 14;
         let walked = 0;
         let index = 0;
@@ -729,7 +953,8 @@ function generateCity() {
           const nz = -tx * side;
           const probeX = px + nx * (road.width / 2 + 12);
           const probeZ = pz + nz * (road.width / 2 + 12);
-          const style = road.kind === "pista" ? undefined : STYLES[districtAt(probeX, probeZ)];
+          const tunnel = road.structure >= 0 && STRUCTURES[road.structure].kind === "tunel";
+          const style = road.kind === "pista" || road.kind === "taxiway" || tunnel ? undefined : STYLES[districtAt(probeX, probeZ)];
           if (!style || row >= style.rows) {
             s += 12;
             continue;
@@ -739,7 +964,7 @@ function generateCity() {
           const kind = style.kind(random, distFromCenter);
           const w = between(random, style.width);
           const d = between(random, style.depth);
-          const offset = road.width / 2 + style.setback + d / 2 + row * (style.depth[1] + 8);
+          const offset = road.width / 2 + style.setback + d / 2 + row * (style.depth[1] + (style.rows > 2 ? 4 : 8));
           const b: Building = {
             x: px + nx * offset,
             z: pz + nz * offset,
@@ -766,6 +991,38 @@ function generateCity() {
           s += w + between(random, style.gap);
         }
       }
+    }
+  }
+
+  // Miolo dos quarteirões do centro e da Liberdade: prédios onde sobrou espaço,
+  // alinhados com a rua mais perto (o quarteirão fica cheio, sem terreno baldio).
+  for (const [district, tries] of [["centro", 9000], ["liberdade", 9000]] as [DistrictId, number][]) {
+    const style = STYLES[district]!;
+    const box = DISTRICTS.find((d) => d.id === district)!.polygon;
+    const minX = Math.min(...box.map((p) => p[0]));
+    const maxX = Math.max(...box.map((p) => p[0]));
+    const minZ = Math.min(...box.map((p) => p[1]));
+    const maxZ = Math.max(...box.map((p) => p[1]));
+    const [cx, cz] = style.center ?? [-40, -40];
+    for (let k = 0; k < tries; k++) {
+      const x = minX + random() * (maxX - minX);
+      const z = minZ + random() * (maxZ - minZ);
+      if (districtAt(x, z) !== district) continue;
+      const dist = Math.hypot(x - cx, z - cz);
+      // Na Liberdade, o miolo cheio é só perto da praça (longe dela os quarteirões são mais abertos).
+      if (district === "liberdade" && dist > 330 + random() * 120) continue;
+      const near = roadGrid.get(cellKey(x, z));
+      let angle = random() * Math.PI;
+      if (near?.length) {
+        const seg = near[0];
+        angle = Math.atan2(seg.bx - seg.ax, seg.bz - seg.az) + Math.PI / 2;
+      }
+      const kind = style.kind(random, dist);
+      const b: Building = {
+        x, z, w: between(random, style.width), d: between(random, style.depth), angle,
+        height: style.height(kind, random, dist), kind, tint: Math.floor(random() * style.tints), front: 1,
+      };
+      if (free(b, style.setback)) add(b);
     }
   }
 
@@ -796,7 +1053,7 @@ function generateCity() {
       const x = minX + random() * (maxX - minX);
       const z = minZ + random() * (maxZ - minZ);
       if (districtAt(x, z) !== district || !insideWorld(x, z, 6)) continue;
-      if (roadClearance(x, z) < 4 || autodromoClearance(x, z) < 8 || insideLake(x, z, 4)) continue;
+      if (roadClearance(x, z) < 4 || autodromoClearance(x, z) < 8 || insideWater(x, z, 4) || insideAirport(x, z) || roundaboutIsland(x, z, 2)) continue;
       if (reserved.some((r) => insideBox(r, x, z, 3))) continue;
       if (nearby(x, z).some((o) => Math.hypot(o.x - x, o.z - z) < Math.max(o.w, o.d) / 2 + 3)) continue;
       if ((treeCells.get(cellKey(x, z)) ?? []).some((t) => Math.abs(t.x - x) < 5 && Math.abs(t.z - z) < 5)) continue;
@@ -820,7 +1077,7 @@ function distanceAlong(road: Road, x: number, z: number) {
   for (let i = 1; i < road.points.length; i++) {
     const [ax, az] = road.points[i - 1];
     const [bx, bz] = road.points[i];
-    best = Math.min(best, distanceToSegment(x, z, { ax, az, bx, bz, half: 0, road: 0, index: 0 }));
+    best = Math.min(best, distanceToSegment(x, z, { ax, az, bx, bz, half: 0, road: 0, index: 0, level: GROUND }));
   }
   return best;
 }
@@ -927,6 +1184,13 @@ function circlePush(cx: number, cz: number, r: number): [number, number] | null 
  */
 export function collideWorld(car: CarState, halfLength: number = CAR.halfLength, halfWidth: number = CAR.halfWidth, motion?: CarMotion): boolean {
   let hit = false;
+  // Nível (chão, ponte, viaduto, túnel): troca só nas pontas das obras.
+  const level = motion ? (motion.level = nextLevel(car.x, car.z, motion.level ?? GROUND)) : GROUND;
+  if (collideLevel(car, level, halfLength, halfWidth, motion)) hit = true;
+  if (level >= 0) {
+    // Em cima da ponte (ou dentro do túnel) não há prédio, árvore nem água para bater.
+    return clampBounds(car) || hit;
+  }
   const fx = Math.sin(car.heading);
   const fz = Math.cos(car.heading);
   const reach = Math.max(0, halfLength - halfWidth);
@@ -960,15 +1224,71 @@ export function collideWorld(car: CarState, halfLength: number = CAR.halfLength,
     car.speed *= 0.3;
     hit = true;
   }
+  if (inRiver(car.x, car.z)) {
+    // Para a margem mais perto.
+    const [cx, cz, half] = riverNearest(car.x, car.z);
+    const dx = car.x - cx;
+    const dz = car.z - cz;
+    const d = Math.hypot(dx, dz) || 1;
+    car.x = cx + (dx / d) * (half + 0.5);
+    car.z = cz + (dz / d) * (half + 0.5);
+    car.speed *= 0.3;
+    hit = true;
+  }
+  // Ilha da rotatória (jardim com a estátua): dá a volta nela.
+  const island = roundaboutIsland(car.x, car.z, halfWidth);
+  if (island) {
+    const r = island.r - ROAD_WIDTH[island.kind] / 2 - 1.5 + halfWidth;
+    const dx = car.x - island.x;
+    const dz = car.z - island.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const nx = dx / d;
+    const nz = dz / d;
+    car.x = island.x + nx * r;
+    car.z = island.z + nz * r;
+    car.speed *= 1 - 0.6 * Math.abs(Math.sin(car.heading) * nx + Math.cos(car.heading) * nz);
+    hit = true;
+  }
+  return clampBounds(car) || hit;
+}
 
+/** Ponto do eixo do rio mais perto e a meia largura ali. */
+function riverNearest(x: number, z: number): [number, number, number] {
+  let best = Infinity;
+  let out: [number, number, number] = [x, z, 0];
+  const pts = RIVER.points;
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1];
+    const [bx, bz] = pts[i];
+    const dx = bx - ax;
+    const dz = bz - az;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    const px = ax + dx * t;
+    const pz = az + dz * t;
+    const d = Math.hypot(x - px, z - pz);
+    if (d < best) {
+      best = d;
+      out = [px, pz, (RIVER.width[i - 1] + (RIVER.width[i] - RIVER.width[i - 1]) * t) / 2];
+    }
+  }
+  return out;
+}
+
+/** Muro invisível nas bordas do mapa. */
+function clampBounds(car: CarState) {
   const { minX, maxX, minZ, maxZ } = WORLD_BOUNDS;
   if (car.x < minX || car.x > maxX || car.z < minZ || car.z > maxZ) {
     car.x = Math.max(minX, Math.min(maxX, car.x));
     car.z = Math.max(minZ, Math.min(maxZ, car.z));
     car.speed *= -0.3;
-    hit = true;
+    return true;
   }
-  return hit;
+  return false;
+}
+
+/** Rampa na direção do carro, no nível dele (chão ou obra de arte). */
+export function carGrade(car: CarState, motion?: CarMotion) {
+  return surfaceGrade(car.x, car.z, car.heading, motion?.level ?? GROUND, () => gradeAt(car.x, car.z, car.heading));
 }
 
 // --- Grafo de ruas (navegação das viaturas e do trânsito) --------------------
@@ -1009,12 +1329,20 @@ export function linkPoints(link: NavNode["links"][number]): Point[] {
   return link.reversed ? [...points].reverse() : points;
 }
 
-/** Rua mais próxima de um ponto e em que trecho dela (índice do ponto). */
-export function nearestRoad(x: number, z: number) {
+/**
+ * Rua mais próxima de um ponto e em que trecho dela (índice do ponto). Com
+ * `level`, só as ruas daquele nível (em cima de uma ponte, a própria ponte;
+ * no chão, as do chão), se houver alguma perto.
+ */
+export function nearestRoad(x: number, z: number, level?: number) {
   let best: Segment | null = null;
   let bestDist = Infinity;
   const candidates = roadGrid.get(cellKey(x, z));
-  const pool = candidates && candidates.length ? candidates : [...roadGrid.values()].flat();
+  let pool = candidates && candidates.length ? candidates : [...roadGrid.values()].flat();
+  if (level !== undefined) {
+    const own = pool.filter((s) => (level >= 0 ? ROADS[s.road].structure === level : s.level === GROUND));
+    if (own.length) pool = own;
+  }
   for (const s of pool) {
     const d = distanceToSegment(x, z, s);
     if (d < bestDist) {
@@ -1107,6 +1435,7 @@ export function findRoute(from: number, to: number): number[] {
 export type RaceId =
   | "autodromo" | "centro" | "porto" | "pastel" | "parque"
   | "praia" | "picanha" | "yakisoba" | "aeroporto" | "serra" | "gordura" | "roca" | "morro" | "rodoanel" | "serpentina"
+  | "elevado" | "foz" | "tunel-torresmo" | "cebola" | "acucar" | "lago" | "pontes" | "terminal"
   | "radar-porto" | "radar-yakisoba" | "radar-rodoanel";
 
 export interface RaceInfo {
@@ -1179,32 +1508,55 @@ function routeTrack(ids: string[], width: number): Track {
     }
     return [sx / (window * 2 + 1), sz / (window * 2 + 1)] as Point;
   });
-  return buildTrack(smooth, width);
+  const track = buildTrack(smooth, width);
+  // Nível de cada amostra (em cima de uma ponte, dentro de um túnel...).
+  track.levels = pathLevels(track.samples);
+  return track;
 }
 
 // As corridas de radar entram logo abaixo (speedtrap), por isso o "as".
+const PORTO_ROUTE = ["P2", "P3", "P4", "R1", "SE1", "RT2", "RT3", "C1"];
+const YAKISOBA_ROUTE = ["O0", "O1", "O2", "O3", "O4", "O5", "O6", "O7", "O8", "O9", "O10", "O11"];
+const RODOANEL_ROUTE = [
+  "HW1", "HW2", "HW3", "HW4", "HN0", "HN1", "HNm", "HN2", "HN3", "HN4", "HE4", "HE3", "AEE", "HE2", "HE1",
+  "PE3", "PE2", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "BM4", "BM3", "BM2", "BM1", "BM0",
+];
+
 export const RACES = {
   autodromo: { id: "autodromo", name: "Autódromo do Colesterol", laps: 3, track: AUTODROMO_TRACK },
-  centro: { id: "centro", name: "Circuito do Centro", laps: 2, track: routeTrack(["C2", "D2", "M4", "M6", "M3", "C1", "D1"], 16) },
-  porto: { id: "porto", name: "Volta do Porto", laps: 2, track: routeTrack(["P2", "P3", "R1", "M3", "C1", "D1", "S0", "V0", "P1"], 18) },
-  pastel: { id: "pastel", name: "Rota do Pastel", laps: 2, track: routeTrack(["W0", "V3", "V2", "V1", "V0", "S0"], 15) },
-  parque: { id: "parque", name: "Volta do Lago", laps: 2, track: routeTrack(["Q0", "Q1", "Q2", "Q3", "Q4", "R2"], 15) },
-  // Bairros novos: corridas mais largas e com curvas abertas.
-  praia: { id: "praia", name: "Volta da Praia", laps: 2, track: routeTrack(["BA0", "BA1", "HW1", "MK", "MG", "MC", "MB", "MA"], 20) },
-  morro: { id: "morro", name: "Ladeira do Torresmo", laps: 2, track: routeTrack(["MA", "ME", "MI", "MJ", "MK", "MG", "MC", "MB"], 15) },
-  picanha: { id: "picanha", name: "Alto da Picanha", laps: 2, track: routeTrack(["AP0", "AP1", "AP2", "AP5", "AP4", "AP7", "AP6", "AP3"], 15) },
-  yakisoba: { id: "yakisoba", name: "Circuito do Yakisoba", laps: 2, track: routeTrack(["Y10", "Y20", "Y30", "Y31", "Y32", "Y33", "Y23", "Y22", "Y11"], 18) },
-  aeroporto: { id: "aeroporto", name: "Pista do Aeroporto", laps: 2, track: routeTrack(["AE0", "AE1", "AE4", "AE5"], 24) },
+  centro: { id: "centro", name: "Circuito do Centro", laps: 2, track: routeTrack(["RT1", "E1", "R2", "D3", "NE1", "C3", "RT0"], 16) },
+  porto: { id: "porto", name: "Volta do Porto", laps: 2, track: routeTrack(PORTO_ROUTE, 18) },
+  pastel: { id: "pastel", name: "Rota do Pastel", laps: 2, track: routeTrack(["W0", "V3", "V2", "V1", "V0"], 15) },
+  parque: { id: "parque", name: "Volta do Lago", laps: 2, track: routeTrack(["Q0", "Q1", "QS", "Q2", "Q3", "Q4", "QN", "Q5"], 15) },
+  // Bairros em volta: corridas mais largas e com curvas abertas.
+  praia: { id: "praia", name: "Volta da Praia", laps: 2, track: routeTrack(["BM0", "BM1", "BM2", "BM3", "PR3", "PR2", "PR1", "PR0"], 20) },
+  morro: { id: "morro", name: "Ladeira do Torresmo", laps: 2, track: routeTrack(["MB0", "ME", "MI", "MJ", "MF", "MA"], 15) },
+  picanha: { id: "picanha", name: "Alto da Picanha", laps: 2, track: routeTrack(["AP0", "AP1", "AP2", "AP5", "AP4", "AP3"], 15) },
+  yakisoba: { id: "yakisoba", name: "Circuito do Yakisoba", laps: 1, track: routeTrack(YAKISOBA_ROUTE, 18) },
+  aeroporto: { id: "aeroporto", name: "Pista do Aeroporto", laps: 2, track: routeTrack(["AE5", "AE4", "TW1", "TW0"], 24) },
   serra: { id: "serra", name: "Subida da Serra", laps: 2, track: routeTrack(["SA", "SB", "SC", "SD", "SF", "SE"], 15) },
   gordura: { id: "gordura", name: "Circuito da Gordura Trans", laps: 2, track: routeTrack(["I00", "I10", "I20", "I21", "I22", "I12", "I02", "I01"], 18) },
   roca: { id: "roca", name: "Estrada da Roça", laps: 2, track: routeTrack(["RO0", "RO1", "RO2", "RO3"], 15) },
   serpentina: { id: "serpentina", name: "Serpentina do Açúcar", laps: 2, track: routeTrack(["SC", "SZ1", "SZ2", "SZ3", "HN0", "HN1", "SD"], 15) },
-  // O anel inteiro da rodovia (e a beira-mar): uma volta só, de ~12 km.
-  rodoanel: {
-    id: "rodoanel", name: "Rodoanel de Cebola", laps: 1,
-    // Larga na subida do lado oeste (longe do ponto de encontro da Volta do Porto).
-    track: routeTrack(["HW1", "HW2", "HW3", "HN0", "HN1", "HN2", "HN3", "HE3", "HE2", "HE1", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "P0", "BA0", "BA1"], 24),
-  },
+  // O anel inteiro da rodovia (e a beira-mar): uma volta só, de ~13 km, com o Viaduto da Cebola e a Ponte da Foz.
+  rodoanel: { id: "rodoanel", name: "Rodoanel de Cebola", laps: 1, track: routeTrack(RODOANEL_ROUTE, 24) },
+  // --- Obras de arte: pontes, viadutos e túneis ---
+  // Por cima do centro no Elevado Costelão e de volta pela beira-mar.
+  elevado: { id: "elevado", name: "Elevado Costelão", laps: 2, track: routeTrack(["EL0", "EL1", "PA5", "PA4", "P3", "P2", "P1", "V0", "V4"], 20) },
+  // As duas pontes da foz do Rio Banha: a da beira-mar e a do Torresmo.
+  foz: { id: "foz", name: "Travessia da Foz", laps: 2, track: routeTrack(["BM3", "BM4", "PA0", "V1", "V2", "MB0", "PR3"], 18) },
+  // Por dentro do morro e de volta pelas ladeiras.
+  "tunel-torresmo": { id: "tunel-torresmo", name: "Túnel do Torresmo", laps: 2, track: routeTrack(["TT0", "TT1", "MJ", "MI", "ME", "MB0", "MA"], 18) },
+  // O Rodoanel por cima do Distrito e de volta pela Avenida da Gordura.
+  cebola: { id: "cebola", name: "Viaduto da Cebola", laps: 2, track: routeTrack(["HE1", "PE3", "PE2", "I30", "I31", "I41"], 22) },
+  // A Estrada da Serra por dentro do Pico do Açúcar, um pedaço do Rodoanel e a volta pela serra.
+  acucar: { id: "acucar", name: "Túnel do Açúcar", laps: 2, track: routeTrack(["SA", "TS0", "TS1", "HNm", "HN2", "SF", "SE"], 18) },
+  // Curtinha: atravessa o lago pela ponte e dá a volta pela alameda.
+  lago: { id: "lago", name: "Ponte do Lago", laps: 3, track: routeTrack(["QS", "QN", "Q5", "Q0", "Q1"], 15) },
+  // A Ponte Norte e a da Picanha, de um lado e do outro do rio.
+  pontes: { id: "pontes", name: "Pontes do Rio Banha", laps: 2, track: routeTrack(["MC", "N0", "J7", "K0", "AP0", "MD"], 18) },
+  // Em volta do aeroporto: embarque, Rodoanel e a rua do perímetro.
+  terminal: { id: "terminal", name: "Volta do Terminal", laps: 1, track: routeTrack(["AT0", "AT1", "AT2", "AT3", "HE3", "AEE", "AE2", "AE1", "AE0", "AW"], 20) },
 } as Record<RaceId, RaceInfo>;
 
 // Speedtraps: as mesmas ruas de algumas corridas, no sentido contrário (o ponto de
@@ -1213,14 +1565,14 @@ function speedtrap(id: RaceId, name: string, ids: string[], width: number, laps:
   const track = routeTrack([...ids].reverse(), width);
   RACES[id] = { id, name, laps, track, kind: "radar", radars: radarSpots(track, radars) };
 }
-speedtrap("radar-porto", "Radar do Porto", ["P2", "P3", "R1", "M3", "C1", "D1", "S0", "V0", "P1"], 18, 1, 4);
-speedtrap("radar-yakisoba", "Radar da Liberdade", ["Y10", "Y20", "Y30", "Y31", "Y32", "Y33", "Y23", "Y22", "Y11"], 18, 1, 4);
-speedtrap("radar-rodoanel", "Radar do Rodoanel", ["HW1", "HW2", "HW3", "HN0", "HN1", "HN2", "HN3", "HE3", "HE2", "HE1", "PE1", "PE0", "P5", "P4", "P3", "P2", "P1", "P0", "BA0", "BA1"], 24, 1, 6);
+speedtrap("radar-porto", "Radar do Porto", PORTO_ROUTE, 18, 1, 4);
+speedtrap("radar-yakisoba", "Radar da Liberdade", YAKISOBA_ROUTE, 18, 1, 4);
+speedtrap("radar-rodoanel", "Radar do Rodoanel", RODOANEL_ROUTE, 24, 1, 6);
 
 export const RACE_IDS = Object.keys(RACES) as RaceId[];
 
 /** Nome da corrida com a preposição certa: "no Circuito do Centro", "na Volta do Lago". */
-export const atRace = (id: RaceId) => `${/^(Volta|Rota|Ladeira|Subida|Pista|Estrada|Rodovia|Serpentina)\b/.test(RACES[id].name) ? "na" : "no"} ${RACES[id].name}`;
+export const atRace = (id: RaceId) => `${/^(Volta|Rota|Ladeira|Subida|Pista|Estrada|Rodovia|Serpentina|Travessia|Ponte|Pontes)\b/.test(RACES[id].name) ? "na" : "no"} ${RACES[id].name}`;
 
 export const isRaceId = (value: unknown): value is RaceId =>
   typeof value === "string" && value in RACES;
@@ -1238,7 +1590,7 @@ export function raceMarker(id: RaceId) {
 // --- Nascimento e comida -----------------------------------------------------
 
 /** Onde se nasce no mundo aberto: no meio de ruas do centro, de frente para a rua. */
-export const SPAWNS = (["C2", "M1", "M4", "C5"] as const).map((id) => {
+export const SPAWNS = (["CB2", "CC2", "CB3", "CC3"] as const).map((id) => {
   const node = NAV[navIndex.get(id)!];
   const link = node.links[0];
   const points = linkPoints(link);

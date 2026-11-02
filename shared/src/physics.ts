@@ -37,9 +37,11 @@ export interface CarMotion {
   vx: number;
   vz: number;
   spin: number;
+  /** Nível em que o carro anda: -1 = chão, senão a obra de arte (ponte, viaduto, túnel) em STRUCTURES. */
+  level: number;
 }
 
-export const createMotion = (): CarMotion => ({ vx: 0, vz: 0, spin: 0 });
+export const createMotion = (): CarMotion => ({ vx: 0, vz: 0, spin: 0, level: -1 });
 
 /** Estado do trem de força (só no servidor; o giro e a marcha vão para o estado da sala). */
 export interface DriveState {
