@@ -90,6 +90,7 @@ const HORNS: Record<string, HornProfile> = {
   fusca: { notes: [470], formant: 2400 },
   uno: { notes: [440, 554], formant: 2000 },
   gol: { notes: [415, 523], formant: 1900 },
+  etios: { notes: [440, 523], formant: 2000 },
   civic: { notes: [466, 587], formant: 2100 },
   golf: { notes: [440, 554], formant: 2000 },
   opala: { notes: [330, 415], formant: 1500 },
@@ -276,6 +277,8 @@ export class Sound {
   private nitroHiss!: ReturnType<typeof noiseLoop>;
   private siren: Siren | null = null;
   private music: Music | null = null;
+  /** Jogo pausado (a música espera). */
+  private musicPaused = false;
   private voices = new Voices();
   private wantedSong: SongName | null = null;
   private wantedCue: CueName | null = null;
@@ -343,6 +346,7 @@ export class Sound {
       this.music.onTrack = (info) => this.onTrack?.(info);
       this.music.setEnabled(this.prefs.music);
       if (this.wantedCue) this.music.setCue(this.wantedCue);
+      if (this.musicPaused) this.music.setPaused(true);
       if (this.wantedSong) this.music.play(this.wantedSong);
     } catch (err) {
       console.error("Áudio indisponível", err);
@@ -386,6 +390,12 @@ export class Sound {
     if (!this.music) return;
     if (name) this.music.play(name);
     else this.music.stop();
+  }
+
+  /** Pausa do jogo: a música para e, ao sair da pausa, continua de onde parou. */
+  pauseMusic(on: boolean) {
+    this.musicPaused = on;
+    this.music?.setPaused(on);
   }
 
   /** Começa a gravar o começo de uma trilha antes de ela tocar (a abertura). */
@@ -459,7 +469,7 @@ export class Sound {
 
   /** Estado da trilha (para os testes). */
   audioState() {
-    return { ...(this.music?.state() ?? { mood: this.wantedSong, cue: this.wantedCue, track: null, enabled: this.prefs.music }), cinematic: this.cine };
+    return { ...(this.music?.state() ?? { mood: this.wantedSong, cue: this.wantedCue, track: null, enabled: this.prefs.music, paused: this.musicPaused }), cinematic: this.cine };
   }
 
   /** Segundos desde o último quadro de som (para as contas de tempo dos motores). */
@@ -766,6 +776,11 @@ export class Sound {
 
   click() {
     if (this.ctx) fx.tick(this.kit);
+  }
+
+  /** Porta de enrolar da garagem (subindo ou descendo por `seconds`). */
+  garageDoor(seconds: number, volume = 1) {
+    if (this.ctx) fx.rollDoor(this.kit, seconds, volume);
   }
 
   // --- Abertura ----------------------------------------------------------------

@@ -37,9 +37,11 @@ export interface CarMotion {
   vx: number;
   vz: number;
   spin: number;
+  /** Nível em que o carro anda: -1 = chão, senão a obra de arte (ponte, viaduto, túnel) em STRUCTURES. */
+  level: number;
 }
 
-export const createMotion = (): CarMotion => ({ vx: 0, vz: 0, spin: 0 });
+export const createMotion = (): CarMotion => ({ vx: 0, vz: 0, spin: 0, level: -1 });
 
 /** Estado do trem de força (só no servidor; o giro e a marcha vão para o estado da sala). */
 export interface DriveState {
@@ -59,6 +61,11 @@ export interface DriveState {
   steer: number;
   /** Suaviza o volante (jogadores); a IA já manda um volante proporcional. */
   smoothSteer: boolean;
+  /**
+   * Fração da força do motor que chega no chão (1 = toda). A arrancada usa:
+   * largada fora da faixa certa patina ou "morre" por um instante.
+   */
+  traction?: number;
 }
 
 export const CAR = {
@@ -227,7 +234,7 @@ export function stepCar(
   const engineForce = drive.shiftTimer > 0 || drive.limiter
     ? 0
     : (torqueAt(spec, drive.rpm) * gearRatio(spec, drive.gear) * spec.finalDrive * DRIVETRAIN / spec.wheelRadius) * drive.pedal
-      * (reverse ? 1 : 1 + Math.max(0, nitro));
+      * (reverse ? 1 : 1 + Math.max(0, nitro)) * (drive.traction ?? 1);
   const drag = 0.5 * AIR_DENSITY * spec.dragArea * v * Math.abs(v);
   const rolling = (onGrass ? 0.32 : 0.015) * spec.mass * GRAVITY * Math.sign(v);
   // Freio motor: tirar o pé segura o carro, mais forte em giro alto.
@@ -320,6 +327,28 @@ export function topSpeed(spec: CarSpec) {
   }
   return best;
 }
+
+/** Força do motor nas rodas (N) a `speed` m/s numa marcha, com o pé no fundo (0 se passa do limitador). */
+export function gearForce(spec: CarSpec, speed: number, gear: number) {
+  const rpm = wheelRpm(spec, speed, gear);
+  if (rpm > spec.redline) return 0;
+  return torqueAt(spec, Math.max(rpm, spec.idleRpm)) * gearRatio(spec, gear) * spec.finalDrive * DRIVETRAIN / spec.wheelRadius;
+}
+
+/** A maior força nas rodas (N) a essa velocidade, na melhor marcha. */
+export function bestDriveForce(spec: CarSpec, speed: number) {
+  let best = 0;
+  for (let g = 1; g <= spec.gears.length; g++) best = Math.max(best, gearForce(spec, speed, g));
+  return best;
+}
+
+/** Ar e rolagem no asfalto (N), contra o movimento. */
+export function roadResistance(spec: CarSpec, speed: number) {
+  return 0.5 * AIR_DENSITY * spec.dragArea * speed * Math.abs(speed) + 0.015 * spec.mass * GRAVITY;
+}
+
+/** Gravidade ao longo da rampa (N; positivo = segura, na subida). */
+export const hillForce = (spec: CarSpec, grade: number) => (spec.mass * GRAVITY * grade) / Math.sqrt(1 + grade * grade);
 
 /** Tempo de 0 a 100 km/h (s), simulando com o câmbio automático. */
 export function zeroToHundred(spec: CarSpec) {

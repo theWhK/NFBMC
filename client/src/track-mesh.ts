@@ -6,7 +6,10 @@ import * as THREE from "three";
 import { makeFlag } from "./flag.ts";
 import { scaleUv } from "./prop-kit.ts";
 import { sponsorStripMaterial } from "./teams.ts";
-import { heightAt, trackCorridor, type Track } from "@nfbmc/shared";
+import { GROUND, dragPoint, heightAt, pathLevels, surfaceY, trackCorridor, type DragInfo, type Track } from "@nfbmc/shared";
+
+/** Altura da superfície numa amostra do traçado (em cima da ponte, no tabuleiro). */
+const trackY = (track: Track, i: number, x: number, z: number) => surfaceY(x, z, track.levels?.[i % track.samples.length] ?? GROUND);
 
 /** Faixa ao longo da pista, entre `inner` e `outer` metros do centro (negativo = lado direito). */
 function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?: (i: number) => THREE.Color) {
@@ -22,7 +25,7 @@ function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?:
     const iz = s.z - s.tx * inner;
     const ox = s.x + s.tz * outer;
     const oz = s.z - s.tx * outer;
-    positions.push(ix, heightAt(ix, iz) + y, iz, ox, heightAt(ox, oz) + y, oz);
+    positions.push(ix, trackY(track, i, ix, iz) + y, iz, ox, trackY(track, i, ox, oz) + y, oz);
     if (colorAt) {
       const c = colorAt(i);
       colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
@@ -87,7 +90,7 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
   // Com o plano deitado, o eixo X dele vira (cos, 0, -sin) do ângulo: igual ao pórtico, atravessando a pista.
   line.rotation.z = heading;
   // Um pouco mais alta: na ladeira, o meio da linha não pode afundar no asfalto.
-  line.position.set(start.x, heightAt(start.x, start.z) + 0.25, start.z);
+  line.position.set(start.x, trackY(track, 0, start.x, start.z) + 0.25, start.z);
   group.add(line);
 
   // Pórtico de largada: duas colunas e uma faixa em cima.
@@ -106,7 +109,7 @@ export function buildTrackMesh(track: Track, options: { asphalt: boolean; banner
     gate.add(flag);
   }
   gate.rotation.y = heading;
-  gate.position.set(start.x, heightAt(start.x, start.z), start.z);
+  gate.position.set(start.x, trackY(track, 0, start.x, start.z), start.z);
   group.add(gate);
 
   return group;
@@ -169,7 +172,7 @@ export function buildBarriers(track: Track) {
       const offset = (panel.side > 0 ? corridor.left[k % n] : corridor.right[k % n]) - 0.3;
       const x = s.x + s.tz * offset * panel.side;
       const z = s.z - s.tx * offset * panel.side;
-      const y = heightAt(x, z);
+      const y = trackY(track, k, x, z);
       const u = ((k - panel.from) * spacing) / 4;
       positions.push(x, y + 0.05, z, x, y + BARRIER_HEIGHT, z);
       uvs.push(u, 0, u, 1);
@@ -190,6 +193,85 @@ export function buildBarriers(track: Track) {
   mesh.name = "race-barriers";
   mesh.renderOrder = 2;
   return { mesh, texture };
+}
+
+/**
+ * Arrancada: faixas pintadas na pista, a linha de largada com a "árvore de
+ * Natal" (o semáforo do drag) entre as faixas e a chegada xadrez com o pórtico.
+ */
+export function buildDragStrip(track: Track, drag: DragInfo) {
+  const group = new THREE.Group();
+  const paint = new THREE.MeshLambertMaterial({ color: "#f5f5f5", polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const lane = Math.abs(drag.lanes[0]);
+  const from = drag.start - 15;
+  const to = drag.start + drag.distance + 20;
+  // Linhas das faixas: o meio (entre os carros) e as bordas de fora.
+  const line = (side: number, width: number, dashed: boolean) => {
+    for (let d = from; d < to; d += dashed ? 12 : 30) {
+      const length = dashed ? 6 : 30;
+      const a = dragPoint(track, d, side);
+      const b = dragPoint(track, Math.min(to, d + length), side);
+      const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, Math.hypot(b.x - a.x, b.z - a.z)), paint);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.z = a.heading;
+      mesh.position.set(mid.x, heightAt(mid.x, mid.z) + 0.2, mid.z);
+      group.add(mesh);
+    }
+  };
+  line(0, 0.4, true);
+  line(lane * 2, 0.35, false);
+  line(-lane * 2, 0.35, false);
+
+  // Linha de largada (branca) e de chegada (xadrez), atravessando as duas faixas.
+  const across = (dist: number, material: THREE.Material, depth: number) => {
+    const p = dragPoint(track, dist, 0);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(lane * 4, depth), material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.z = p.heading;
+    mesh.position.set(p.x, heightAt(p.x, p.z) + 0.22, p.z);
+    group.add(mesh);
+    return p;
+  };
+  across(drag.start, paint, 0.6);
+  const checker = new THREE.MeshLambertMaterial({ map: checkerTexture(), polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const finish = across(drag.start + drag.distance, checker, 2);
+
+  // Árvore de Natal: poste entre as faixas, logo à frente da largada, com as
+  // luzes amarelas e a verde (desenho fixo; quem conta é o HUD).
+  const tree = new THREE.Group();
+  tree.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 3, 0.3), new THREE.MeshLambertMaterial({ color: "#333333" })).translateY(1.5));
+  const colors = ["#ffb000", "#ffb000", "#ffb000", "#3ddc4a"];
+  colors.forEach((color, i) => {
+    for (const side of [-0.35, 0.35]) {
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color }));
+      bulb.position.set(side, 3.2 - i * 0.42, 0);
+      tree.add(bulb);
+    }
+  });
+  const treeSpot = dragPoint(track, drag.start + 6, 0);
+  tree.rotation.y = treeSpot.heading;
+  tree.position.set(treeSpot.x, heightAt(treeSpot.x, treeSpot.z), treeSpot.z);
+  group.add(tree);
+
+  // Pórtico na chegada, com as bandeiras do Orgulho Gordo.
+  const post = new THREE.MeshLambertMaterial({ color: "#333333" });
+  const banner = new THREE.MeshLambertMaterial({ color: "#ffc42e" });
+  const half = lane * 2 + 2;
+  const gate = new THREE.Group();
+  gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(half).translateY(3.5));
+  gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(-half).translateY(3.5));
+  gate.add(new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.6, 1.6, 0.4), banner).translateY(7));
+  for (const side of [1, -1]) {
+    const flag = makeFlag(4, 3.6);
+    flag.position.set(side * half, 7.8, 0);
+    flag.rotation.y = side > 0 ? 0 : Math.PI;
+    gate.add(flag);
+  }
+  gate.rotation.y = finish.heading;
+  gate.position.set(finish.x, heightAt(finish.x, finish.z), finish.z);
+  group.add(gate);
+  return group;
 }
 
 /** As setas das barreiras correm no sentido da corrida. */
@@ -226,7 +308,9 @@ function gpsTexture() {
  * pontos da rota são 6 índices, então dá para esconder o que já passou com o
  * `drawRange` (`gpsDrawFrom`).
  */
-export function buildGpsRibbon(route: [number, number][]) {
+export function buildGpsRibbon(route: [number, number][], startLevel = GROUND) {
+  // Nível de cada ponto (a rota passa por cima das pontes e por dentro dos túneis).
+  const levels = pathLevels(route.map(([x, z]) => ({ x, z })), false, startLevel);
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -243,7 +327,7 @@ export function buildGpsRibbon(route: [number, number][]) {
     for (const side of [1, -1]) {
       const px = x + nx * half * side;
       const pz = z + nz * half * side;
-      positions.push(px, heightAt(px, pz) + 0.22, pz);
+      positions.push(px, surfaceY(px, pz, levels[i]) + 0.22, pz);
       uvs.push(u, side > 0 ? 1 : 0);
     }
     if (i < route.length - 1) {

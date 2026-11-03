@@ -6,9 +6,16 @@ import {
   RACES,
   pointOnTrack,
   RACE_IDS,
+  raceSummary,
   carSpec,
+  GROUND,
+  STRUCTURES,
+  TUNNEL_HEIGHT,
   heightAt,
+  locate,
   slopeAt,
+  surfaceSlope,
+  surfaceY,
   isOnRoad,
   rampSteer,
   yawRate,
@@ -27,8 +34,10 @@ import { LOD_CHUNKS } from "./chunks.ts";
 import { applyLook, surface, type Look } from "./look.ts";
 import { RealPass, skyEnvironment } from "./realism.ts";
 import { CHUNKS, SUN_DIRECTION, buildScenery, glowTexture, waterNormal } from "./scenery.ts";
-import { InkPass, type Quality } from "./toon.ts";
-import { animateBarriers, buildBarriers, buildGpsRibbon, buildTrackMesh, gpsDrawFrom } from "./track-mesh.ts";
+import { PRESETS, isPreset, loadOverrides, saveOverrides, type Graphics, type Preset } from "./graphics.ts";
+import { SpeedBlur, blurForSpeed } from "./speed-blur.ts";
+import { InkPass } from "./toon.ts";
+import { animateBarriers, buildBarriers, buildDragStrip, buildGpsRibbon, buildTrackMesh, gpsDrawFrom } from "./track-mesh.ts";
 
 /** O que a cena precisa saber de cada carro (vem do estado da sala). */
 export interface CarView {
@@ -48,6 +57,8 @@ export interface CarView {
   cop?: boolean;
   /** Carro do trânsito, e de que tipo. */
   traffic?: TrafficKind;
+  /** Nível (-1 = chão; senão a ponte, viaduto ou túnel em STRUCTURES). */
+  level?: number;
 }
 
 export interface FoodView {
@@ -75,8 +86,10 @@ interface CarEntry {
   receivedAt: number;
   /** Volante previsto do próprio carro (o mesmo `rampSteer` do servidor). */
   steer: number;
-  /** Altura do chão embaixo do carro (relevo). */
+  /** Altura do chão embaixo do carro (relevo, ou o tabuleiro da ponte/túnel em que ele está). */
   y: number;
+  /** Nível do carro (GROUND ou a obra de arte), como o servidor mandou. */
+  level: number;
 }
 
 /**
@@ -163,8 +176,7 @@ function makeMarker(id: RaceId) {
   glow.scale.setScalar(26);
   glow.position.y = 3;
   group.add(glow);
-  const km = (race.track.length / 1000).toFixed(1).replace(".", ",");
-  const label = markerLabel(race.name, `${race.laps} voltas · ${km} km`);
+  const label = markerLabel(race.name, raceSummary(id));
   label.position.y = 22;
   group.add(label);
   group.position.set(spot.x, heightAt(spot.x, spot.z), spot.z);
@@ -173,9 +185,10 @@ function makeMarker(id: RaceId) {
 
 /**
  * Qualidade gráfica: a escolhida nas Opções ou, sem escolha, automática
- * (sem placa de vídeo → baixa; celular → média; computador → alta).
+ * (sem placa de vídeo → baixa; celular → média; computador → alta; o ultra
+ * só escolhido à mão).
  */
-function chooseQuality(renderer: THREE.WebGLRenderer, choice?: string): Quality {
+function chooseQuality(renderer: THREE.WebGLRenderer, choice?: string): Preset {
   let saved: string | null = choice ?? null;
   if (choice === undefined) {
     try {
@@ -184,7 +197,7 @@ function chooseQuality(renderer: THREE.WebGLRenderer, choice?: string): Quality 
       // Sem localStorage: automática.
     }
   }
-  if (saved === "alto" || saved === "medio" || saved === "baixo") return saved;
+  if (isPreset(saved)) return saved;
   if (isSoftwareRenderer(renderer)) return "baixo";
   return window.matchMedia?.("(pointer: coarse)").matches ? "medio" : "alto";
 }
@@ -201,12 +214,6 @@ function chooseLook(choice?: string): Look {
   }
   return saved === "quadrinho" ? "quadrinho" : "realista";
 }
-
-/**
- * Até onde (m) os blocos da cidade aparecem com todos os detalhes (casas com
- * janelas, telhas, sinalização miúda); além disso, a versão simples.
- */
-const DETAIL_RANGE: Record<Quality, number> = { alto: 340, medio: 190, baixo: 0 };
 
 /**
  * Câmeras (tecla C), nesta ordem: capô, primeira pessoa, terceira pessoa perto
@@ -383,12 +390,20 @@ export class GameScene {
   private barriers: { mesh: THREE.Mesh; texture: THREE.Texture } | null = null;
   /** Rota do GPS no chão (mundo aberto). */
   private gpsRoute: THREE.Mesh | null = null;
+  /** Nível do carro seguido (para a rota do GPS sair do tabuleiro, se ele está numa ponte). */
+  private followLevel = GROUND;
   private markers: THREE.Group;
   private light: THREE.DirectionalLight;
   private ambient: THREE.HemisphereLight;
   private skyMaterial: THREE.Material;
   private clouds: THREE.Object3D;
-  quality: Quality;
+  /** Preset de gráficos (Opções) e a regulagem que vale (o preset com os ajustes avulsos). */
+  quality: Preset;
+  graphics: Graphics;
+  private overrides: Partial<Graphics> = loadOverrides();
+  /** Borrão de velocidade fora do composer (quadrinho, realista sem pós). */
+  private blur: SpeedBlur;
+  private blurStrength = 0;
   /** Visual: realista (materiais físicos) ou quadrinho (cel-shading com contorno). */
   look: Look;
   private ink: InkPass | null = null;
@@ -405,6 +420,8 @@ export class GameScene {
   private leaving: { model: CarModel; since: number }[] = [];
   /** Oficina no mundo aberto: a câmera gira devagar em volta do carro parado na garagem. */
   private garageCam = false;
+  /** Câmera dentro da garagem: o sol e o céu quase não entram. */
+  private indoor = false;
   /** Ficha do próprio carro (com a tunagem), para a previsão da curva bater com a do servidor. */
   localSpec: CarSpec | null = null;
   /** Câmera atual (C troca): capô, primeira pessoa, terceira perto ou longe. */
@@ -434,14 +451,17 @@ export class GameScene {
   private director: CineDirector | null = null;
   /** Resolução adaptativa: cai quando o FPS fica baixo (PC fraco ou sem placa de vídeo). */
   // No celular começa um pouco mais baixa: a tela é pequena e a bateria agradece.
-  private pixelRatio = Math.min(window.devicePixelRatio, window.matchMedia?.("(pointer: coarse)").matches ? 1.5 : 2);
+  private pixelRatio = 1;
+  /** Densidade de pixels máxima: a da tela, limitada pela regulagem (e 0,5 sem placa de vídeo). */
+  private get maxPixelRatio() {
+    return isSoftwareRenderer(this.renderer) ? 0.5 : Math.min(window.devicePixelRatio, this.graphics.resolution);
+  }
   private fpsFrames = 0;
   private fpsTime = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    if (isSoftwareRenderer(this.renderer)) this.pixelRatio = 0.5;
-    this.renderer.setPixelRatio(this.pixelRatio);
+    this.blur = new SpeedBlur(this.renderer);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
 
@@ -459,6 +479,9 @@ export class GameScene {
     this.scene.add(this.markers);
 
     this.quality = chooseQuality(this.renderer);
+    this.graphics = { ...PRESETS[this.quality], ...this.overrides };
+    this.pixelRatio = this.maxPixelRatio;
+    this.renderer.setPixelRatio(this.pixelRatio);
     this.look = chooseLook();
     this.scene.add(this.cockpit.group);
     this.configure();
@@ -481,10 +504,36 @@ export class GameScene {
    */
   setQuality(choice: string) {
     const next = chooseQuality(this.renderer, choice);
-    if (next === this.quality) return next;
+    // Escolher um preset desfaz os ajustes avulsos.
+    if (next === this.quality && !Object.keys(this.overrides).length) return next;
     this.quality = next;
-    this.configure();
+    this.overrides = {};
+    saveOverrides(this.overrides);
+    this.applyGraphics();
     return next;
+  }
+
+  /** Ajustes avulsos (Opções → Gráficos avançados), por cima do preset. */
+  setGraphics(change: Partial<Graphics>) {
+    this.overrides = { ...this.overrides, ...change };
+    for (const key of Object.keys(this.overrides) as (keyof Graphics)[]) {
+      if (this.overrides[key] === PRESETS[this.quality][key]) delete this.overrides[key];
+    }
+    saveOverrides(this.overrides);
+    this.applyGraphics();
+  }
+
+  /** Tem ajuste avulso (o preset vira "personalizado"). */
+  get customized() {
+    return Object.keys(this.overrides).length > 0;
+  }
+
+  private applyGraphics() {
+    this.graphics = { ...PRESETS[this.quality], ...this.overrides };
+    // A resolução volta ao teto escolhido (a adaptativa recomeça dali).
+    this.pixelRatio = this.maxPixelRatio;
+    this.renderer.setPixelRatio(this.pixelRatio);
+    this.configure();
   }
 
   /** Troca o visual na hora (Opções): realista ou quadrinho. `choice` vazio = o padrão. */
@@ -496,9 +545,9 @@ export class GameScene {
     return next;
   }
 
-  /** Realista na qualidade baixa: fica no material mais leve (Lambert), sem reflexo. */
+  /** Realista sem reflexos: fica no material mais leve (Lambert). */
   private get simple() {
-    return this.look === "realista" && this.quality === "baixo";
+    return this.look === "realista" && !this.graphics.reflections;
   }
 
   /**
@@ -508,31 +557,34 @@ export class GameScene {
   private configure() {
     const real = this.look === "realista";
     const rich = real && !this.simple;
-    if (!real && this.quality !== "baixo") this.ink ??= new InkPass(this.renderer);
+    const { occlusion, bloom, outline } = this.graphics;
+    if (!real && outline) this.ink ??= new InkPass(this.renderer);
     else this.ink = null;
-    if (real && this.quality === "alto") this.real ??= new RealPass(this.renderer, this.scene, this.camera);
-    else {
+    if (real && (occlusion || bloom)) {
+      this.real ??= new RealPass(this.renderer, this.scene, this.camera);
+      this.real.occlusion = occlusion;
+      this.real.glow = bloom;
+    } else {
       this.real?.dispose();
       this.real = null;
     }
     if (rich) this.environment ??= skyEnvironment(this.renderer, this.skyMaterial, "#4a4032");
     this.scene.environment = rich ? this.environment : null;
-    this.scene.environmentIntensity = 0.55;
-    // Com o reflexo do céu iluminando tudo, a luz ambiente diminui (senão tudo fica lavado).
-    this.ambient.intensity = rich ? 0.75 : 1.4;
-    this.light.intensity = rich ? 2.8 : 2.4;
+    this.lightLevels();
     for (const cloud of this.clouds.children) {
       const textures = cloud.userData.textures as Record<Look, THREE.Texture> | undefined;
       if (textures) (cloud as THREE.Sprite).material.map = textures[this.look];
     }
     applyLook(this.scene, this.look, this.simple);
-    if (this.quality === "alto") this.enableShadows();
+    const hadShadows = this.renderer.shadowMap.enabled;
+    if (this.graphics.shadows > 0) this.enableShadows();
     else {
       this.renderer.shadowMap.enabled = false;
       this.light.castShadow = false;
     }
-    // Ligar/desligar sombra muda o shader dos materiais: recompila.
-    this.scene.traverse((object) => {
+    // Ligar/desligar sombra muda o shader dos materiais: recompila. Só nessa
+    // hora: recompilar a cidade inteira a cada ajuste travava a tela por segundos.
+    if (hadShadows !== this.renderer.shadowMap.enabled) this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh) return;
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) material.needsUpdate = true;
@@ -540,13 +592,34 @@ export class GameScene {
     this.resize();
   }
 
+  /** Força do sol, do céu e do reflexo (dentro da garagem, quase nada entra). */
+  private lightLevels() {
+    const rich = this.look === "realista" && !this.simple;
+    const inside = this.indoor;
+    this.scene.environmentIntensity = inside ? 0.18 : 0.55;
+    // Com o reflexo do céu iluminando tudo, a luz ambiente diminui (senão tudo fica lavado).
+    this.ambient.intensity = (rich ? 0.75 : 1.4) * (inside ? 0.22 : 1);
+    this.light.intensity = (rich ? 2.8 : 2.4) * (inside ? 0.04 : 1);
+  }
+
+  /** Dentro da garagem (client/src/garage-cutscene.ts): quem ilumina são as luzes de lá. */
+  setIndoor(on: boolean) {
+    if (on === this.indoor) return;
+    this.indoor = on;
+    this.lightLevels();
+    // As colunas de luz das corridas (com o nome por cima de tudo) não atravessam as paredes.
+    if (on) this.markersOutside = this.markers.visible;
+    this.markers.visible = on ? false : this.markersOutside;
+  }
+  private markersOutside = false;
+
   private enableShadows() {
     const real = this.look === "realista";
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.light.castShadow = true;
-    // No realista, mapa maior e borda macia (o raio espalha a borda da sombra).
-    const size = real ? 4096 : 2048;
+    // O tamanho do mapa vem da regulagem; no realista, borda macia (o raio espalha a borda da sombra).
+    const size = this.graphics.shadows;
     if (this.light.shadow.mapSize.x !== size) {
       this.light.shadow.mapSize.set(size, size);
       this.light.shadow.map?.dispose();
@@ -577,7 +650,7 @@ export class GameScene {
   /** Objeto novo na cena (carro, comida): mesmo visual do resto. */
   private dress(object: THREE.Object3D) {
     applyLook(object, this.look, this.simple);
-    if (this.quality === "alto") object.traverse((o) => this.shadowsOn(o));
+    if (this.graphics.shadows > 0) object.traverse((o) => this.shadowsOn(o));
   }
 
   private resize() {
@@ -585,6 +658,7 @@ export class GameScene {
     this.renderer.setSize(w, h);
     this.ink?.setSize(w, h, this.pixelRatio);
     this.real?.setSize(w, h, this.pixelRatio);
+    this.blur.setSize(w, h, this.pixelRatio);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -596,10 +670,13 @@ export class GameScene {
     const fps = this.fpsFrames / this.fpsTime;
     this.fpsFrames = 0;
     this.fpsTime = 0;
+    if (!this.graphics.adaptive) return;
+    // Com limite de FPS, "lento" é bem abaixo do limite (e não abaixo de 38).
+    const slow = fps < (this.graphics.fpsCap ? Math.min(38, this.graphics.fpsCap * 0.85) : 38);
     // Aba em segundo plano não conta (o navegador pausa os quadros).
     // Primeiro sai a oclusão de ambiente (a parte mais pesada); só depois a resolução cai.
-    if (fps < 38 && fps > 3 && this.real?.occlusion) this.real.occlusion = false;
-    else if (fps < 38 && fps > 3 && this.pixelRatio > 0.5) {
+    if (slow && fps > 3 && this.real?.occlusion) this.real.occlusion = false;
+    else if (slow && fps > 3 && this.pixelRatio > 0.5) {
       this.pixelRatio = Math.max(0.5, this.pixelRatio * 0.75);
       this.renderer.setPixelRatio(this.pixelRatio);
       this.resize();
@@ -623,7 +700,13 @@ export class GameScene {
       this.barriers.texture.dispose();
       this.barriers = null;
     }
-    if (raceId && raceId !== "autodromo") {
+    const dragInfo = raceId ? RACES[raceId].drag : undefined;
+    if (raceId && dragInfo) {
+      // Arrancada: faixas, largada com o semáforo e chegada (sem barreiras: a direção é automática).
+      this.raceOverlay = buildDragStrip(RACES[raceId].track, dragInfo);
+      this.dress(this.raceOverlay);
+      this.scene.add(this.raceOverlay);
+    } else if (raceId && raceId !== "autodromo") {
       const race = RACES[raceId];
       this.raceOverlay = buildTrackMesh(race.track, { asphalt: false, bannerColor: race.kind === "radar" ? "#2a6bff" : "#ff7a00" });
       // Speedtrap: um poste de radar na beira da pista em cada ponto de medição.
@@ -634,7 +717,7 @@ export class GameScene {
       this.dress(this.raceOverlay);
       this.scene.add(this.raceOverlay);
     }
-    if (raceId) {
+    if (raceId && !dragInfo) {
       // Barreiras nas saídas e nas curvas (o autódromo também tem).
       this.barriers = buildBarriers(RACES[raceId].track);
       this.scene.add(this.barriers.mesh);
@@ -647,6 +730,16 @@ export class GameScene {
   }
 
   /** Rota do GPS no chão (lista vazia apaga). */
+  /** Altura do teto (menos uma folga) se o carro seguido está dentro de um túnel; senão null. */
+  private tunnelCeiling(entry: CarEntry) {
+    if (entry.level < 0) return null;
+    const st = STRUCTURES[entry.level];
+    if (st.kind !== "tunel") return null;
+    const loc = locate(st, entry.x, entry.z, 20);
+    if (!loc || loc.ground - loc.y < 1) return null;
+    return loc.y + TUNNEL_HEIGHT - 1.2;
+  }
+
   setGpsRoute(route: [number, number][]) {
     if (this.gpsRoute) {
       this.scene.remove(this.gpsRoute);
@@ -657,7 +750,8 @@ export class GameScene {
       this.gpsRoute = null;
     }
     if (route.length < 2) return;
-    this.gpsRoute = buildGpsRibbon(route);
+    // A rota começa no nível do carro (se ele está na ponte, a rota sai do tabuleiro).
+    this.gpsRoute = buildGpsRibbon(route, this.followLevel);
     this.scene.add(this.gpsRoute);
   }
 
@@ -765,7 +859,8 @@ export class GameScene {
         model.group.rotation.order = "YXZ";
         entry = {
           model, x: car.x, z: car.z, heading: car.heading, key, lean: 0, skid: 0, offroad: false,
-          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0, y: heightAt(car.x, car.z),
+          serverX: car.x, serverZ: car.z, serverHeading: car.heading, receivedAt: this.time, steer: 0,
+          y: surfaceY(car.x, car.z, car.level ?? GROUND), level: car.level ?? GROUND,
         };
         this.scene.add(model.group);
         this.cars.set(id, entry);
@@ -805,7 +900,7 @@ export class GameScene {
     // Blocos com nível de detalhe: perto, a versão detalhada (montada na primeira
     // vez, no máximo uma por quadro, a mais perto primeiro); longe, a simples. A
     // detalhada de um bloco que ficou bem longe é descartada (memória).
-    const range = DETAIL_RANGE[this.quality];
+    const range = this.graphics.detail;
     let pending: (typeof LOD_CHUNKS)[number] | null = null;
     let pendingDistance = Infinity;
     for (const chunk of LOD_CHUNKS) {
@@ -940,16 +1035,18 @@ export class GameScene {
       const turnRate = dt > 0 ? Math.atan2(Math.sin(entry.heading - previousHeading), Math.cos(entry.heading - previousHeading)) / dt : 0;
       const lateral = turnRate * car.speed;
       entry.skid = damp(entry.skid, Math.min(1, Math.max(0, (Math.abs(lateral) - 30) / 25)), 12, dt);
-      entry.offroad = !isOnRoad(entry.x, entry.z);
+      entry.level = car.level ?? GROUND;
+      entry.offroad = !isOnRoad(entry.x, entry.z, entry.level);
       entry.lean = damp(entry.lean, Math.max(-0.12, Math.min(0.12, lateral * 0.0025)), 8, dt);
 
       const { group, flame, wheels } = entry.model;
       group.visible = car.visible;
       // No morro, o carro sobe e desce com o chão e inclina junto (frente/trás e de lado).
-      const [sx, sz] = slopeAt(entry.x, entry.z);
+      // Em cima da ponte (ou dentro do túnel), segue o tabuleiro.
+      const [sx, sz] = surfaceSlope(entry.x, entry.z, entry.level) ?? slopeAt(entry.x, entry.z);
       const fx = Math.sin(entry.heading);
       const fz = Math.cos(entry.heading);
-      entry.y = heightAt(entry.x, entry.z);
+      entry.y = surfaceY(entry.x, entry.z, entry.level);
       group.position.set(entry.x, entry.y, entry.z);
       group.rotation.set(-Math.atan(sx * fx + sz * fz), entry.heading, entry.lean + Math.atan(sx * fz - sz * fx), "YXZ");
       for (const wheel of wheels) wheel.rotation.x += (car.speed * dt) / ((wheel.userData.radius as number | undefined) ?? 0.45);
@@ -965,7 +1062,7 @@ export class GameScene {
       if (car.visible) {
         const dusty = entry.offroad && Math.abs(car.speed) > 6;
         const amount = dusty ? Math.min(1, Math.abs(car.speed) / 25) * 0.6 : entry.skid;
-        if (amount > 0.15) this.effects.wheelTrail(entry.x, entry.z, entry.heading, amount, entry.offroad);
+        if (amount > 0.15) this.effects.wheelTrail(entry.x, entry.z, entry.heading, amount, entry.offroad, entry.level);
       }
     }
     this.effects.update(dt);
@@ -993,9 +1090,11 @@ export class GameScene {
     }
 
     const followed = followId ? this.cars.get(followId) : undefined;
+    this.followLevel = followed?.level ?? GROUND;
     const followedCar = followId ? cars.get(followId) : undefined;
     if (this.director) {
       this.director(dt, this.camera, this.cameraTarget);
+      this.cockpit.group.visible = false;
       this.camera.updateProjectionMatrix();
     } else if (followed && followedCar && (this.finishCam !== null || this.garageCam)) {
       // Chegada: a câmera gira devagar em volta do carro, baixa, como nos replays da série.
@@ -1022,8 +1121,12 @@ export class GameScene {
       // A câmera acompanha a altura do carro (e não entra no morro atrás dele numa subida).
       const camX = followed.x - forwardX * view.back + sideX;
       const camZ = followed.z - forwardZ * view.back + sideZ;
-      const camHeight = view.seat ? followed.y : Math.max(followed.y, heightAt(camX, camZ) + 1);
+      // Em cima da ponte ou do viaduto, o chão lá embaixo não conta.
+      const camHeight = view.seat || followed.level >= 0 ? followed.y : Math.max(followed.y, heightAt(camX, camZ) + 1);
       const desired = new THREE.Vector3(camX, camHeight + view.height, camZ);
+      // Dentro do túnel a câmera não passa do teto.
+      const ceiling = this.tunnelCeiling(followed);
+      if (ceiling !== null) desired.y = Math.min(desired.y, ceiling);
       // No capô e no banco a câmera vai presa ao carro; nas outras, ela vem atrás com um pouco de atraso.
       if (view.back < 0 || view.seat) this.camera.position.copy(desired);
       else this.camera.position.lerp(desired, 1 - Math.exp(-6 * dt));
@@ -1078,13 +1181,27 @@ export class GameScene {
     this.sun.position.copy(this.camera.position).addScaledVector(this.sunDirection, 1200);
 
     // A luz do sol (e a área de sombra) acompanha o que a câmera está olhando.
-    if (this.quality === "alto") {
+    if (this.graphics.shadows > 0) {
       this.light.target.position.copy(this.cameraTarget).setY(0);
       this.light.position.copy(this.light.target.position).addScaledVector(this.sunDirection, 250);
     }
-    if (this.real) this.real.render();
-    else if (this.ink) this.ink.render(this.scene, this.camera);
-    else this.renderer.render(this.scene, this.camera);
+    // Borrão de velocidade: só seguindo um carro na câmera normal, e vai e volta suave.
+    const wantBlur = this.graphics.speedBlur && followed && followedCar && this.finishCam === null && !this.garageCam && !this.director
+      ? blurForSpeed(followedCar.speed, followedCar.boost > 0)
+      : 0;
+    if (!this.paused) this.blurStrength = damp(this.blurStrength, wantBlur, wantBlur > this.blurStrength ? 2.5 : 4, rawDt);
+    if (this.real) {
+      this.real.speedBlur = this.blurStrength;
+      this.real.render();
+    } else {
+      this.blur.render(this.blurStrength, (target) => {
+        if (this.ink) this.ink.render(this.scene, this.camera, target);
+        else {
+          this.renderer.setRenderTarget(target);
+          this.renderer.render(this.scene, this.camera);
+        }
+      });
+    }
     return followed ? { skid: followed.skid, offroad: followed.offroad } : null;
   }
 }

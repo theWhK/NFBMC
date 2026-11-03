@@ -144,3 +144,22 @@ test("modo história: derrota do rival (chave, nota fiscal e Cross-fit) com voz 
   await page.getByTestId("comic-skip").click();
   await expect(comic).toBeHidden();
 });
+
+test("modo história: carro de avanço (Etios) chega na garagem depois do primeiro rival", async ({ page }) => {
+  const garageCard = async (progress: Record<string, unknown>) => {
+    await page.goto("/");
+    await page.evaluate((p) => {
+      localStorage.setItem("nfbmc:story", JSON.stringify({
+        wins: 0, escapes: 0, bounty: 0, car: "uno", seenPrologue: true, finaleDone: false, ...p,
+      }));
+    }, progress);
+    await page.reload();
+    await page.getByTestId("garage-menu").click();
+    await page.getByTestId("car-list").locator('[data-car="etios"]').click();
+    return page.locator("#car-info .garage-career");
+  };
+  // Começo da carreira: ainda trancado, com o aviso de quando chega.
+  await expect(await garageCard({ stage: 0, unlocked: ["uno", "fusca"] })).toContainText("depois de vencer o primeiro rival");
+  // Salvo antigo, já depois da Izzy (sem o Etios na lista): entra sozinho ao carregar.
+  await expect(await garageCard({ stage: 1, unlocked: ["uno", "fusca", "gol"] })).toContainText("Liberado na carreira");
+});

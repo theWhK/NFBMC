@@ -14,6 +14,8 @@ export const Player = schema({
   z: t.number().default(0),
   heading: t.number().default(0),
   speed: t.number().default(0),
+  /** Nível: -1 = chão; senão a obra de arte (ponte, viaduto, túnel) em STRUCTURES. */
+  level: t.int8().default(-1),
   /** Fora da corrida atual (entrou no meio): espera a próxima. */
   racing: t.boolean().default(false),
   /** Volta em que o jogador está (0 = ainda no grid, antes de cruzar a linha). */
@@ -34,6 +36,20 @@ export const Player = schema({
   trapTotal: t.number().default(0),
   traps: t.uint8().default(0),
   lastTrap: t.number().default(0),
+  /**
+   * Arrancada: já soltou a embreagem, tempo de reação (s; negativo = queimou),
+   * nota da largada e da última troca (e quantas trocas, para o HUD piscar),
+   * faixa verde do conta-giros e o giro ideal de troca na marcha atual.
+   */
+  launched: t.boolean().default(false),
+  reaction: t.number().default(0),
+  jumped: t.boolean().default(false),
+  launchGrade: t.string().default(""),
+  shiftGrade: t.string().default(""),
+  shifts: t.uint8().default(0),
+  zoneLo: t.uint16().default(0),
+  zoneHi: t.uint16().default(0),
+  shiftRpm: t.uint16().default(0),
 });
 export type Player = SchemaType<typeof Player>;
 
@@ -55,6 +71,13 @@ export const Result = schema({
   projected: t.boolean().default(false),
   /** Speedtrap: soma das velocidades nos radares (km/h). */
   trap: t.number().default(0),
+  /** Speedtrap: medalha ("" = não bateu a meta) e a meta da vitória (bronze, km/h). */
+  medal: t.string().default(""),
+  goal: t.number().default(0),
+  /** Arrancada: reação (s), velocidade na chegada (km/h) e se queimou a largada (desclassificado). */
+  reaction: t.number().default(0),
+  speed: t.number().default(0),
+  jumped: t.boolean().default(false),
 });
 export type Result = SchemaType<typeof Result>;
 
@@ -63,8 +86,12 @@ export const RaceState = schema({
   /** Qual corrida de Porto Gordo é esta, e quantas voltas tem. */
   raceId: t.string().default("autodromo"),
   laps: t.uint8().default(3),
-  /** "circuito" ou "radar" (speedtrap). */
+  /** "circuito", "radar" (speedtrap) ou "drag" (arrancada). */
   kind: t.string().default("circuito"),
+  /** Speedtrap: metas da soma dos radares (km/h) para bronze (vitória), prata e ouro. */
+  goalBronze: t.number().default(0),
+  goalSilver: t.number().default(0),
+  goalGold: t.number().default(0),
   /** Corrida disparada do mundo aberto (larga sozinha e devolve todo mundo ao mundo). */
   event: t.boolean().default(false),
   /** Duelo do modo história contra um rival da Lista Gorda (larga sozinho). */
@@ -101,6 +128,8 @@ export const WorldPlayer = schema({
   z: t.number().default(0),
   heading: t.number().default(0),
   speed: t.number().default(0),
+  /** Nível: -1 = chão; senão a obra de arte (ponte, viaduto, túnel) em STRUCTURES. */
+  level: t.int8().default(-1),
   /** Nitro ligado agora (1) ou não (0), e quanto sobra no cilindro (0 a 1). */
   boost: t.number().default(0),
   nitro: t.number().default(0),
@@ -122,6 +151,8 @@ export const Cop = schema({
   z: t.number().default(0),
   heading: t.number().default(0),
   speed: t.number().default(0),
+  /** Nível: -1 = chão; senão a obra de arte (ponte, viaduto, túnel) em STRUCTURES. */
+  level: t.int8().default(-1),
   boost: t.number().default(0),
   /** Sessão do jogador perseguido. */
   target: t.string().default(""),
@@ -143,6 +174,8 @@ export const Npc = schema({
   z: t.number().default(0),
   heading: t.number().default(0),
   speed: t.number().default(0),
+  /** Nível: -1 = chão; senão a obra de arte (ponte, viaduto, túnel) em STRUCTURES. */
+  level: t.int8().default(-1),
   kind: t.string().default("sedan"),
   color: t.string().default("#888888"),
 });

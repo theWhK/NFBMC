@@ -95,6 +95,8 @@
           <button type="button" id="opt-gearbox" data-testid="opt-gearbox">Câmbio: automático</button>
           <button type="button" id="opt-look" data-testid="opt-look">Visual: realista</button>
           <button type="button" id="opt-quality" data-testid="opt-quality">Gráficos: automático</button>
+          <button type="button" id="opt-advanced" data-testid="opt-advanced">Gráficos avançados ▸</button>
+          <div id="gfx-advanced" class="gfx-advanced" hidden></div>
           <button type="button" id="opt-intro" data-testid="opt-intro">Abertura: ligada</button>
         </div>
         <p class="hint">Todos os comandos: F1 dentro do jogo (ou "Controles" na pausa).</p>
@@ -184,13 +186,19 @@
 
     <div id="hud" hidden>
       <div class="hud-place"><strong id="place" data-testid="place">1º</strong><span>posição</span></div>
-      <div class="hud-row"><span>volta</span><strong id="lap" data-testid="lap">1/3</strong></div>
+      <div class="hud-row" id="lap-row"><span>volta</span><strong id="lap" data-testid="lap">1/3</strong></div>
       <div class="hud-row cash"><span>💵 prêmio</span><strong id="race-prize" data-testid="race-prize">R$ 0</strong></div>
       <div class="hud-row trap" id="trap-row" hidden><span>📸 radares</span><strong id="trap" data-testid="trap">0 km/h</strong></div>
+      <!-- Speedtrap: as metas (bronze já vence) e quanto falta para a próxima. -->
+      <div class="hud-row trap" id="radar-goal-row" hidden><span>🏅 metas</span><strong id="radar-goals" data-testid="radar-goals"></strong></div>
+      <!-- Arrancada: reação e quanto falta até a chegada. -->
+      <div class="hud-row trap" id="drag-row" hidden><span>🏁 arrancada</span><strong id="drag-info" data-testid="drag-info"></strong></div>
     </div>
 
     <!-- Speedtrap: flash do radar com a velocidade medida. -->
     <div id="trap-flash" data-testid="trap-flash" hidden></div>
+    <!-- Arrancada: nota da largada e de cada troca de marcha. -->
+    <div id="drag-grade" data-testid="drag-grade" hidden></div>
 
     <!-- Chegada: faixas de cinema, a posição e o tempo, enquanto a câmera enquadra o carro. -->
     <div id="finish-cam" class="finish-cam" data-testid="finish-cam" hidden>
@@ -213,7 +221,7 @@
       <p class="stamp">Lista Gorda</p>
       <h2 id="winner"></h2>
       <table>
-        <thead><tr><th>#</th><th>Piloto</th><th>Chegada</th><th>Tempo</th><th class="trap-col">Radares</th><th>kcal</th><th>Prêmio</th></tr></thead>
+        <thead><tr><th>#</th><th>Piloto</th><th>Chegada</th><th>Tempo</th><th class="trap-col" id="trap-col-title">Radares</th><th>kcal</th><th>Prêmio</th></tr></thead>
         <tbody id="results-body"></tbody>
       </table>
       <p class="hint" id="results-timer"></p>
@@ -276,20 +284,20 @@
       <div class="pause-main">
         <h2>Pausa</h2>
         <p class="hint" id="pause-note" data-testid="pause-note">O jogo continua rodando para a galera enquanto este menu está aberto.</p>
-        <div class="mw-list sub">
+        <div class="mw-list sub" id="pause-list">
           <button type="button" id="pause-resume" data-testid="pause-resume">Continuar</button>
           <button type="button" id="pause-map" data-testid="pause-map">Mapa da cidade</button>
           <button type="button" id="pause-help" data-testid="pause-help">Controles</button>
-          <button type="button" id="pause-music">Música</button>
-          <button type="button" id="pause-sfx">Efeitos</button>
+          <button type="button" id="pause-options" data-testid="pause-options">Opções</button>
           <button type="button" id="pause-quit" data-testid="pause-quit">Voltar ao menu principal</button>
+        </div>
+        <!-- "Opções": o mesmo painel das Opções do menu principal vem para cá enquanto estiver aberto. -->
+        <div id="pause-options-slot" hidden>
+          <div class="mw-list sub"><button type="button" id="pause-options-back" data-testid="pause-options-back">← Voltar para a pausa</button></div>
         </div>
       </div>
       <aside class="pause-card" id="pause-card" data-testid="pause-card"></aside>
     </div>
-
-    <!-- Volta da pausa jogando sozinho: 3, 2, 1 antes de o jogo andar de novo. -->
-    <div id="resume-count" data-testid="resume-count" hidden></div>
 
     <!-- Lista de comandos (F1). -->
     <div id="help" class="panel center help" data-testid="help" hidden>
@@ -301,6 +309,7 @@
         <tr><td><kbd>Espaço</kbd></td><td>Freio de mão (drift)</td></tr>
         <tr><td><kbd>Shift</kbd></td><td>Nitro (segure acelerando; precisa do cilindro, comprado na garagem)</td></tr>
         <tr><td><kbd>E</kbd> / <kbd>Q</kbd> <kbd>Ctrl</kbd></td><td>Subir / descer marcha (câmbio manual)</td></tr>
+        <tr><td>Arrancada</td><td>Câmbio sempre manual e direção automática: na contagem, acelere para deixar o giro na faixa verde e aperte <kbd>E</kbd> no verde para largar (antes do verde queima a largada); troque com <kbd>E</kbd> quando a luz acender</td></tr>
         <tr><td><kbd>H</kbd></td><td>Buzina (a galera ouve)</td></tr>
         <tr><td><kbd>C</kbd></td><td>Trocar câmera (capô, primeira pessoa, terceira pessoa perto e longe)</td></tr>
         <tr><td><kbd>R</kbd></td><td>Voltar para a rua (quando empacar)</td></tr>

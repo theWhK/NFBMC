@@ -19,6 +19,8 @@ export interface Track {
   samples: TrackSample[];
   length: number;
   width: number;
+  /** Nível de cada amostra (-1 = chão; senão a obra de arte em STRUCTURES). Sem isso, tudo no chão. */
+  levels?: Int8Array;
 }
 
 type Point = [number, number];

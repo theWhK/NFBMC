@@ -132,12 +132,13 @@ export class InkPass {
     this.material.uniforms.thickness.value = Math.max(1.5, 2 * pixelRatio);
   }
 
-  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
+  /** `output`: onde vai o resultado (null = a tela; um alvo = para o borrão de velocidade). */
+  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, output: THREE.WebGLRenderTarget | null = null) {
     this.material.uniforms.near.value = camera.near;
     this.material.uniforms.far.value = camera.far;
     this.renderer.setRenderTarget(this.target);
     this.renderer.render(scene, camera);
-    this.renderer.setRenderTarget(null);
+    this.renderer.setRenderTarget(output);
     this.renderer.render(this.scene, this.camera);
   }
 }

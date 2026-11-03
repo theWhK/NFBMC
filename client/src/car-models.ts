@@ -1070,6 +1070,97 @@ DESIGNS.gol = {
   },
 };
 
+// Toyota Etios hatch: alto e estreito, teto reto até o fim, faróis grandes
+// puxados para o para-lama, a grade fininha em cima e a boca trapezoidal no
+// para-choque. Calotas de aço, como todo Etios de autoescola.
+DESIGNS.etios = {
+  ...sz.etios,
+  wheels: { front: 1.13, rear: -1.33, radius: 0.29, width: 0.175, rim: "hubcap", rimColor: "#b3b7bc", rimRatio: 0.6, caliper: null, inset: 0.025 },
+  body: {
+    top: [[-1.89, 0.55], [-1.88, 0.84], [-1.84, 0.95], [-1.74, 0.985], [-0.8, 0.975], [0.2, 0.95], [0.9, 0.905], [1.35, 0.86], [1.68, 0.8], [1.84, 0.73], [1.89, 0.52]],
+    bottom: [[-1.89, 0.35], [-1.7, 0.25], [1.6, 0.22], [1.89, 0.3]],
+    plan: [[-1.89, 0.74], [-1.84, 0.8], [-1.6, 0.835], [0, 0.845], [1.2, 0.84], [1.65, 0.79], [1.84, 0.7], [1.89, 0.56]],
+    shoulder: [[-1.89, 0.8], [0, 0.77], [1.89, 0.64]],
+    shape: { nTop: 4.8, nBot: 4.5, tumble: 0.06, tuck: 0.09, crown: 0.07 },
+  },
+  cabin: {
+    top: [[-1.82, 0.985], [-1.79, 1.2], [-1.72, 1.42], [-1.55, 1.5], [-0.6, 1.51], [0.05, 1.49], [0.35, 1.36], [0.68, 1.12], [0.96, 0.9]],
+    shape: SHAPE.cabin,
+    ws: [0.92, 0.08],
+    bl: [-1.56, -1.8],
+    b: [-0.3, 0.08],
+    c: [[-1.3, 0.98], [-1.14, 1.48]],
+    drop: 0.065,
+  },
+  doors: [[0.9, -0.28], [-0.33, -1.06]],
+  mirror: { z: 0.8, rise: 0.06, size: 0.9 },
+  plates: { front: 0.38, rear: 0.6 },
+  details: (k) => {
+    const { s } = k;
+    k.both((side) => {
+      // Faróis grandes, subindo e entrando no para-lama, com a lâmpada redonda e o pisca.
+      k.lamp(s.front, sideOf(side, rounded([[0.3, 0.6], [0.58, 0.6], [0.76, 0.63], [0.82, 0.7], [0.62, 0.73], [0.32, 0.69]], 2)), LAMP.head, { bulbs: [sideOf(side, ellipse(0.5, 0.655, 0.06, 0.04, 18))], dome: 0.006 });
+      k.patch(s.front, sideOf(side, roundRect(0.66, 0.635, 0.77, 0.67, 0.012)), "lamp", LAMP.turn, { off: 0.008 });
+      // Lanternas em pé no canto da tampa, entrando na lateral.
+      k.lamp(s.rear, sideOf(side, rounded([[0.46, 0.7], [0.68, 0.7], [0.7, 0.86], [0.62, 0.92], [0.47, 0.91]], 2)), LAMP.tail, { bulbs: [sideOf(side, roundRect(0.5, 0.8, 0.65, 0.88, 0.012)), sideOf(side, roundRect(0.5, 0.73, 0.65, 0.77, 0.01))] });
+      // Faróis de neblina nas pontas do para-choque.
+      k.lamp(s.front, sideOf(side, ellipse(0.64, 0.38, 0.045, 0.035, 16)), LAMP.head, { bezel: "trim" });
+      k.patch(s.rear, sideOf(side, roundRect(0.46, 0.38, 0.6, 0.42, 0.01)), "lamp", LAMP.tail, { off: 0.006 });
+    });
+    // Grade fininha entre os faróis, com o friso cromado e o emblema.
+    k.patch(s.front, rounded([[-0.3, 0.62], [0.3, 0.62], [0.32, 0.69], [-0.32, 0.69]], 1), "trim", "#141416", { off: 0.004 });
+    k.patch(s.front, roundRect(-0.28, 0.645, 0.28, 0.66, 0.006), "chrome", null, { off: 0.008 });
+    k.patch(s.front, ellipse(0, 0.655, 0.055, 0.035, 18), "chrome", null, { off: 0.011, dome: 0.003 });
+    // A boca trapezoidal grande no para-choque.
+    const mouth: P2[] = rounded([[-0.44, 0.27], [0.44, 0.27], [0.38, 0.5], [-0.38, 0.5]], 2);
+    k.patch(s.front, mouth, "trim", "#0d0d0f", { off: 0.004 });
+    grilleBars(k, s.front, -0.38, 0.38, 0.3, 0.47, 3, "trim", "#26262a");
+    // Para-choque de trás com a faixa preta embaixo, escape e a antena no fim do teto.
+    k.patch(s.rear, roundRect(-0.6, 0.27, 0.6, 0.34, 0.02), "trim", "#141416", { off: 0.005 });
+    k.patch(s.rear, roundRect(-0.12, 0.66, 0.12, 0.69, 0.01), "chrome", null, { off: 0.008 });
+    exhaust(k, -0.45, 0.28, 0.025, 0.12);
+    antenna(k, 0.0, k.topAt(-1.45), -1.45, 0.45, -0.4);
+  },
+  food: (k) => {
+    // Marmita de alumínio no teto, aberta: arroz, feijão, bife, ovo frito e salada.
+    const y = k.topAt(-0.55) + 0.01;
+    const z = -0.6;
+    const W = 0.92;
+    const D = 1.15;
+    const H = 0.17;
+    k.box("chrome", null, [W, 0.02, D], [0, y + 0.01, z], { r: 0.008 });
+    k.both((side) => k.box("chrome", null, [0.025, H, D], [side * (W / 2 - 0.012), y + H / 2, z], { r: 0.008 }));
+    for (const dz of [-1, 1]) k.box("chrome", null, [W, H, 0.025], [0, y + H / 2, z + dz * (D / 2 - 0.012)], { r: 0.008 });
+    // A borda dobrada da marmita.
+    k.box("chrome", null, [W + 0.06, 0.018, 0.05], [0, y + H, z + D / 2], { r: 0.006 });
+    k.box("chrome", null, [W + 0.06, 0.018, 0.05], [0, y + H, z - D / 2], { r: 0.006 });
+    // A tampa aberta, de pé atrás.
+    k.box("chrome", null, [W + 0.04, 0.02, 0.45], [0, y + H + 0.17, z - D / 2 - 0.06], { r: 0.008, rot: [-1.25, 0, 0] });
+    const top = y + H - 0.02;
+    // Arroz (montinho branco cheio de grão) e feijão (caldo escuro com grãos).
+    const rice = new THREE.SphereGeometry(0.3, k.seg(20), k.seg(12), 0, Math.PI * 2, 0, Math.PI / 2);
+    const rp = rice.attributes.position;
+    for (let i = 0; i < rp.count; i++) {
+      const v = new THREE.Vector3().fromBufferAttribute(rp, i);
+      const f = 1 + 0.05 * Math.sin(v.x * 70) * Math.sin(v.z * 63 + v.y * 40);
+      rp.setXYZ(i, v.x * f * 1.35, v.y * 0.45 * f, v.z * f);
+    }
+    rice.computeVertexNormals();
+    k.geo("food", rice, "#f4f1e6", [-0.2, top - 0.03, z + 0.22]);
+    k.box("food", "#3b2216", [0.38, 0.03, 0.42], [0.24, top - 0.01, z + 0.25], { r: 0.015 });
+    for (let i = 0; i < 9; i++) k.sphere("food", "#2a160d", 0.03, [0.12 + (i % 3) * 0.11, top + 0.01, z + 0.12 + Math.floor(i / 3) * 0.12], { scale: [1.3, 0.7, 0.9], seg: 8 });
+    // Bife acebolado.
+    k.box("food", "#6e3a1c", [0.42, 0.04, 0.3], [-0.18, top, z - 0.22], { r: 0.03, rot: [0, 0.2, 0] });
+    for (const dx of [-0.1, 0.02, 0.12]) k.cyl("food", "#e9d8a6", 0.035, 0.01, [-0.18 + dx, top + 0.03, z - 0.2 + dx * 0.3], { seg: 10 });
+    // Ovo frito: clara achatada e a gema.
+    k.cyl("food", "#fbf8ef", 0.13, 0.015, [0.24, top + 0.02, z - 0.22], { seg: 18 });
+    k.sphere("food", "#f2a20c", 0.05, [0.26, top + 0.035, z - 0.2], { scale: [1, 0.55, 1], seg: 12 });
+    // Salada: alface e rodelas de tomate na ponta.
+    for (const [dx, dz] of [[-0.3, -0.45], [-0.18, -0.48], [0.3, -0.45]] as const) k.sphere("food", "#5fa83a", 0.07, [dx, top + 0.02, z + dz], { scale: [1.2, 0.6, 1], seg: 10 });
+    for (const dx of [0.0, 0.12]) k.cyl("food", "#d2352a", 0.06, 0.02, [dx, top + 0.035, z - 0.46], { seg: 14, rot: [0.2, 0, 0.1] });
+  },
+};
+
 // VW Golf GTI (Mk5): hatch de ombro marcado, a grade em escudo preta em
 // colmeia com o friso vermelho, faróis grandes com dois projetores e o
 // spoiler no alto da tampa.
