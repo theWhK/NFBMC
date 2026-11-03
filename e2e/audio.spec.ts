@@ -33,10 +33,10 @@ test("trilha: na cidade toca uma faixa do rádio com o aviso \"tocando agora\"",
   await expect.poll(async () => (await audio(page))?.mood).toBe("lobby");
   // A primeira seção é gravada antes de tocar: o aviso aparece quando o som começa.
   await expect(page.getByTestId("now-playing")).toHaveClass(/show/, { timeout: 20_000 });
-  // Uma das faixas de cidade/menu (o rádio sorteia): o aviso traz a banda dela.
-  const lobby = /MC Pastel de Feira|Sindicato do Torresmo|Sorvete de Vapor|Brigadeiro Laser|Rádio Gordura FM|Churrasco Cósmico/;
+  // Uma das faixas de cidade/menu (o rádio sorteia, inclusive o brega do Lado E): o aviso traz a banda dela.
+  const lobby = /MC Pastel de Feira|Sindicato do Torresmo|Sorvete de Vapor|Brigadeiro Laser|Rádio Gordura FM|Churrasco Cósmico|Os Tecladistas do Cais/;
   await expect(page.getByTestId("now-playing")).toContainText(lobby);
-  expect((await audio(page))?.track).toMatch(/recheio-pesado|barriga-cheia|por-do-sol-no-cais|fliperama-do-bairro|madrugada-na-lanchonete|fumaca-rosa/);
+  expect((await audio(page))?.track).toMatch(/recheio-pesado|barriga-cheia|por-do-sol-no-cais|fliperama-do-bairro|madrugada-na-lanchonete|fumaca-rosa|saudade-de-torresmo/);
 });
 
 test("trilha: a cena do modo história troca a música do jogo pelo tema dela e devolve no fim", async ({ page }) => {
