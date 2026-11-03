@@ -90,7 +90,10 @@ function plan(): { airport: Airport; solids: Building[]; clear: Box[]; paved: Bo
 
   /** Até onde (n) o lado está livre de ruas, entre −halfU e halfU. */
   const freeDepth = (f: Frame, halfU: number) => {
-    for (let n = width / 2 + 20; n < 520; n += 5) {
+    // A taxiway da planta pode ser rua: o espaço livre conta a partir dela.
+    const taxi = drawn?.taxiway ? sideOf(f, drawn.taxiway.a, drawn.taxiway.b) : 0;
+    const start = taxi > 0 ? taxi + drawn!.taxiway!.width / 2 + 12 : width / 2 + 20;
+    for (let n = start; n < 520; n += 5) {
       for (let u = -halfU; u <= halfU; u += 15) {
         const [x, z] = toWorld(f, u, n);
         if (!insideWorld(x, z, 15) || roadClearance(x, z) < 10) return n;
@@ -120,7 +123,8 @@ function plan(): { airport: Airport; solids: Building[]; clear: Box[]; paved: Bo
   const paved: Box[] = [];
   const taxiN = drawn?.taxiway ? Math.abs(sideOf(f, drawn.taxiway.a, drawn.taxiway.b)) : width / 2 + 42;
   const taxiW = drawn?.taxiway?.width ?? 18;
-  const tu = length / 2 - 30;
+  const drawnTu = drawn?.taxiway ? Math.max(...[drawn.taxiway.a, drawn.taxiway.b].map(([x, z]) => Math.abs((x - f.x) * f.ux + (z - f.z) * f.uz))) : Infinity;
+  const tu = Math.min(length / 2 - 30, drawnTu);
   const taxiway = { n: taxiN, width: taxiW, u0: -tu, u1: tu, exits: [-tu, -length * 0.17, length * 0.17, tu] };
   paved.push(frameBox(f, -tu - taxiW / 2, tu + taxiW / 2, taxiN - taxiW / 2, taxiN + taxiW / 2));
 
