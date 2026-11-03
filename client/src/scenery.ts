@@ -37,6 +37,8 @@ import { buildBuildings, buildingMaterial } from "./buildings.ts";
 import { Bucket, buildStreets, streetMaterial } from "./streets.ts";
 import { buildStructures, buildTunnelBerms, insideTunnelCut, nearStructure, tunnelCutSquares } from "./structures.ts";
 import { buildTrees } from "./trees.ts";
+import { buildFarms } from "./farms.ts";
+import { buildAirport } from "./airport.ts";
 import { surface } from "./look.ts";
 import { normalTexture, paintedTexture } from "./textures.ts";
 
@@ -1257,6 +1259,8 @@ export function buildScenery(scene: THREE.Scene) {
   buildLamps(scene);
   buildBillboards(scene);
   buildTrees(scene);
+  buildFarms(scene);
+  buildAirport(scene);
   buildStatues(scene);
   buildFlags(scene);
   buildProps(scene);
