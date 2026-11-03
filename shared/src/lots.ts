@@ -2,21 +2,15 @@
 // fazendas de rural.ts e o aeroporto de airport.ts): distância até a rua mais
 // perto, caixas giradas e um "referencial" ao longo de uma rua. Tudo lido do
 // mapa já pronto (ROADS), então acompanha qualquer mudança no traçado.
-import { LANDMARKS, ROADS, WORLD_BOUNDS, type Building, type Road } from "./world.ts";
+import { LANDMARKS, ROADS, WORLD_BOUNDS, type Box, type Building, type Road } from "./world.ts";
 
 export type Point = [number, number];
 
 /**
- * Caixa girada no chão (a mesma convenção de Building em world.ts): o eixo
- * local "w" aponta para (cos angle, −sin angle) e o "d" para (sin angle, cos angle).
+ * Caixa girada no chão: a mesma de world.ts (o eixo local "w" aponta para
+ * (cos angle, −sin angle) e o "d" para (sin angle, cos angle)).
  */
-export interface Box {
-  x: number;
-  z: number;
-  w: number;
-  d: number;
-  angle: number;
-}
+export type { Box };
 
 /** Ângulo de uma caixa cujo eixo "w" aponta para (ux, uz). */
 export const angleAlong = (ux: number, uz: number) => Math.atan2(-uz, ux);

@@ -32,6 +32,9 @@ import {
 import { bake, makeBurger } from "./models.ts";
 import { buildTrackMesh } from "./track-mesh.ts";
 import { buildLandmarks } from "./landmarks.ts";
+import { buildHarbor } from "./harbor.ts";
+import { buildPaddock } from "./paddock.ts";
+import { TEAMS, teamPanelMaterial } from "./teams.ts";
 import { TILE, addChunk, addLodChunk, byTile } from "./chunks.ts";
 import { buildBuildings, buildingMaterial } from "./buildings.ts";
 import { Bucket, buildStreets, streetMaterial } from "./streets.ts";
@@ -789,27 +792,6 @@ function scaleUv(geometry: THREE.BufferGeometry, u: number, v: number) {
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * u, uv.getY(i) * v);
 }
 
-/** Guindastes do porto (só enfeite, na beira do cais). */
-function buildCranes(scene: THREE.Scene) {
-  const yellow = new THREE.MeshLambertMaterial({ color: "#e8a00c" });
-  for (const x of [-380, -120, 140, 380]) {
-    const crane = new THREE.Group();
-    for (const [lx, lz] of [[-4, -3], [4, -3], [-4, 3], [4, 3]]) {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.8, 26, 0.8), yellow);
-      leg.position.set(lx, 13, lz);
-      crane.add(leg);
-    }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(10, 2, 8), yellow);
-    beam.position.y = 26;
-    crane.add(beam);
-    const jib = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 46), yellow);
-    jib.position.set(0, 28, -14);
-    crane.add(jib);
-    crane.position.set(x, 0, QUAY_Z + 4);
-    scene.add(bake(crane));
-  }
-}
-
 /**
  * Postes ao longo das avenidas e ruas: coluna, braço curvo sobre a rua e a
  * luminária, com o brilho das lâmpadas num só Points (barato).
@@ -1154,8 +1136,10 @@ function buildProps(scene: THREE.Scene) {
     place(g, spot.x, spot.z, spot.facing);
   }
 
-  // Outdoors nas avenidas e no Rodoanel (os mesmos anúncios do autódromo).
-  const faces = BILLBOARDS.map((ad) => new THREE.MeshLambertMaterial({ map: billboardTexture(ad), emissive: "#ffffff", emissiveIntensity: 0.25, side: THREE.DoubleSide }));
+  // Outdoors nas avenidas e no Rodoanel: os anúncios do autódromo e as equipes (teams.ts).
+  const ads = BILLBOARDS.map((ad) => new THREE.MeshLambertMaterial({ map: billboardTexture(ad), emissive: "#ffffff", emissiveIntensity: 0.25, side: THREE.DoubleSide }));
+  const teams = TEAMS.map((team) => teamPanelMaterial(team, THREE.DoubleSide));
+  const faces = ads.flatMap((ad, i) => [ad, teams[i * 2], teams[i * 2 + 1]]).concat(teams.slice(ads.length * 2)).filter(Boolean);
   const boardGeometry = new THREE.PlaneGeometry(16, 8);
   const legGeometry = new THREE.BoxGeometry(0.5, 6, 0.5);
   roadsideSpots(902, 36, ["avenida", "rodovia"], 9, 6).forEach((spot, i) => {
@@ -1255,7 +1239,8 @@ export function buildScenery(scene: THREE.Scene) {
   buildGround(scene);
   buildBuildings(scene);
   buildLandmarks(scene, addChunk);
-  buildCranes(scene);
+  buildHarbor(scene);
+  buildPaddock(scene);
   buildLamps(scene);
   buildBillboards(scene);
   buildTrees(scene);

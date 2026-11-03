@@ -12,6 +12,7 @@ export * from "./levels.ts";
 export * from "./tuning.ts";
 export * from "./speedtrap.ts";
 export * from "./drag.ts";
+export * from "./props.ts";
 // Campo e aeroporto: gerados a partir do mapa, entram na colisão ao carregar.
 export * from "./lots.ts";
 export * from "./rural.ts";
