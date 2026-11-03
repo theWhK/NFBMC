@@ -4,7 +4,7 @@
 import * as THREE from "three";
 
 import { makeFlag } from "./flag.ts";
-import { heightAt, trackCorridor, type Track } from "@nfbmc/shared";
+import { dragPoint, heightAt, trackCorridor, type DragInfo, type Track } from "@nfbmc/shared";
 
 /** Faixa ao longo da pista, entre `inner` e `outer` metros do centro (negativo = lado direito). */
 function ribbon(track: Track, inner: number, outer: number, y: number, colorAt?: (i: number) => THREE.Color) {
@@ -187,6 +187,85 @@ export function buildBarriers(track: Track) {
   mesh.name = "race-barriers";
   mesh.renderOrder = 2;
   return { mesh, texture };
+}
+
+/**
+ * Arrancada: faixas pintadas na pista, a linha de largada com a "árvore de
+ * Natal" (o semáforo do drag) entre as faixas e a chegada xadrez com o pórtico.
+ */
+export function buildDragStrip(track: Track, drag: DragInfo) {
+  const group = new THREE.Group();
+  const paint = new THREE.MeshLambertMaterial({ color: "#f5f5f5", polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const lane = Math.abs(drag.lanes[0]);
+  const from = drag.start - 15;
+  const to = drag.start + drag.distance + 20;
+  // Linhas das faixas: o meio (entre os carros) e as bordas de fora.
+  const line = (side: number, width: number, dashed: boolean) => {
+    for (let d = from; d < to; d += dashed ? 12 : 30) {
+      const length = dashed ? 6 : 30;
+      const a = dragPoint(track, d, side);
+      const b = dragPoint(track, Math.min(to, d + length), side);
+      const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, Math.hypot(b.x - a.x, b.z - a.z)), paint);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.z = a.heading;
+      mesh.position.set(mid.x, heightAt(mid.x, mid.z) + 0.2, mid.z);
+      group.add(mesh);
+    }
+  };
+  line(0, 0.4, true);
+  line(lane * 2, 0.35, false);
+  line(-lane * 2, 0.35, false);
+
+  // Linha de largada (branca) e de chegada (xadrez), atravessando as duas faixas.
+  const across = (dist: number, material: THREE.Material, depth: number) => {
+    const p = dragPoint(track, dist, 0);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(lane * 4, depth), material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.z = p.heading;
+    mesh.position.set(p.x, heightAt(p.x, p.z) + 0.22, p.z);
+    group.add(mesh);
+    return p;
+  };
+  across(drag.start, paint, 0.6);
+  const checker = new THREE.MeshLambertMaterial({ map: checkerTexture(), polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const finish = across(drag.start + drag.distance, checker, 2);
+
+  // Árvore de Natal: poste entre as faixas, logo à frente da largada, com as
+  // luzes amarelas e a verde (desenho fixo; quem conta é o HUD).
+  const tree = new THREE.Group();
+  tree.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 3, 0.3), new THREE.MeshLambertMaterial({ color: "#333333" })).translateY(1.5));
+  const colors = ["#ffb000", "#ffb000", "#ffb000", "#3ddc4a"];
+  colors.forEach((color, i) => {
+    for (const side of [-0.35, 0.35]) {
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color }));
+      bulb.position.set(side, 3.2 - i * 0.42, 0);
+      tree.add(bulb);
+    }
+  });
+  const treeSpot = dragPoint(track, drag.start + 6, 0);
+  tree.rotation.y = treeSpot.heading;
+  tree.position.set(treeSpot.x, heightAt(treeSpot.x, treeSpot.z), treeSpot.z);
+  group.add(tree);
+
+  // Pórtico na chegada, com as bandeiras do Orgulho Gordo.
+  const post = new THREE.MeshLambertMaterial({ color: "#333333" });
+  const banner = new THREE.MeshLambertMaterial({ color: "#ffc42e" });
+  const half = lane * 2 + 2;
+  const gate = new THREE.Group();
+  gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(half).translateY(3.5));
+  gate.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), post).translateX(-half).translateY(3.5));
+  gate.add(new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.6, 1.6, 0.4), banner).translateY(7));
+  for (const side of [1, -1]) {
+    const flag = makeFlag(4, 3.6);
+    flag.position.set(side * half, 7.8, 0);
+    flag.rotation.y = side > 0 ? 0 : Math.PI;
+    gate.add(flag);
+  }
+  gate.rotation.y = finish.heading;
+  gate.position.set(finish.x, heightAt(finish.x, finish.z), finish.z);
+  group.add(gate);
+  return group;
 }
 
 /** As setas das barreiras correm no sentido da corrida. */

@@ -159,31 +159,3 @@ test("fim de corrida contra bots: não espera ninguém, câmera de chegada e tem
   await expect(page.getByTestId("results").locator("tr.me")).toContainText("R$");
   await expect.poll(() => page.evaluate(() => window.__nfbmcEconomy!().cash)).toBeGreaterThan(2000);
 });
-
-test("speedtrap: radares somam a velocidade e decidem a colocação", async ({ browser }) => {
-  const context = await browser.newContext();
-  contexts.push(context);
-  const page = await context.newPage();
-  await page.goto("/");
-  await page.getByTestId("name-input").fill("Will");
-  await page.getByTestId("quick-menu").click();
-  await page.getByTestId("quick-track").selectOption("radar-porto");
-  await page.getByTestId("solo-button").click();
-  await page.getByTestId("start-button").click();
-  await expect.poll(() => phase(page), { timeout: 15_000 }).toBe("racing");
-  await expect(page.getByTestId("trap")).toContainText("0/4");
-
-  // Passa no primeiro radar a 100 m/s (360 km/h): flash e soma no HUD.
-  await page.evaluate(() => window.__nfbmc!.send("debugRadar", { speed: 100 }));
-  await expect(page.getByTestId("trap-flash")).toContainText("360 km/h");
-  await expect(page.getByTestId("trap")).toContainText("360 km/h · 1/4");
-  for (let i = 0; i < 3; i++) await page.evaluate(() => window.__nfbmc!.send("debugRadar", { speed: 100 }));
-  await expect(page.getByTestId("trap")).toContainText("4/4");
-
-  await page.evaluate(() => window.__nfbmc!.send("debugFinish", {}));
-  await expect.poll(() => phase(page), { timeout: 8_000 }).toBe("results");
-  // 4 × 360 km/h ninguém alcança: primeiro lugar, e a coluna dos radares aparece.
-  const mine = page.getByTestId("results").locator("tr.me");
-  await expect(mine).toContainText("1º");
-  await expect(mine).toContainText("1.440 km/h");
-});

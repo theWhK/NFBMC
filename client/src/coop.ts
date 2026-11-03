@@ -64,7 +64,8 @@ export class CoopPanel {
     this.room = room;
     this.sound = sound;
     this.focusMap = focusMap;
-    this.select.innerHTML = RACE_IDS.map((id) => `<option value="${id}">${escapeHtml(RACES[id].name)}</option>`).join("");
+    // Speedtrap é desafio solo: fora da lista do pega.
+    this.select.innerHTML = RACE_IDS.filter((id) => RACES[id].kind !== "radar").map((id) => `<option value="${id}">${escapeHtml(RACES[id].name)}</option>`).join("");
     this.select.onchange = () => {
       this.raceChosen = true;
       this.select.blur();
@@ -146,7 +147,7 @@ export class CoopPanel {
       this.mapWasOpen = true;
       this.lastFetch = -Infinity;
       if (!this.raceChosen) {
-        const nearest = [...RACE_IDS].sort((a, b) => {
+        const nearest = RACE_IDS.filter((id) => RACES[id].kind !== "radar").sort((a, b) => {
           const ma = raceMarker(a);
           const mb = raceMarker(b);
           return Math.hypot(ma.x - me.x, ma.z - me.z) - Math.hypot(mb.x - me.x, mb.z - me.z);
