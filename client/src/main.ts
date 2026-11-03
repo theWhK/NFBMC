@@ -46,6 +46,7 @@ import { jukeboxState, setupJukebox } from "./jukebox.ts";
 import { makeBridge, playStory, showRadio, type Cast } from "./cinematic.ts";
 import { economy, money } from "./economy.ts";
 import { createGarage } from "./garage.ts";
+import { createGarageCutscene, type GarageCutscene } from "./garage-cutscene.ts";
 import { createGps, type GpsGuidance, type GpsTarget } from "./gps.ts";
 import { createFullMap, createMinimap, createTacho, type MapPick, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
@@ -331,6 +332,7 @@ let switching = false;
 
 function setMode(next: WorldMode | RaceMode | null) {
   garage.close();
+  dropGarageScene();
   mode?.dispose();
   hideModeUi();
   sound.updateSiren(null);
@@ -367,14 +369,32 @@ function carOptions() {
   return { name: playerName, color: menu.color(), car, manual: menu.manual(), tune: economy.tune(car) };
 }
 
+/** Animação de entrar/sair da garagem (só com o 3D); null fora dela. */
+let garageScene: GarageCutscene | null = null;
+
 /**
- * Parou no pátio de uma garagem (mundo aberto) e apertou Enter: abre a oficina
- * do carro atual. Jogando sozinho o jogo pausa; as peças valem na hora.
+ * Parou no pátio de uma garagem (mundo aberto) e apertou Enter: o carro entra
+ * (client/src/garage-cutscene.ts) e abre a oficina do carro atual, com o
+ * interior da garagem por trás. Jogando sozinho o jogo pausa com a oficina
+ * aberta; as peças valem na hora. Ao fechar, o carro sai para o pátio, no
+ * mesmo lugar em que está no servidor (que nunca o tirou dali).
  */
 async function openSafehouse(name: string) {
   if (!(mode instanceof WorldMode) || garage.isOpen() || overlayOpen()) return;
   const world = mode;
   releaseControls();
+  const place = GARAGES.find((g) => g.name === name);
+  const pose = () => {
+    const me = world.room.state.players?.get(world.room.sessionId);
+    return me ? { x: me.x, z: me.z, heading: me.heading, color: me.color, car: me.car } : null;
+  };
+  const start = pose();
+  if (scene && place && start) {
+    garageScene = createGarageCutscene(scene, place, start, { color: start.color, car: start.car }, sound);
+    world.hideSelf = true;
+    await garageScene.enter();
+    if (mode !== world) return;
+  }
   pauseGame(true);
   await garage.open({
     kind: "safehouse",
@@ -387,7 +407,19 @@ async function openSafehouse(name: string) {
       $("touch").classList.toggle("nitro", ctx.hasNitro());
     },
   });
-  if (mode === world) pauseGame(false);
+  if (mode !== world) return;
+  pauseGame(false);
+  const cut = garageScene;
+  const end = pose();
+  if (cut && end) await cut.exit(end);
+  if (garageScene === cut) garageScene = null;
+  world.hideSelf = false;
+}
+
+/** Trocou de sala (ou saiu) no meio da garagem: some com a animação e o interior. */
+function dropGarageScene() {
+  garageScene?.abort();
+  garageScene = null;
 }
 
 /** Prêmio em dinheiro de uma corrida (qualquer uma): entra na carteira. */
@@ -561,13 +593,15 @@ function duelFinished(result: RaceFinish) {
   const bet = won ? duelCash(rival.rank) : 0;
   racePrize(result, bet);
   if (won) {
+    const before = new Set(story.story.unlocked);
     story.defeat();
-    const prizes = [carSpec(rival.car).name, ...(rival.bonusCar ? [carSpec(rival.bonusCar).name] : [])];
+    // Os carros que entraram na garagem agora (do rival, o brinde e os de avanço).
+    const prizes = story.story.unlocked.filter((car) => !before.has(car)).map((car) => carSpec(car).name);
     stamp.textContent = "Nota fiscal";
     $("duel-title").textContent = `Você derrotou ${rival.name}!`;
     $("duel-text").textContent = (rival.rank === 1
       ? "Você é o novo Número 1 da Lista Gorda."
-      : `Na sua garagem agora: ${prizes.join(" e ")}. Próximo alvo: #${rival.rank - 1}.`) + ` A aposta: ${money(bet)}.`;
+      : `Na sua garagem agora: ${prizes.slice(0, -1).join(", ")}${prizes.length > 1 ? " e " : ""}${prizes.at(-1)}. Próximo alvo: #${rival.rank - 1}.`) + ` A aposta: ${money(bet)}.`;
     sound.finish();
   } else {
     stamp.textContent = "Derrota";
@@ -700,7 +734,8 @@ function sendInput() {
 
 /** Troca de marcha no câmbio manual (teclado ou botões da tela). */
 function shift(direction: number) {
-  if (!mode || !menu.manual()) return;
+  // Na arrancada o câmbio é sempre manual (e o E solta a embreagem na largada).
+  if (!mode || (!menu.manual() && !(mode instanceof RaceMode && mode.manualOnly()))) return;
   mode.sendShift(direction);
 }
 
@@ -709,7 +744,7 @@ function shift(direction: number) {
 const pause = $("pause");
 const fullMapEl = $("fullmap");
 const help = $("help");
-const overlayOpen = () => !pause.hidden || !fullMapEl.hidden || !help.hidden || garage.isOpen();
+const overlayOpen = () => !pause.hidden || !fullMapEl.hidden || !help.hidden || garage.isOpen() || !!garageScene;
 
 /**
  * Pausa de verdade (a simulação para no servidor) com a pausa, o mapa ou a
@@ -736,13 +771,49 @@ function refreshPauseNotes() {
   $("map-paused").hidden = !pausable;
 }
 
+/**
+ * A música para com a pausa (ou a lista de comandos) aberta e, ao fechar,
+ * continua de onde parou. No mapa ela segue tocando.
+ */
+function syncMusicPause() {
+  sound.pauseMusic(!pause.hidden || !help.hidden);
+}
+
+// Opções na pausa: o próprio painel de Opções do menu principal (os mesmos
+// botões e controles, com os mesmos efeitos) vem para dentro da pausa enquanto
+// estiver aberto e volta para o lugar dele ao fechar.
+const optionsScreen = document.querySelector<HTMLElement>('[data-screen-id="options"]')!;
+const optionsHome = { parent: optionsScreen.parentElement!, next: optionsScreen.nextSibling };
+const pauseList = $("pause-list");
+const pauseOptionsSlot = $("pause-options-slot");
+const pauseOptionsOpen = () => !pauseOptionsSlot.hidden;
+
+function openPauseOptions() {
+  menu.refreshOptions();
+  pauseOptionsSlot.prepend(optionsScreen);
+  optionsScreen.hidden = false;
+  pauseList.hidden = true;
+  pauseOptionsSlot.hidden = false;
+  optionsScreen.querySelector<HTMLButtonElement>("button")?.focus();
+}
+
+function closePauseOptions(focus = true) {
+  if (!pauseOptionsOpen()) return;
+  optionsHome.parent.insertBefore(optionsScreen, optionsHome.next);
+  optionsScreen.hidden = true;
+  pauseOptionsSlot.hidden = true;
+  pauseList.hidden = false;
+  if (focus) $<HTMLButtonElement>("pause-options").focus();
+}
+
 function openHelp() {
-  cancelResume();
+  closePauseOptions(false);
   pause.hidden = true;
   fullMapEl.hidden = true;
   help.hidden = false;
   releaseControls();
   pauseGame(true);
+  syncMusicPause();
   $<HTMLButtonElement>("help-close").focus();
 }
 
@@ -784,11 +855,6 @@ function releaseControls() {
   sendInput();
 }
 
-function refreshPauseLabels() {
-  $("pause-music").textContent = `Música: ${sound.prefs.music ? "ligada" : "desligada"}`;
-  $("pause-sfx").textContent = `Efeitos: ${sound.prefs.sfx ? "ligados" : "desligados"}`;
-}
-
 /** Resumo ao lado da pausa: onde você está, com que carro e quanto já comeu. */
 function renderPauseCard() {
   const me = lastMapView?.cars.get(lastMapView.myId);
@@ -820,15 +886,15 @@ const PAUSE_TIPS = [
 
 function openPause() {
   if (!mode) return;
-  cancelResume();
+  closePauseOptions(false);
   fullMapEl.hidden = true;
   help.hidden = true;
   pause.hidden = false;
   renderPauseCard();
-  refreshPauseLabels();
   refreshPauseNotes();
   releaseControls();
   pauseGame(true);
+  syncMusicPause();
   $<HTMLButtonElement>("pause-resume").focus();
 }
 
@@ -843,85 +909,42 @@ function focusMapOnMe() {
 
 function openMap() {
   if (!mode) return;
-  cancelResume();
+  closePauseOptions(false);
   pause.hidden = true;
   fullMapEl.hidden = false;
   focusMapOnMe();
   refreshPauseNotes();
   releaseControls();
   pauseGame(true);
+  syncMusicPause();
 }
 
+/** Fecha a pausa, o mapa e a lista de comandos: o jogo (e a música) volta na hora. */
 function closeOverlays() {
-  cancelResume();
-  pause.hidden = true;
-  fullMapEl.hidden = true;
-  help.hidden = true;
-  pauseGame(false);
-}
-
-/**
- * Fechar a pausa (ou o mapa) jogando sozinho: 3, 2, 1 com o jogo ainda parado,
- * para dar tempo de pôr o dedo no acelerador. Com a galera, fecha na hora.
- */
-const resumeCount = $("resume-count");
-let resumeTimer: ReturnType<typeof setTimeout> | undefined;
-function resumeGame() {
-  if (!mode?.pausable() || !pauseRequested) return closeOverlays();
+  closePauseOptions(false);
   pause.hidden = true;
   fullMapEl.hidden = true;
   help.hidden = true;
   (document.activeElement as HTMLElement | null)?.blur?.();
-  let n = 3;
-  const tick = () => {
-    if (n === 0) {
-      resumeCount.hidden = true;
-      resumeTimer = undefined;
-      pauseGame(false);
-      return;
-    }
-    resumeCount.textContent = String(n);
-    resumeCount.hidden = false;
-    // Reinicia a animação a cada número.
-    resumeCount.classList.remove("pop");
-    void resumeCount.offsetWidth;
-    resumeCount.classList.add("pop");
-    sound.click();
-    n--;
-    resumeTimer = setTimeout(tick, 550);
-  };
-  tick();
-}
-
-function cancelResume() {
-  if (resumeTimer !== undefined) clearTimeout(resumeTimer);
-  resumeTimer = undefined;
-  resumeCount.hidden = true;
+  pauseGame(false);
+  syncMusicPause();
 }
 
 $("to-menu").addEventListener("click", openPause);
 $("open-map").addEventListener("click", openMap);
-$("pause-resume").addEventListener("click", resumeGame);
+$("pause-resume").addEventListener("click", closeOverlays);
 $("pause-map").addEventListener("click", openMap);
 $("pause-help").addEventListener("click", openHelp);
-$("help-close").addEventListener("click", resumeGame);
+$("help-close").addEventListener("click", closeOverlays);
 for (const button of document.querySelectorAll<HTMLButtonElement>("#touch [data-action]")) {
   button.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     carAction(button.dataset.action as Parameters<typeof carAction>[0]);
   });
 }
-$("fullmap-close").addEventListener("click", resumeGame);
-$("pause-music").addEventListener("click", () => {
-  sound.toggle("music");
-  refreshAudioButtons();
-  refreshPauseLabels();
-});
-$("pause-sfx").addEventListener("click", () => {
-  sound.toggle("sfx");
-  refreshAudioButtons();
-  refreshPauseLabels();
-});
+$("fullmap-close").addEventListener("click", closeOverlays);
+$("pause-options").addEventListener("click", openPauseOptions);
+$("pause-options-back").addEventListener("click", () => closePauseOptions());
 $("pause-quit").addEventListener("click", () => {
   closeOverlays();
   void returnToMenu();
@@ -932,30 +955,32 @@ window.addEventListener("keydown", (e) => {
   // Pausa: Esc ou P (Esc também fecha mapa e ajuda).
   if (mode && (e.code === "Escape" || (e.code === "KeyP" && help.hidden))) {
     e.preventDefault();
-    if (overlayOpen()) resumeGame();
+    // Nas Opções da pausa, Esc volta para a lista da pausa.
+    if (e.code === "Escape" && !pause.hidden && pauseOptionsOpen()) closePauseOptions();
+    else if (overlayOpen()) closeOverlays();
     else openPause();
     return;
   }
   // Mapa: M ou Tab.
   if (mode && (e.code === "KeyM" || e.code === "Tab") && pause.hidden && help.hidden) {
     e.preventDefault();
-    if (!fullMapEl.hidden) resumeGame();
+    if (!fullMapEl.hidden) closeOverlays();
     else openMap();
     return;
   }
   // Lista de comandos: F1.
   if (mode && e.code === "F1") {
     e.preventDefault();
-    if (!help.hidden) resumeGame();
+    if (!help.hidden) closeOverlays();
     else openHelp();
     return;
   }
-  // Na pausa, ↑↓ andam entre as opções (Enter aperta a que estiver em foco).
+  // Na pausa, ↑↓ andam entre os itens (Enter aperta o que estiver em foco; ←→ mexem no volume).
   if (!pause.hidden && (e.code === "ArrowUp" || e.code === "ArrowDown")) {
     e.preventDefault();
-    const buttons = [...pause.querySelectorAll<HTMLButtonElement>("button")];
-    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    buttons[(index + (e.code === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length].focus();
+    const items = [...pause.querySelectorAll<HTMLElement>("button, input, select")].filter((el) => !el.closest("[hidden]"));
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    items[(index + (e.code === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
     return;
   }
   // Desafio de outro piloto na tela: Y aceita, X amarela (até com o mapa aberto).
@@ -993,7 +1018,15 @@ window.addEventListener("blur", () => {
 
 // --- Laço de desenho -------------------------------------------------------
 
-function frame() {
+let lastFrame = 0;
+function frame(now = performance.now()) {
+  // Limite de FPS (Opções → Gráficos avançados): pula o quadro que chegou cedo demais.
+  const cap = scene?.graphics.fpsCap ?? 0;
+  if (cap && now - lastFrame < 1000 / cap - 2) {
+    requestAnimationFrame(frame);
+    return;
+  }
+  lastFrame = now;
   if (scene) scene.paused = !!mode?.paused();
   // Com a pausa, o mapa ou a ajuda abertos, o HUD do jogo (e os botões de toque) sai da frente.
   document.body.classList.toggle("overlay-open", !!mode && overlayOpen());
@@ -1056,7 +1089,9 @@ async function start(entry: MenuEntry) {
     const spawn = new URLSearchParams(location.search).get("spawn");
     await enterWorld(isRaceId(spawn) ? spawn : undefined);
   } else {
-    const room = await joinQuickRace({ ...carOptions(), raceId: menu.quickTrack() }, entry === "solo");
+    // Speedtrap é sempre desafio solo (o servidor também garante).
+    const raceId = menu.quickTrack();
+    const room = await joinQuickRace({ ...carOptions(), raceId }, entry === "solo" || RACES[raceId].kind === "radar");
     room.onLeave(() => {
       if (!switching) ui.status.textContent = "Desconectado. Recarregue a página.";
     });
@@ -1102,6 +1137,14 @@ const menu = createMenu({
   token: () => token,
   onEnter: enter,
   onAudioChange: refreshAudioButtons,
+  onGearbox: (manual) => {
+    $("touch").classList.toggle("manual", manual);
+    try {
+      mode?.sendGearbox(manual);
+    } catch {
+      // Sala fechando: vale na próxima.
+    }
+  },
   onPreviewRival: (index) => previewRival(story.story, index),
   onBoardClosed: () => resetPreview(),
   onScreen: (id) => {
@@ -1201,6 +1244,7 @@ function publishTestHook() {
     },
     setDestination: (x: number, z: number) => pickDestination({ x, z, race: null, onPin: false }),
     garages: () => GARAGES.map((g) => ({ name: g.name, x: g.apron.x, z: g.apron.z })),
+    garageScene: () => garageScene?.phase() ?? null,
     send: (type: string, message: unknown) => {
       if (current instanceof WorldMode) current.send(type, message);
       else (current.room as unknown as { send: (type: string, message: unknown) => void }).send(type, message);
@@ -1212,7 +1256,7 @@ declare global {
   interface Window {
     __nfbmcJukebox?: typeof jukeboxState;
     __nfbmcEconomy?: () => ReturnType<typeof economy.state>;
-    __nfbmcAudio?: () => { mood: string | null; cue: string | null; track: string | null; enabled: boolean; cinematic: boolean; jukebox?: boolean };
+    __nfbmcAudio?: () => { mood: string | null; cue: string | null; track: string | null; enabled: boolean; cinematic: boolean; jukebox?: boolean; paused?: boolean };
     __nfbmc?: {
       sessionId: string;
       mode: () => "world" | "race";
@@ -1231,6 +1275,8 @@ declare global {
       setDestination: (x: number, z: number) => void;
       /** Garagens (esconderijos): nome e o meio do pátio. */
       garages: () => { name: string; x: number; z: number }[];
+      /** Animação da garagem (entrando, dentro, saindo) ou null (sem 3D, ela não existe). */
+      garageScene: () => "entrando" | "dentro" | "saindo" | null;
       send: (type: string, message: unknown) => void;
     };
   }

@@ -67,11 +67,20 @@ function decal(parent: THREE.Object3D, geometry: THREE.BufferGeometry, look: Loo
 function collect(root: THREE.Object3D) {
   root.updateMatrixWorld(true);
   const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const apart: THREE.Mesh[] = [];
   const color = new THREE.Color();
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     const material = mesh.material as THREE.Material;
+    // Peça que precisa ficar separada (a porta da garagem, que some na animação de entrar).
+    if (mesh.userData.keep) {
+      const kept = new THREE.Mesh(mesh.geometry.clone().applyMatrix4(mesh.matrixWorld), material);
+      kept.name = mesh.userData.keep as string;
+      kept.geometry.computeBoundingSphere();
+      apart.push(kept);
+      return;
+    }
     const geometry = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
     geometry.applyMatrix4(mesh.matrixWorld);
     for (const name of Object.keys(geometry.attributes)) if (!["position", "normal", "uv"].includes(name)) geometry.deleteAttribute(name);
@@ -96,6 +105,7 @@ function collect(root: THREE.Object3D) {
     mesh.geometry.computeBoundingSphere();
     group.add(mesh);
   }
+  if (apart.length) group.add(...apart);
   return group;
 }
 
@@ -312,8 +322,8 @@ const plate = (name: string) =>
     ctx.fillText(name.toUpperCase(), w / 2, h / 2 + 4, w - 50);
   });
 
-/** Porta de enrolar: lâminas cinza e a faixa zebrada embaixo. */
-const rollDoor = () =>
+/** Porta de enrolar: lâminas cinza e a faixa zebrada embaixo (a animação de entrar usa a mesma). */
+export const rollDoor = () =>
   lit("door:garagem", 512, 320, (ctx, w, h) => {
     for (let y = 0; y < h; y += 16) {
       ctx.fillStyle = (y / 16) % 2 ? "#9aa3ad" : "#b6bec7";
@@ -488,16 +498,30 @@ function outbacon(g: THREE.Group, f: Frame) {
   twoFaced(top, new THREE.PlaneGeometry(6.6, 1.4), sloganBoard("outbacon", ["cebola explosiva"], "#3d2414", "#f3dfb8", "#e3b77a"), 0, -1.05, 0, 0.3);
 }
 
+/** Porta da garagem (vão no meio da fachada) e a espessura das paredes, que são ocas. */
+export const GARAGE_DOOR = { width: 7.6, height: 4.7, wall: 0.3 };
+
 function garagem(g: THREE.Group, f: Frame, name: string) {
   const { W, D, H, S, A } = f;
-  box(g, W, H + S, D, 0, -S, 0, "#5d6670");
+  // Paredes ocas, com o vão da porta: o interior da oficina (garage-interior.ts)
+  // só é montado quando alguém entra, e aparece pela porta aberta.
+  const { wall: T, height: DH } = GARAGE_DOOR;
+  const shell = "#5d6670";
+  box(g, W, H + S, T, 0, -S, -D / 2 + T / 2, shell);
+  for (const s of [-1, 1]) box(g, T, H + S, D, s * (W / 2 - T / 2), -S, 0, shell);
+  box(g, W, T, D, 0, H - T, 0, shell);
+  const jamb = (W - GARAGE_DOOR.width) / 2;
+  for (const s of [-1, 1]) box(g, jamb, H + S, T, s * (W / 2 - jamb / 2), -S, D / 2 - T / 2, shell);
+  box(g, GARAGE_DOOR.width, H - DH, T, 0, DH, D / 2 - T / 2, shell);
+  box(g, GARAGE_DOOR.width, S, T, 0, -S, D / 2 - T / 2, shell);
   box(g, W + 0.5, 0.45, D + 0.5, 0, H, 0, "#2b2f36");
   // Frisos de chapa ondulada na fachada.
   for (let y = 5.6; y < H; y += 0.6) box(g, W + 0.02, 0.08, D + 0.02, 0, y, 0, "#4b535c");
   // Porta de enrolar com batente amarelo.
-  const door = 7.6;
-  box(g, door + 0.8, 5.1, 0.25, 0, 0, D / 2 + 0.1, "#f2c230");
-  put(g, new THREE.PlaneGeometry(door, 4.7), rollDoor(), 0, 2.35, D / 2 + 0.24);
+  const door = GARAGE_DOOR.width;
+  for (const s of [-1, 1]) box(g, 0.4, DH + 0.4, 0.25, s * (door / 2 + 0.2), 0, D / 2 + 0.1, "#f2c230");
+  box(g, door + 0.8, 0.4, 0.25, 0, DH, D / 2 + 0.1, "#f2c230");
+  put(g, new THREE.PlaneGeometry(door, DH), rollDoor(), 0, DH / 2, D / 2 + 0.24).userData.keep = "door";
   put(g, new THREE.PlaneGeometry(5.6, 0.95), plate(name), 0, 5.75, D / 2 + 0.05);
   // Portinha e janela de lado.
   box(g, 1.1, 2.3, 0.14, W / 2 - 2, 0, D / 2 + 0.07, "#2b2f36");
@@ -566,8 +590,15 @@ function buildLandmark(l: Landmark) {
     case "outbacon": outbacon(root, f); break;
     case "garagem": garagem(root, f, l.name); break;
   }
-  return collect(root);
+  const built = collect(root);
+  const door = built.getObjectByName("door");
+  if (door) DOORS.set(l.id, door);
+  return built;
 }
+
+const DOORS = new Map<string, THREE.Object3D>();
+/** Porta (fechada) da garagem desenhada na cidade: a animação esconde e põe a dela, que abre. */
+export const garageDoor = (id: string) => DOORS.get(id) ?? null;
 
 /** Desenha todas as lanchonetes e garagens, cada uma no bloco da cena dela. */
 export function buildLandmarks(scene: THREE.Scene, addChunk: AddChunk) {

@@ -25,6 +25,10 @@ export interface TachoData {
   gear: number;
   car: string;
   manual: boolean;
+  /** Arrancada: faixa verde da largada (rpm), desenhada no conta-giros. */
+  zone?: [number, number];
+  /** Arrancada: giro ideal da troca (a marca verde; a luz acende perto dela). */
+  shiftAt?: number;
 }
 
 /**
@@ -41,7 +45,7 @@ export function createTacho(canvas: HTMLCanvasElement) {
   const start = Math.PI * 0.75;
   const sweep = Math.PI * 1.5;
 
-  return ({ speed, rpm, gear, car, manual }: TachoData) => {
+  return ({ speed, rpm, gear, car, manual, zone, shiftAt }: TachoData) => {
     const spec = carSpec(car);
     const max = Math.ceil((spec.redline + 1000) / 1000) * 1000;
     const angle = (value: number) => start + (value / max) * sweep;
@@ -58,6 +62,24 @@ export function createTacho(canvas: HTMLCanvasElement) {
     ctx.strokeStyle = "#c1121f";
     ctx.lineWidth = 7;
     ctx.stroke();
+
+    // Arrancada: faixa verde da largada e a marca do giro ideal de troca.
+    if (zone) {
+      ctx.beginPath();
+      ctx.arc(c, c, radius - 4, angle(zone[0]), angle(zone[1]));
+      ctx.strokeStyle = "#3ddc4a";
+      ctx.lineWidth = 9;
+      ctx.stroke();
+    }
+    if (shiftAt) {
+      const a = angle(shiftAt);
+      ctx.strokeStyle = "#7dff6a";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(c + Math.cos(a) * (radius - 20), c + Math.sin(a) * (radius - 20));
+      ctx.lineTo(c + Math.cos(a) * (radius + 6), c + Math.sin(a) * (radius + 6));
+      ctx.stroke();
+    }
 
     // Marcações a cada 1000 rpm (números) e a cada 500 (tracinhos).
     ctx.textAlign = "center";
@@ -100,7 +122,7 @@ export function createTacho(canvas: HTMLCanvasElement) {
     ctx.fill();
 
     // Luz de troca: acende perto da faixa vermelha e pisca no limitador.
-    const shiftNow = rpm > spec.redline * 0.9;
+    const shiftNow = shiftAt ? rpm >= shiftAt - spec.redline * 0.04 : rpm > spec.redline * 0.9;
     const blink = rpm >= spec.redline - 300 && Math.floor(performance.now() / 80) % 2 === 0;
     ctx.beginPath();
     ctx.arc(c, c - radius * 0.55, 7, 0, Math.PI * 2);
@@ -116,7 +138,7 @@ export function createTacho(canvas: HTMLCanvasElement) {
     ctx.fillText("KM/H", c, c + 70);
     ctx.font = "26px 'Russo One', sans-serif";
     ctx.fillStyle = gear < 0 ? "#ff9a1f" : "#ffffff";
-    ctx.fillText(gear < 0 ? "R" : String(gear), c, c - 26);
+    ctx.fillText(gear < 0 ? "R" : gear === 0 ? "N" : String(gear), c, c - 26);
     ctx.font = "11px 'Russo One', sans-serif";
     ctx.fillStyle = "rgba(245, 235, 224, 0.7)";
     ctx.fillText(manual ? "MANUAL" : "AUTO", c, c - 8);

@@ -10,13 +10,28 @@ export * from "./world.ts";
 export * from "./barriers.ts";
 export * from "./levels.ts";
 export * from "./tuning.ts";
+export * from "./speedtrap.ts";
+export * from "./drag.ts";
 
 import type { Tune } from "./tuning.ts";
+import { RACES, type RaceId } from "./world.ts";
 
 export const ROOM_NAME = "race";
 export const WORLD_ROOM_NAME = "world";
 
 export const MAX_PLAYERS = 8;
+
+/** Quantos carros largam numa corrida: o speedtrap é solo e a arrancada é de dois. */
+export const raceSeats = (id: RaceId) => (RACES[id].kind === "radar" ? 1 : RACES[id].kind === "drag" ? 2 : MAX_PLAYERS);
+
+/** Resumo da corrida para o menu, o ponto de encontro e a placa: voltas, km, radares ou distância. */
+export function raceSummary(id: RaceId) {
+  const race = RACES[id];
+  const km = (race.track.length / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+  if (race.drag) return `Arrancada de ${race.drag.distance} m · câmbio manual`;
+  if (race.kind === "radar") return `Desafio solo · ${race.radars?.length ?? 0} radares · ${km} km`;
+  return `${race.laps} ${race.laps === 1 ? "volta" : "voltas"} · ${km} km por volta`;
+}
 export const NAME_MAX_LENGTH = 16;
 
 export const COUNTDOWN_SECONDS = 3;
