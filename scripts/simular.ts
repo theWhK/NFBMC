@@ -1,5 +1,6 @@
 // Simulação dos bots dando volta nas pistas (rode ao mexer em carros, pistas ou ruas):
 //   node scripts/simular.ts [corrida ...] [--carro=civic] [--skill=0.9]
+//   node scripts/simular.ts --obras   (atravessa cada ponte, viaduto e túnel nos dois sentidos)
 // Para cada corrida: tempo de volta de um bot com aquela habilidade e carro,
 // quantas vezes encostou nas barreiras (trackCorridor), bateu no cenário e se
 // desatolou. Um bot bom não deve encostar (ou quase nada).
@@ -16,6 +17,7 @@ import {
   keepInCorridor,
   nearestSample,
   stepCar,
+  STRUCTURES,
   type RaceId,
 } from "../shared/src/index.ts";
 import { botInput, createBrain } from "../server/src/rooms/bots.ts";
@@ -71,7 +73,44 @@ export function simulate(id: RaceId, carId: string, botSkill: number, laps = RAC
   return { time, walls, world, stuck, maxSpeed: maxSpeed * 3.6, done: lap >= laps };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * Atravessa cada obra de arte nos dois sentidos com um piloto simples (segue o
+ * eixo), contando batidas: entrar e sair da ponte/túnel não pode bater em nada.
+ */
+function crossStructures(carId: string) {
+  const spec = carSpec(carId);
+  const size = carHalfSize(carId);
+  for (const st of STRUCTURES) {
+    for (const dir of [1, -1]) {
+      const pts = dir > 0 ? st.points : [...st.points].reverse();
+      const [ax, az] = pts[0];
+      const [bx, bz] = pts[3];
+      const len = Math.hypot(bx - ax, bz - az);
+      const state = { x: ax - ((bx - ax) / len) * 2, z: az - ((bz - az) / len) * 2, heading: Math.atan2(bx - ax, bz - az), speed: 25 };
+      const motion = createMotion();
+      const drive = createDrive(spec);
+      let hits = 0;
+      let target = 0;
+      let climbed = false;
+      for (let k = 0; k < 30 * 120 && target < pts.length - 1; k++) {
+        while (target < pts.length - 1 && Math.hypot(pts[target][0] - state.x, pts[target][1] - state.z) < 10) target++;
+        const [tx, tz] = pts[target];
+        const aim = Math.atan2(tx - state.x, tz - state.z) - state.heading;
+        const want = Math.atan2(Math.sin(aim), Math.cos(aim));
+        const input = { throttle: state.speed < 30 ? 1 : 0, steer: Math.max(-1, Math.min(1, -want * 3)) };
+        stepCar(state, drive, spec, input, 1 / 30, !isOnRoad(state.x, state.z, motion.level), 0, motion, carGrade(state, motion));
+        if (collideWorld(state, size.halfLength, size.halfWidth, motion)) hits++;
+        if (motion.level === st.id) climbed = true;
+      }
+      const ok = hits === 0 && climbed && target >= pts.length - 1;
+      console.log(`${ok ? "ok  " : "ERRO"} ${st.name.padEnd(22)} ${dir > 0 ? "A→B" : "B→A"}  batidas ${hits}  no nível ${climbed ? "sim" : "não"}  atravessou ${target >= pts.length - 1 ? "sim" : "não"}`);
+    }
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}` && args.includes("--obras")) {
+  crossStructures(car);
+} else if (import.meta.url === `file://${process.argv[1]}`) {
   for (const id of ids.length ? ids : RACE_IDS) {
     const t0 = performance.now();
     const r = simulate(id, car, skill, 1);

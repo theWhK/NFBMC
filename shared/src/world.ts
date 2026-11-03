@@ -1180,13 +1180,18 @@ function circlePush(cx: number, cz: number, r: number): [number, number] | null 
  * O carro é uma cápsula (três círculos ao longo do comprimento, da largura
  * dele): o bico não atravessa a parede e a lateral não para longe dela.
  * Batendo de frente o carro para; de raspão, escorrega pela parede.
+ * Com `motion`, também acompanha o nível do carro (`motion.level`) e bate nas
+ * obras de arte (ver levels.ts); passe sempre o `motion` de cada carro.
  * Retorna true se bateu.
  */
 export function collideWorld(car: CarState, halfLength: number = CAR.halfLength, halfWidth: number = CAR.halfWidth, motion?: CarMotion): boolean {
   let hit = false;
-  // Nível (chão, ponte, viaduto, túnel): troca só nas pontas das obras.
+  // Nível (chão, ponte, viaduto, túnel): troca só nas pontas das obras. Sem
+  // `motion` não dá para saber o nível (quem chama não guarda): aí as paredes
+  // das obras (guarda-corpo, rampa, galeria do túnel) ficam de fora, senão um
+  // carro entrando no túnel bateria na boca como se estivesse no chão.
   const level = motion ? (motion.level = nextLevel(car.x, car.z, motion.level ?? GROUND)) : GROUND;
-  if (collideLevel(car, level, halfLength, halfWidth, motion)) hit = true;
+  if (motion && collideLevel(car, level, halfLength, halfWidth, motion)) hit = true;
   if (level >= 0) {
     // Em cima da ponte (ou dentro do túnel) não há prédio, árvore nem água para bater.
     return clampBounds(car) || hit;
