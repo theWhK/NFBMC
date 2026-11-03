@@ -46,6 +46,7 @@ import { jukeboxState, setupJukebox } from "./jukebox.ts";
 import { makeBridge, playStory, showRadio, type Cast } from "./cinematic.ts";
 import { economy, money } from "./economy.ts";
 import { createGarage } from "./garage.ts";
+import { createGarageCutscene, type GarageCutscene } from "./garage-cutscene.ts";
 import { createGps, type GpsGuidance, type GpsTarget } from "./gps.ts";
 import { createFullMap, createMinimap, createTacho, type MapPick, type MinimapView } from "./hud.ts";
 import { introEnabled, playIntro } from "./intro.ts";
@@ -331,6 +332,7 @@ let switching = false;
 
 function setMode(next: WorldMode | RaceMode | null) {
   garage.close();
+  dropGarageScene();
   mode?.dispose();
   hideModeUi();
   sound.updateSiren(null);
@@ -367,14 +369,32 @@ function carOptions() {
   return { name: playerName, color: menu.color(), car, manual: menu.manual(), tune: economy.tune(car) };
 }
 
+/** Animação de entrar/sair da garagem (só com o 3D); null fora dela. */
+let garageScene: GarageCutscene | null = null;
+
 /**
- * Parou no pátio de uma garagem (mundo aberto) e apertou Enter: abre a oficina
- * do carro atual. Jogando sozinho o jogo pausa; as peças valem na hora.
+ * Parou no pátio de uma garagem (mundo aberto) e apertou Enter: o carro entra
+ * (client/src/garage-cutscene.ts) e abre a oficina do carro atual, com o
+ * interior da garagem por trás. Jogando sozinho o jogo pausa com a oficina
+ * aberta; as peças valem na hora. Ao fechar, o carro sai para o pátio, no
+ * mesmo lugar em que está no servidor (que nunca o tirou dali).
  */
 async function openSafehouse(name: string) {
   if (!(mode instanceof WorldMode) || garage.isOpen() || overlayOpen()) return;
   const world = mode;
   releaseControls();
+  const place = GARAGES.find((g) => g.name === name);
+  const pose = () => {
+    const me = world.room.state.players?.get(world.room.sessionId);
+    return me ? { x: me.x, z: me.z, heading: me.heading, color: me.color, car: me.car } : null;
+  };
+  const start = pose();
+  if (scene && place && start) {
+    garageScene = createGarageCutscene(scene, place, start, { color: start.color, car: start.car }, sound);
+    world.hideSelf = true;
+    await garageScene.enter();
+    if (mode !== world) return;
+  }
   pauseGame(true);
   await garage.open({
     kind: "safehouse",
@@ -387,7 +407,19 @@ async function openSafehouse(name: string) {
       $("touch").classList.toggle("nitro", ctx.hasNitro());
     },
   });
-  if (mode === world) pauseGame(false);
+  if (mode !== world) return;
+  pauseGame(false);
+  const cut = garageScene;
+  const end = pose();
+  if (cut && end) await cut.exit(end);
+  if (garageScene === cut) garageScene = null;
+  world.hideSelf = false;
+}
+
+/** Trocou de sala (ou saiu) no meio da garagem: some com a animação e o interior. */
+function dropGarageScene() {
+  garageScene?.abort();
+  garageScene = null;
 }
 
 /** Prêmio em dinheiro de uma corrida (qualquer uma): entra na carteira. */
@@ -712,7 +744,7 @@ function shift(direction: number) {
 const pause = $("pause");
 const fullMapEl = $("fullmap");
 const help = $("help");
-const overlayOpen = () => !pause.hidden || !fullMapEl.hidden || !help.hidden || garage.isOpen();
+const overlayOpen = () => !pause.hidden || !fullMapEl.hidden || !help.hidden || garage.isOpen() || !!garageScene;
 
 /**
  * Pausa de verdade (a simulação para no servidor) com a pausa, o mapa ou a
@@ -1212,6 +1244,7 @@ function publishTestHook() {
     },
     setDestination: (x: number, z: number) => pickDestination({ x, z, race: null, onPin: false }),
     garages: () => GARAGES.map((g) => ({ name: g.name, x: g.apron.x, z: g.apron.z })),
+    garageScene: () => garageScene?.phase() ?? null,
     send: (type: string, message: unknown) => {
       if (current instanceof WorldMode) current.send(type, message);
       else (current.room as unknown as { send: (type: string, message: unknown) => void }).send(type, message);
@@ -1242,6 +1275,8 @@ declare global {
       setDestination: (x: number, z: number) => void;
       /** Garagens (esconderijos): nome e o meio do pátio. */
       garages: () => { name: string; x: number; z: number }[];
+      /** Animação da garagem (entrando, dentro, saindo) ou null (sem 3D, ela não existe). */
+      garageScene: () => "entrando" | "dentro" | "saindo" | null;
       send: (type: string, message: unknown) => void;
     };
   }

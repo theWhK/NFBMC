@@ -407,6 +407,8 @@ export class GameScene {
   private leaving: { model: CarModel; since: number }[] = [];
   /** Oficina no mundo aberto: a câmera gira devagar em volta do carro parado na garagem. */
   private garageCam = false;
+  /** Câmera dentro da garagem: o sol e o céu quase não entram. */
+  private indoor = false;
   /** Ficha do próprio carro (com a tunagem), para a previsão da curva bater com a do servidor. */
   localSpec: CarSpec | null = null;
   /** Câmera atual (C troca): capô, primeira pessoa, terceira perto ou longe. */
@@ -555,10 +557,7 @@ export class GameScene {
     }
     if (rich) this.environment ??= skyEnvironment(this.renderer, this.skyMaterial, "#4a4032");
     this.scene.environment = rich ? this.environment : null;
-    this.scene.environmentIntensity = 0.55;
-    // Com o reflexo do céu iluminando tudo, a luz ambiente diminui (senão tudo fica lavado).
-    this.ambient.intensity = rich ? 0.75 : 1.4;
-    this.light.intensity = rich ? 2.8 : 2.4;
+    this.lightLevels();
     for (const cloud of this.clouds.children) {
       const textures = cloud.userData.textures as Record<Look, THREE.Texture> | undefined;
       if (textures) (cloud as THREE.Sprite).material.map = textures[this.look];
@@ -579,6 +578,27 @@ export class GameScene {
     });
     this.resize();
   }
+
+  /** Força do sol, do céu e do reflexo (dentro da garagem, quase nada entra). */
+  private lightLevels() {
+    const rich = this.look === "realista" && !this.simple;
+    const inside = this.indoor;
+    this.scene.environmentIntensity = inside ? 0.18 : 0.55;
+    // Com o reflexo do céu iluminando tudo, a luz ambiente diminui (senão tudo fica lavado).
+    this.ambient.intensity = (rich ? 0.75 : 1.4) * (inside ? 0.22 : 1);
+    this.light.intensity = (rich ? 2.8 : 2.4) * (inside ? 0.04 : 1);
+  }
+
+  /** Dentro da garagem (client/src/garage-cutscene.ts): quem ilumina são as luzes de lá. */
+  setIndoor(on: boolean) {
+    if (on === this.indoor) return;
+    this.indoor = on;
+    this.lightLevels();
+    // As colunas de luz das corridas (com o nome por cima de tudo) não atravessam as paredes.
+    if (on) this.markersOutside = this.markers.visible;
+    this.markers.visible = on ? false : this.markersOutside;
+  }
+  private markersOutside = false;
 
   private enableShadows() {
     const real = this.look === "realista";
@@ -1045,6 +1065,7 @@ export class GameScene {
     const followedCar = followId ? cars.get(followId) : undefined;
     if (this.director) {
       this.director(dt, this.camera, this.cameraTarget);
+      this.cockpit.group.visible = false;
       this.camera.updateProjectionMatrix();
     } else if (followed && followedCar && (this.finishCam !== null || this.garageCam)) {
       // Chegada: a câmera gira devagar em volta do carro, baixa, como nos replays da série.

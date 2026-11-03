@@ -167,6 +167,55 @@ test("3D: visual realista com detalhes de perto e troca para o quadrinho", async
   expect(errors).toEqual([]);
 });
 
+// Garagem no mundo aberto: a porta sobe, o carro entra sozinho (Esc pula), a oficina
+// abre com o interior por trás e, ao fechar, o carro sai até o mesmo lugar do pátio
+// (o servidor nunca o tirou de lá) e o controle volta.
+test("3D: entrar e sair da garagem com a animação e o interior", async ({ page }) => {
+  test.setTimeout(240_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => {
+    if (m.type() === "error") errors.push(m.text());
+  });
+  await page.addInitScript(() => localStorage.setItem("nfbmc:quality", "medio"));
+  await page.goto("/");
+  await page.getByTestId("name-input").fill("Will");
+  await page.getByTestId("world-solo-button").click();
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode()), { timeout: 30_000 }).toBe("world");
+  const [garage] = await page.evaluate(() => window.__nfbmc!.garages());
+  await page.evaluate((g) => window.__nfbmc!.send("debugMove", { x: g.x, z: g.z }), garage);
+  await expect(page.getByTestId("garage-prompt")).toBeVisible({ timeout: 15_000 });
+  const me = () => page.evaluate(() => window.__nfbmc!.players()[window.__nfbmc!.sessionId]);
+  const parked = await me();
+
+  // Entrando: a animação roda (com as faixas de cinema) e Esc pula direto para a oficina.
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.garageScene()), { timeout: 20_000 }).toBe("entrando");
+  await expect(page.getByTestId("garage-cutscene")).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(1500);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("garage")).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.garageScene()), { timeout: 20_000 }).toBe("dentro");
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.paused()), { timeout: 20_000 }).toBe(true);
+  await page.waitForTimeout(1000);
+
+  // Saindo: a oficina fecha, o carro sai e o controle volta no mesmo lugar do pátio.
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("garage")).toBeHidden({ timeout: 20_000 });
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.garageScene()), { timeout: 20_000 }).toBe("saindo");
+  // Com o 3D desenhado na CPU cada quadro demora: deixa rodar um pouco e pula o resto (Esc).
+  await page.waitForTimeout(2000);
+  await page.keyboard.press("Escape");
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.garageScene()), { timeout: 30_000 }).toBeNull();
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.paused()), { timeout: 20_000 }).toBe(false);
+  const after = await me();
+  expect(Math.hypot(after.x - parked.x, after.z - parked.z)).toBeLessThan(1);
+  // E dá para entrar de novo.
+  await expect(page.getByTestId("garage-prompt")).toBeVisible({ timeout: 20_000 });
+
+  expect(errors).toEqual([]);
+});
+
 // Arrancada: a pista do drag (faixas, semáforo e chegada) monta na cena 3D.
 test("3D: arrancada do aeroporto desenha a pista e larga sem erros", async ({ page }) => {
   test.setTimeout(120_000);
