@@ -985,7 +985,15 @@ window.addEventListener("blur", () => {
 
 // --- Laço de desenho -------------------------------------------------------
 
-function frame() {
+let lastFrame = 0;
+function frame(now = performance.now()) {
+  // Limite de FPS (Opções → Gráficos avançados): pula o quadro que chegou cedo demais.
+  const cap = scene?.graphics.fpsCap ?? 0;
+  if (cap && now - lastFrame < 1000 / cap - 2) {
+    requestAnimationFrame(frame);
+    return;
+  }
+  lastFrame = now;
   if (scene) scene.paused = !!mode?.paused();
   // Com a pausa, o mapa ou a ajuda abertos, o HUD do jogo (e os botões de toque) sai da frente.
   document.body.classList.toggle("overlay-open", !!mode && overlayOpen());

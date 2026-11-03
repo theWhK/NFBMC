@@ -12,6 +12,7 @@ import type { Sound } from "./audio.ts";
 import { economy, money } from "./economy.ts";
 import type { Garage } from "./garage.ts";
 import { introEnabled, setIntroEnabled } from "./intro.ts";
+import { mountGraphicsOptions } from "./graphics-options.ts";
 import { openJukebox } from "./jukebox.ts";
 import { whereLabel } from "./coop.ts";
 import { fetchListaGorda, fetchOnline, fetchProfile } from "./net.ts";
@@ -87,8 +88,19 @@ export function createMenu(options: MenuOptions) {
       const label = items[selected].querySelector(".label")?.textContent ?? "";
       setHtml(hint, `<strong>${escapeHtml(label)}</strong><span>${escapeHtml(items[selected].dataset.hint ?? "")}</span>`);
       items[selected].scrollIntoView?.({ block: "nearest", inline: "center" });
-    }
+    } else buttons[selected].scrollIntoView?.({ block: "nearest" });
   };
+
+  /** Botões navegáveis da tela aberta (os escondidos ficam de fora). */
+  const subButtons = () =>
+    [...(openScreen?.querySelectorAll<HTMLButtonElement>(".mw-list.sub button, .swatches button") ?? [])].filter((b) => !b.hidden && !b.closest("[hidden]"));
+  // Uma tela mostrou ou escondeu botões (Gráficos avançados): refaz a lista do teclado.
+  document.addEventListener("menu:relist", (e) => {
+    if (active === items || !openScreen?.contains(e.target as Node)) return;
+    const current = active[selected];
+    active = subButtons();
+    select(Math.max(0, active.indexOf(current)), active);
+  });
 
   const showScreen = (id: string | null) => {
     openScreen = null;
@@ -121,7 +133,7 @@ export function createMenu(options: MenuOptions) {
       showScreen(button.dataset.screen);
       options.onScreen?.(button.dataset.screen);
       // Telas com botões viram um submenu navegável pelo teclado.
-      const sub = [...(openScreen?.querySelectorAll<HTMLButtonElement>(".mw-list.sub button, .swatches button") ?? [])];
+      const sub = subButtons();
       if (sub.length) {
         active = sub;
         // Lista Gorda: no combo atual.
@@ -180,19 +192,21 @@ export function createMenu(options: MenuOptions) {
     optSfx.textContent = `Efeitos: ${sound.prefs.sfx ? "ligados" : "desligados"}`;
     optGearbox.textContent = `Câmbio: ${manual ? "manual (E/Q)" : "automático"}`;
   };
-  // Gráficos: automático → alto → médio → baixo. Vale na hora (sem recarregar a
-  // página, que fazia a abertura tocar de novo a cada clique).
+  // Gráficos: automático → ultra → alto → médio → baixo. Vale na hora (sem
+  // recarregar a página, que fazia a abertura tocar de novo a cada clique).
   const optQuality = document.getElementById("opt-quality") as HTMLButtonElement;
   const QUALITY_KEY = "nfbmc:quality";
-  const qualityOrder = ["", "alto", "medio", "baixo"];
+  const qualityOrder = ["", "ultra", "alto", "medio", "baixo"];
   const qualityLabel = (choice: string) => {
     const comic = scene?.look === "quadrinho";
-    return ({
+    const label = ({
       "": `automático (${scene?.quality === "medio" ? "médio" : scene?.quality ?? "baixo"})`,
-      alto: comic ? "alto (contorno + sombras)" : "alto (sombras, oclusão e brilho)",
+      ultra: comic ? "ultra (contorno + sombras altas)" : "ultra (sombras altas, oclusão e brilho)",
+      alto: comic ? "alto (contorno + sombras)" : "alto (sombras e brilho)",
       medio: comic ? "médio (contorno)" : "médio (reflexos, sem sombras)",
       baixo: "baixo (mais leve)",
     } as Record<string, string>)[choice] ?? "automático";
+    return scene?.customized ? `${label}, personalizado` : label;
   };
   let currentQuality = storage.get(QUALITY_KEY);
   if (!qualityOrder.includes(currentQuality)) currentQuality = "";
@@ -203,7 +217,15 @@ export function createMenu(options: MenuOptions) {
     storage.set(QUALITY_KEY, currentQuality);
     scene?.setQuality(currentQuality);
     refreshQuality();
+    advanced.refresh();
   });
+  // Gráficos avançados: cada ajuste por cima do preset (client/src/graphics-options.ts).
+  const advanced = mountGraphicsOptions(
+    document.getElementById("gfx-advanced")!,
+    document.getElementById("opt-advanced") as HTMLButtonElement,
+    scene,
+    refreshQuality,
+  );
   // Visual: realista (materiais físicos, reflexos) ou quadrinho (cel-shading com contorno, o antigo).
   const optLook = document.getElementById("opt-look") as HTMLButtonElement;
   const LOOK_KEY = "nfbmc:look";
@@ -216,6 +238,7 @@ export function createMenu(options: MenuOptions) {
     scene?.setLook(currentLook);
     refreshLook();
     refreshQuality();
+    advanced.refresh();
   });
   // Jukebox: a tela para ouvir a trilha (client/src/jukebox.ts), item do menu principal.
   document.getElementById("menu-jukebox")!.addEventListener("click", () => openJukebox());
