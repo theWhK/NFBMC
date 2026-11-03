@@ -564,13 +564,15 @@ export class GameScene {
       if (textures) (cloud as THREE.Sprite).material.map = textures[this.look];
     }
     applyLook(this.scene, this.look, this.simple);
+    const hadShadows = this.renderer.shadowMap.enabled;
     if (this.graphics.shadows > 0) this.enableShadows();
     else {
       this.renderer.shadowMap.enabled = false;
       this.light.castShadow = false;
     }
-    // Ligar/desligar sombra muda o shader dos materiais: recompila.
-    this.scene.traverse((object) => {
+    // Ligar/desligar sombra muda o shader dos materiais: recompila. Só nessa
+    // hora: recompilar a cidade inteira a cada ajuste travava a tela por segundos.
+    if (hadShadows !== this.renderer.shadowMap.enabled) this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh) return;
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) material.needsUpdate = true;
