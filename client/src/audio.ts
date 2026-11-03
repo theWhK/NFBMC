@@ -768,6 +768,11 @@ export class Sound {
     if (this.ctx) fx.tick(this.kit);
   }
 
+  /** Porta de enrolar da garagem (subindo ou descendo por `seconds`). */
+  garageDoor(seconds: number, volume = 1) {
+    if (this.ctx) fx.rollDoor(this.kit, seconds, volume);
+  }
+
   // --- Abertura ----------------------------------------------------------------
 
   whoosh() {

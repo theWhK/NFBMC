@@ -62,6 +62,8 @@ export class WorldMode {
   /** Bairro onde o carro estava no quadro anterior (para mostrar a placa ao trocar). */
   private district: string | null = null;
 
+  /** Dentro da garagem (animação e oficina): o próprio carro some da cena; quem anda é o carro de cena. */
+  hideSelf = false;
   /** Parou no pátio de uma garagem e apertou Enter: abre a oficina. */
   private onGarage: (name: string) => void;
   /** Ganchos do modo história (calorias ganhas e fugas da Vigilância). */
@@ -197,7 +199,8 @@ export class WorldMode {
     const alone = !!room.state.solo;
     room.state.players?.forEach((p, id) => {
       const name = alone && id === room.sessionId ? "" : p.name;
-      cars.set(id, { name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible: true });
+      const visible = !(this.hideSelf && id === room.sessionId);
+      cars.set(id, { name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible });
     });
     room.state.traffic?.forEach((n, id) => {
       cars.set(`npc:${id}`, {

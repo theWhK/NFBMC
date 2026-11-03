@@ -1,0 +1,67 @@
+/* --- Entrar e sair da garagem (client/src/garage-cutscene.ts) ------------- */
+
+/* Por baixo da oficina (z-index 42) e por cima do HUD. */
+#garage-cut {
+  position: fixed;
+  inset: 0;
+  z-index: 41;
+  pointer-events: none;
+}
+
+#garage-cut[hidden] {
+  display: none;
+}
+
+#garage-cut .fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+}
+
+/* Faixas de cinema durante as animações. */
+#garage-cut .bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10vh;
+  background: #000;
+  transition: transform 0.45s ease;
+}
+
+#garage-cut .bar.top {
+  top: 0;
+  transform: translateY(-100%);
+}
+
+#garage-cut .bar.bottom {
+  bottom: 0;
+  transform: translateY(100%);
+}
+
+#garage-cut.bars .bar {
+  transform: none;
+}
+
+#garage-cut .skip {
+  position: absolute;
+  right: 22px;
+  bottom: calc(10vh + 12px);
+  margin: 0;
+  font: italic 0.95rem var(--hud);
+  color: rgba(245, 235, 224, 0.7);
+  text-shadow: 0 1px 4px #000;
+}
+
+#garage-cut .skip[hidden] {
+  display: none;
+}
+
+body.touch #garage-cut .skip::after {
+  content: " (ou toque na tela)";
+}
+
+/* Durante a animação e com a oficina aberta, o aviso do pátio sai da frente. */
+body.overlay-open #garage-prompt {
+  visibility: hidden;
+}

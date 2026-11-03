@@ -325,6 +325,21 @@ export function nitro(kit: Kit) {
   tone(kit, { dur: 0.7, freq: 55, freqTo: 140, type: "sawtooth", gain: 0.25, lowpass: 400, attack: 0.04 });
 }
 
+/**
+ * Porta de enrolar da garagem subindo ou descendo por `seconds`: o motorzinho
+ * zumbindo, as lâminas batendo nos trilhos (estalos em sequência) e a pancada
+ * no fim do curso.
+ */
+export function rollDoor(kit: Kit, seconds: number, volume = 1) {
+  tone(kit, { dur: seconds, freq: 92, freqTo: 104, type: "sawtooth", gain: 0.07 * volume, lowpass: 420, attack: 0.15, wet: 0.2 });
+  burst(kit, { dur: seconds, type: "bandpass", freq: 700, q: 0.8, gain: 0.05 * volume, attack: 0.2, wet: 0.3 });
+  for (let t = 0.05; t < seconds; t += 0.075 + rand(-0.012, 0.012)) {
+    burst(kit, { delay: t, dur: rand(0.012, 0.025), type: "bandpass", freq: rand(1400, 2600), q: 3, gain: rand(0.05, 0.1) * volume, wet: 0.35 });
+  }
+  burst(kit, { delay: seconds, dur: 0.18, type: "lowpass", freq: 260, gain: 0.5 * volume, wet: 0.4 });
+  burst(kit, { delay: seconds, dur: 0.08, type: "bandpass", freq: 1200, q: 2, gain: 0.18 * volume, wet: 0.4 });
+}
+
 /** Clique de menu: um "tic" curto e seco. */
 export function tick(kit: Kit) {
   burst(kit, { dur: 0.012, type: "highpass", freq: 3500, gain: 0.12 });
