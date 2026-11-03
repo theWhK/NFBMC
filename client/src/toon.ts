@@ -35,6 +35,7 @@ export function toonMaterial(material: THREE.Material): THREE.Material {
     side: material.side,
     fog: material.fog,
     depthWrite: material.depthWrite,
+    alphaTest: material.alphaTest,
     polygonOffset: material.polygonOffset,
     polygonOffsetFactor: material.polygonOffsetFactor,
     polygonOffsetUnits: material.polygonOffsetUnits,

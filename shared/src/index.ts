@@ -9,6 +9,10 @@ export * from "./story.ts";
 export * from "./world.ts";
 export * from "./barriers.ts";
 export * from "./tuning.ts";
+// Campo e aeroporto: gerados a partir do mapa, entram na colisão ao carregar.
+export * from "./lots.ts";
+export * from "./rural.ts";
+export * from "./airport.ts";
 
 import type { Tune } from "./tuning.ts";
 
