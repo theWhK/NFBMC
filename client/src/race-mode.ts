@@ -327,6 +327,11 @@ export class RaceMode {
     this.room.send("shift", { direction });
   }
 
+  /** Câmbio trocado nas Opções (pela pausa): vale na hora. */
+  sendGearbox(manual: boolean) {
+    this.room.send("gearbox", { manual });
+  }
+
   /** Sala de um jogador só: dá para pausar (o servidor para a simulação). */
   pausable() {
     return !!this.room.state.pausable;
@@ -358,7 +363,7 @@ export class RaceMode {
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
         name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: p.bot, x: p.x, z: p.z, speed: p.speed, racing: p.racing,
-        lap: p.lap, place: p.place, calories: p.calories, finished: p.finished, nitro: p.nitro, boost: p.boost > 0,
+        lap: p.lap, place: p.place, calories: p.calories, finished: p.finished, nitro: p.nitro, boost: p.boost > 0, manual: p.manual,
       };
     });
     return result;

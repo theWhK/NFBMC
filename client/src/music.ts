@@ -198,6 +198,25 @@ export function stitch(out: Float32Array[], body: Float32Array[], prev: Float32A
   }
 }
 
+/** Opções de `Deck.start`. */
+interface StartOptions {
+  fadeIn?: number;
+  from?: number;
+  /** Segundos já tocados da seção `from` (volta da pausa: continua do meio dela). */
+  seek?: number;
+  thrifty?: boolean;
+  onStart?: () => void;
+  onEnd?: () => void;
+}
+
+/** Onde o toca-discos parou (pausa): a faixa, a seção e quanto dela já tinha tocado. */
+export interface Held {
+  track: TrackDef;
+  options: StartOptions;
+  index: number;
+  seek: number;
+}
+
 /** Onde a faixa está: seção tocando e segundos desde o começo da faixa. */
 export interface Position {
   index: number;
@@ -221,6 +240,7 @@ class Deck {
   /** Quando cada seção começa (no relógio do áudio) e em que segundo da faixa. */
   private marks: { at: number; index: number; offset: number }[] = [];
   private loading = false;
+  private options: StartOptions = {};
   track: TrackDef | null = null;
 
   constructor(ctx: AudioContext, out: AudioNode) {
@@ -232,10 +252,11 @@ class Deck {
    * Toca `track` desde a seção `from`. `onStart` quando o som começa de fato;
    * `onEnd` no fim da forma (sem loop).
    */
-  start(track: TrackDef, o: { fadeIn?: number; from?: number; thrifty?: boolean; onStart?: () => void; onEnd?: () => void } = {}) {
+  start(track: TrackDef, o: StartOptions = {}) {
     this.stop(0.6);
     const token = ++this.token;
     this.track = track;
+    this.options = o;
     this.marks = [];
     this.loading = true;
     const gain = this.ctx.createGain();
@@ -244,6 +265,7 @@ class Deck {
     let index = Math.max(0, Math.min(track.form.length - 1, o.from ?? 0));
     let offset = track.form.slice(0, index).reduce((s, e) => s + sectionLength(track, e), 0);
     let nextAt = 0;
+    let seek = Math.max(0, o.seek ?? 0);
     let busy = false;
     let started = false;
     let previous: { raw: AudioBuffer; frames: number } | null = null;
@@ -323,12 +345,15 @@ class Deck {
       const src = this.ctx.createBufferSource();
       src.buffer = buffer;
       src.connect(gain);
-      src.start(nextAt);
+      // Voltando da pausa, a primeira seção começa de onde tinha parado.
+      const skip = Math.min(seek, Math.max(0, length - 0.05));
+      seek = 0;
+      src.start(nextAt, skip);
       this.sources.add(src);
       src.onended = () => this.sources.delete(src);
-      this.marks.push({ at: nextAt, index, offset });
+      this.marks.push({ at: nextAt - skip, index, offset });
       if (this.marks.length > 4) this.marks.shift();
-      nextAt += length;
+      nextAt += length - skip;
       offset += length;
       index++;
       void pump();
@@ -345,6 +370,27 @@ class Deck {
     const mark = [...this.marks].reverse().find((m) => m.at <= now) ?? null;
     if (!mark) return { index: this.marks[0]?.index ?? 0, elapsed: this.marks[0]?.offset ?? 0, total, loading: this.loading };
     return { index: mark.index, elapsed: Math.min(total, mark.offset + (now - mark.at)), total, loading: false };
+  }
+
+  /**
+   * Pausa: guarda onde estava (faixa, seção e segundos dentro dela) e cala com
+   * um fade curto. `resume(held)` continua dali.
+   */
+  hold(): Held | null {
+    const track = this.track;
+    if (!track) return null;
+    const now = this.ctx.currentTime;
+    const mark = [...this.marks].reverse().find((m) => m.at <= now);
+    const held: Held = mark
+      ? { track, options: this.options, index: mark.index, seek: now - mark.at }
+      : { track, options: this.options, index: this.marks[0]?.index ?? this.options.from ?? 0, seek: 0 };
+    this.stop(0.15);
+    return held;
+  }
+
+  resume(held: Held) {
+    // Sem `onStart`: a faixa é a mesma, o "tocando agora" não aparece de novo.
+    this.start(held.track, { ...held.options, onStart: undefined, from: held.index, seek: held.seek, fadeIn: 0.25 });
   }
 
   stop(fade = 1) {
@@ -404,6 +450,9 @@ export class Music {
   private cue: CueName | null = null;
   private enabled = true;
   private jukebox = false;
+  /** Pausa do jogo: a música para e, ao voltar, continua de onde estava. */
+  private paused = false;
+  private held: { deck: Deck; at: Held } | null = null;
   private playlists = new Map<Mood, TrackDef[]>();
   private lastByMood = new Map<Mood, string>();
   private duckUntil = 0;
@@ -450,6 +499,12 @@ export class Music {
   }
 
   private startMood(mood: Mood, fadeIn = 0) {
+    // Pausado: o que tocava antes não volta mais; ao sair da pausa entra o que valer.
+    if (this.paused) {
+      this.held = null;
+      this.game.stop(0.15);
+      return;
+    }
     const track = this.nextTrack(mood);
     this.current = null;
     this.game.start(track, {
@@ -475,6 +530,7 @@ export class Music {
 
   stop() {
     this.mood = null;
+    this.held = null;
     if (this.jukebox) return;
     this.current = null;
     this.game.stop(1.2);
@@ -486,6 +542,7 @@ export class Music {
     this.enabled = on;
     if (this.jukebox) return;
     if (!on) {
+      this.held = null;
       this.game.stop(0.3);
       this.cues.stop(0.3);
       this.current = null;
@@ -496,6 +553,11 @@ export class Music {
   }
 
   private startCue(name: CueName) {
+    if (this.paused) {
+      this.held = null;
+      this.cues.stop(0.15);
+      return;
+    }
     this.cues.start(CUES[name], { fadeIn: 0.15, thrifty: true });
   }
 
@@ -520,12 +582,38 @@ export class Music {
     if (this.mood && this.enabled) this.startMood(this.mood, 2);
   }
 
+  /**
+   * Pausa do jogo: a música do jogo (ou o tema da cena) para e, ao voltar,
+   * continua do mesmo ponto da mesma faixa. O jukebox tem a pausa dele.
+   */
+  setPaused(on: boolean) {
+    if (on === this.paused) return;
+    if (on) {
+      if (this.jukebox) return;
+      this.paused = true;
+      const deck = this.cue ? this.cues : this.game;
+      const at = deck.hold();
+      this.held = at ? { deck, at } : null;
+      return;
+    }
+    this.paused = false;
+    const held = this.held;
+    this.held = null;
+    if (this.jukebox || !this.enabled) return;
+    if (held) held.deck.resume(held.at);
+    else if (this.cue) this.startCue(this.cue);
+    else if (this.mood) this.startMood(this.mood, 1);
+  }
+
   // --- Jukebox ---
 
   /** Entra no jukebox (a música do jogo sai) ou sai dele (a do clima volta). */
   setJukebox(on: boolean) {
     if (on === this.jukebox) return;
     this.jukebox = on;
+    // O jukebox não divide a pausa do jogo.
+    this.paused = false;
+    this.held = null;
     if (on) {
       this.game.stop(0.6);
       this.cues.stop(0.6);
@@ -573,6 +661,6 @@ export class Music {
   }
 
   state() {
-    return { mood: this.mood, cue: this.cue, track: this.current?.id ?? null, enabled: this.enabled, jukebox: this.jukebox, lite: LITE, economy };
+    return { mood: this.mood, cue: this.cue, track: this.current?.id ?? null, enabled: this.enabled, jukebox: this.jukebox, paused: this.paused, lite: LITE, economy };
   }
 }
