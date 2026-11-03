@@ -209,7 +209,7 @@ const you = (text: string, art = "😤", sfx?: string): ComicPanel => ({ speaker
 export const RIVALS_LADDER: Rival[] = [
   {
     rank: 10, name: "Izzy Iogurte", title: "Light, mas nem tanto", car: "gol", race: "pastel",
-    wins: 1, bounty: 3000, escapes: 0, escapeStars: 0, skill: 0.61,
+    wins: 1, bounty: 3000, escapes: 0, escapeStars: 0, skill: 0.66,
     taunt: [
       line("Izzy Iogurte", "🥛😤", "Zero lactose, zero piedade. Você nem devia estar aqui com esse Uno.", "#9bd3ff"),
       you("Fala isso pro Uno. Ele é sensível."),
@@ -222,13 +222,13 @@ export const RIVALS_LADDER: Rival[] = [
   },
   {
     rank: 9, name: "Ming Miojo", title: "Pronto em 3 minutos", car: "civic", race: "centro",
-    wins: 2, bounty: 8000, escapes: 0, escapeStars: 0, skill: 0.53,
+    wins: 2, bounty: 8000, escapes: 0, escapeStars: 0, skill: 0.79,
     taunt: [line("Ming Miojo", "🍜⏱️", "Eu termino a corrida antes da água ferver. Tempero incluso. Três minutos, cronometrado!", "#f2c14e")],
     defeat: [line("Ming Miojo", "🍜💧", "Passei do ponto... Virei papa. O Civic é seu.", "#f2c14e")],
   },
   {
     rank: 8, name: "JV Pastel", title: "Vento de feira", car: "golf", race: "pastel",
-    wins: 2, bounty: 15000, escapes: 1, escapeStars: 1, skill: 0.77,
+    wins: 2, bounty: 15000, escapes: 1, escapeStars: 1, skill: 0.82,
     taunt: [line("JV Pastel", "🥟💨", "Olha o pastel! Na minha feira, quem não corre vira recheio. Quer de carne ou de queijo?", "#e9c46a")],
     defeat: [line("JV Pastel", "🥟😩", "Murchei igual pastel frio de fim de feira. Fica com o Golf, freguês.", "#e9c46a")],
     interlude: [
@@ -238,13 +238,13 @@ export const RIVALS_LADDER: Rival[] = [
   },
   {
     rank: 7, name: "Vic Virado", title: "Virado à paulista", car: "opala", race: "porto",
-    wins: 2, bounty: 25000, escapes: 1, escapeStars: 2, skill: 1.0,
+    wins: 2, bounty: 25000, escapes: 1, escapeStars: 2, skill: 1.02,
     taunt: [line("Vic Virado", "🍳🥓🥬", "Tutu, couve, linguiça, ovo e um Opala seis cilindros. Isso é que é almoço. Depois eu cochilo na reta.", "#7a1f1f")],
     defeat: [line("Vic Virado", "🍳😪", "Bateu aquele sono depois do almoço... Pode levar o Opala. Só não me acorda.", "#7a1f1f")],
   },
   {
     rank: 6, name: "Earl Esfiha", title: "Aberta ou fechada?", car: "mustang", race: "centro",
-    wins: 3, bounty: 35000, escapes: 1, escapeStars: 2, skill: 0.61,
+    wins: 3, bounty: 35000, escapes: 1, escapeStars: 2, skill: 0.79,
     taunt: [line("Earl Esfiha", "🫓🐎", "Senhoras e senhores! Na reta eu sou aberta. Na curva, fechada. E o Mustang é mostarda!", "#f2b705")],
     defeat: [line("Earl Esfiha", "🫓💔", "Fui... aberto demais. O show acabou. Pega o Mustang.", "#f2b705")],
     interlude: [
@@ -254,7 +254,7 @@ export const RIVALS_LADDER: Rival[] = [
   },
   {
     rank: 5, name: "Ronnie Rocambole", title: "Enrola todo mundo", car: "supra", race: "parque",
-    wins: 3, bounty: 50000, escapes: 2, escapeStars: 2, skill: 0.68, bonusCar: "porchetta",
+    wins: 3, bounty: 50000, escapes: 2, escapeStars: 2, skill: 0.66, bonusCar: "porchetta",
     taunt: [
       line("Ronnie Rocambole", "🍥😈", "Sabe aquela maionese no seu tanque? Fui eu. O Bruno pagou em X-Tudo. Valeu cada mordida.", "#d98a2b", "zoom", "HÁ HÁ!"),
       you("Então é pessoal. Liga esse Supra.", "😠🔧", "GRRR!"),
@@ -267,13 +267,13 @@ export const RIVALS_LADDER: Rival[] = [
   },
   {
     rank: 4, name: "Kaze Coxinha", title: "Mestre do drift", car: "skyline", race: "porto",
-    wins: 3, bounty: 65000, escapes: 2, escapeStars: 3, skill: 0.74, bonusCar: "lasanha",
+    wins: 3, bounty: 65000, escapes: 2, escapeStars: 3, skill: 0.79, bonusCar: "lasanha",
     taunt: [line("Kaze Coxinha", "🍗🌀", "Crocante por fora, cantando pneu por dentro. Relaxa. Vou te deixar no catupiry.", "#2b2d42")],
     defeat: [line("Kaze Coxinha", "🍗🫠", "Desmanchei... O Skyline é seu. E a Lasanha também, eu nunca soube estacionar ela.", "#2b2d42")],
   },
   {
     rank: 3, name: "Baron Brigadeiro", title: "Doce e perigoso", car: "brigadeiro", race: "parque",
-    wins: 3, bounty: 80000, escapes: 2, escapeStars: 3, skill: 0.72, bonusCar: "farofa",
+    wins: 3, bounty: 80000, escapes: 2, escapeStars: 3, skill: 0.69, bonusCar: "farofa",
     taunt: [line("Baron Brigadeiro", "🍫🎩", "Meu caro, granulado na pista e adversário no muro. Dezesseis cilindros de puro açúcar.", "#4a2c1d")],
     defeat: [line("Baron Brigadeiro", "🍫🫠", "Derreti no sol... Que deselegante. O Bugatti é seu. A Ferrari Farofa também, que eu já tava cansado de limpar.", "#4a2c1d")],
     interlude: [
@@ -282,7 +282,7 @@ export const RIVALS_LADDER: Rival[] = [
   },
   {
     rank: 2, name: "Razor Bacon", title: "O braço direito do Bruno", car: "kibe", race: "porto",
-    wins: 4, bounty: 100000, escapes: 3, escapeStars: 4, skill: 0.69,
+    wins: 4, bounty: 100000, escapes: 3, escapeStars: 4, skill: 0.75,
     taunt: [line("Razor Bacon", "🥓🔪", "Eu não freio. Eu frito. O Bruno só chega em você passando por cima de mim.", "#c1442e")],
     defeat: [line("Razor Bacon", "🥓😖", "Torrou... Leva o Kibe-segg. O Bruno te espera no autódromo. E ele não tá sozinho.", "#c1442e")],
     interlude: [

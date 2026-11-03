@@ -198,7 +198,7 @@ let lastMapView: MinimapView | null = null;
 const drawMinimap = (view: MinimapView) => {
   const me = view.cars.get(view.myId);
   // GPS: só no mundo aberto (na corrida, quem guia é o traçado).
-  if (!view.race && me && !mode?.paused() && gps.update(me.x, me.z, me.heading, performance.now())) {
+  if (!view.race && me && !mode?.paused() && gps.update(me.x, me.z, me.heading, performance.now(), me.level)) {
     showPopup(`📍 Você chegou: ${arrivedAt}`);
     sound.lap();
   }

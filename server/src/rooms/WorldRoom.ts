@@ -24,7 +24,10 @@ import {
   garageAt,
   sanitizeTune,
   tunedSpec,
-  gradeAt,
+  carGrade,
+  ROADS,
+  levelOnRoad,
+  surfaceY,
   stepCar,
   pickColor,
   TRAFFIC_SIZE,
@@ -175,8 +178,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const last = this.lastReset.get(client.sessionId) ?? -Infinity;
       if (!player || this.time - last < 3) return;
       this.lastReset.set(client.sessionId, this.time);
-      resetToRoad(player);
-      this.motions.reset(client.sessionId);
+      const level = resetToRoad(player, undefined, this.motions.get(client.sessionId).level);
+      this.motions.reset(client.sessionId, level);
+      player.level = level;
     },
     shift: (client: Client, message: ShiftMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -212,6 +216,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         player.x = message.x;
         player.z = message.z;
         player.speed = 0;
+        player.level = -1;
+        this.motions.reset(client.sessionId);
       },
       debugCalories: (client: Client, message: { calories?: unknown }) => {
         const player = this.state.players.get(client.sessionId);
@@ -461,9 +467,10 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       const nitro = this.nitros.step(sessionId, this.tunes.get(sessionId), input, player, dt);
       player.boost = nitro.power > 0 ? 1 : 0;
       player.nitro = nitro.fill;
-      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z), nitro.power, motion, gradeAt(player.x, player.z, player.heading));
+      stepCar(player, drive, spec, input, dt, !isOnRoad(player.x, player.z, motion.level), nitro.power, motion, carGrade(player, motion));
       const size = carHalfSize(player.car);
       collideWorld(player, size.halfLength, size.halfWidth, motion);
+      player.level = motion.level;
       player.rpm = Math.round(drive.rpm);
       player.gear = drive.gear;
       this.eat(sessionId, player);
@@ -569,6 +576,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
         npc.kind = TRAFFIC_KINDS[Math.floor(Math.random() * TRAFFIC_KINDS.length)];
         npc.color = TRAFFIC_COLORS[Math.floor(Math.random() * TRAFFIC_COLORS.length)];
         const id = `npc-${++this.trafficCount}`;
+        // Nasce no nível da rua escolhida (pode ser em cima de uma ponte).
+        npc.level = levelOnRoad(ROADS[spawned.brain.link.road].structure, npc.x, npc.z);
+        this.motions.reset(id, npc.level);
         this.state.traffic.set(id, npc);
         this.trafficBrains.set(id, spawned.brain);
       }
@@ -587,8 +597,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       // O trânsito anda num carro popular comum, com câmbio automático.
       const spec = carSpec("uno");
       const motion = this.motions.get(id);
-      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z), 0, motion, gradeAt(npc.x, npc.z, npc.heading));
+      stepCar(npc, this.driveOf(id, spec), spec, input, dt, !isOnRoad(npc.x, npc.z, motion.level), 0, motion, carGrade(npc, motion));
       collideWorld(npc, TRAFFIC_SIZE.length / 2, TRAFFIC_SIZE.width / 2, motion);
+      npc.level = motion.level;
     }
   }
 
@@ -606,13 +617,14 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       // O Couve-vette do Cross-fit é sempre ele mesmo.
       if (cop.car !== CROSSFIT_CAR) cop.car = stars >= 4 ? "viatura-tatica" : "viatura";
       const spec = carSpec(cop.car);
-      const { input, boost } = copInput(brain, cop, spec, target, stars, dt);
-      cop.boost = boost ? 1 : 0;
       const motion = this.motions.get(id);
+      const { input, boost } = copInput(brain, cop, spec, target, stars, dt, motion.level === target.level);
+      cop.boost = boost ? 1 : 0;
       // A viatura também tem nitro (a partir de 2★, quando está longe e alinhada).
-      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z), boost ? 0.5 : 0, motion, gradeAt(cop.x, cop.z, cop.heading));
+      stepCar(cop, this.driveOf(id, spec), spec, input, dt, !isOnRoad(cop.x, cop.z, motion.level), boost ? 0.5 : 0, motion, carGrade(cop, motion));
       const size = carHalfSize(cop.car);
       collideWorld(cop, size.halfLength, size.halfWidth, motion);
+      cop.level = motion.level;
     }
   }
 
@@ -654,7 +666,11 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       return;
     }
 
-    const nearest = Math.min(...cops.map(([, c]) => Math.hypot(c.x - player.x, c.z - player.z)));
+    // Distância de verdade (a viatura embaixo do viaduto não autua quem passa em cima).
+    const nearest = Math.min(...cops.map(([, c]) => {
+      const flat = Math.hypot(c.x - player.x, c.z - player.z);
+      return c.level === player.level ? flat : Math.hypot(flat, surfaceY(c.x, c.z, c.level) - surfaceY(player.x, player.z, player.level));
+    }));
 
     if (this.finale) {
       // Fuga final: não dá para despistar, só chegar na ponte inacabada do Cais.

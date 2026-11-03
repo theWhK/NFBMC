@@ -20,7 +20,8 @@ import {
   tunedSpec,
   nearestSample,
   pointOnTrack,
-  gradeAt,
+  carGrade,
+  GROUND,
   stepCar,
   pickColor,
   carHalfSize,
@@ -182,8 +183,9 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       // Na arrancada não tem como sair da faixa (e voltar para a "rua" seria trapaça).
       if (!player || this.drag || this.age - last < 3) return;
       this.lastReset.set(client.sessionId, this.age);
-      resetToRoad(player, this.track);
-      this.motions.reset(client.sessionId);
+      const level = resetToRoad(player, this.track);
+      this.motions.reset(client.sessionId, level);
+      player.level = level;
     },
     start: () => {
       if (this.state.phase === "lobby" && this.state.players.size > 0) this.startCountdown();
@@ -428,7 +430,9 @@ export class RaceRoom extends Room<{ state: RaceState }> {
       const spec = this.specOf(sessionId, player);
       this.drives.set(sessionId, player.bot ? createDrive(spec, !!this.drag) : createPlayerDrive(spec, player.manual || !!this.drag));
       if (this.drag) player.manual = true;
-      this.motions.reset(sessionId);
+      // Larga no nível da pista ali (o grid nunca fica no meio de uma obra, mas por via das dúvidas).
+      player.level = this.track.levels?.[nearestSample(this.track, player.x, player.z).index] ?? GROUND;
+      this.motions.reset(sessionId, player.level);
       // Largada com o cilindro de nitro cheio.
       this.nitros.fill(sessionId, this.tunes.get(sessionId));
       player.racing = true;
@@ -568,19 +572,20 @@ export class RaceRoom extends Room<{ state: RaceState }> {
 
     for (const [sessionId, player] of cars) {
       const input = this.controls.get(sessionId) ?? { throttle: 0, steer: 0 };
-      const onGrass = !isOnRoad(player.x, player.z);
+      const motion = this.motions.get(sessionId);
+      const onGrass = !isOnRoad(player.x, player.z, motion.level);
 
       const spec = this.specOf(sessionId, player);
       let drive = this.drives.get(sessionId);
       if (!drive) this.drives.set(sessionId, (drive = player.bot ? createDrive(spec) : createPlayerDrive(spec, player.manual)));
-      const motion = this.motions.get(sessionId);
       // Nitro só durante a corrida (no lobby e na contagem fica guardado).
       const nitro = this.nitros.step(sessionId, this.tunes.get(sessionId), this.state.phase === "racing" ? input : { ...input, nitro: false }, player, dt);
       player.boost = nitro.power > 0 ? 1 : 0;
       player.nitro = nitro.fill;
-      stepCar(player, drive, spec, input, dt, onGrass, nitro.power, motion, gradeAt(player.x, player.z, player.heading));
+      stepCar(player, drive, spec, input, dt, onGrass, nitro.power, motion, carGrade(player, motion));
       const size = carHalfSize(player.car);
       collideWorld(player, size.halfLength, size.halfWidth, motion);
+      player.level = motion.level;
       // Barreiras da corrida: ninguém sai do traçado (shared/src/barriers.ts).
       keepInCorridor(player, this.track, size.halfWidth, motion);
       player.rpm = Math.round(drive.rpm);
@@ -648,7 +653,7 @@ export class RaceRoom extends Room<{ state: RaceState }> {
         player.speed = 0;
         drive.pedal = 0;
       } else {
-        stepCar(player, drive, spec, { throttle, steer }, dt, false, nitro.power, motion, gradeAt(player.x, player.z, player.heading));
+        stepCar(player, drive, spec, { throttle, steer }, dt, false, nitro.power, motion, carGrade(player, motion));
       }
       const size = carHalfSize(player.car);
       collideWorld(player, size.halfLength, size.halfWidth, motion);

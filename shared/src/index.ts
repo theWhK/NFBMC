@@ -8,6 +8,7 @@ export * from "./collision.ts";
 export * from "./story.ts";
 export * from "./world.ts";
 export * from "./barriers.ts";
+export * from "./levels.ts";
 export * from "./tuning.ts";
 export * from "./speedtrap.ts";
 export * from "./drag.ts";

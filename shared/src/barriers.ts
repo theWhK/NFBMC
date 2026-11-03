@@ -5,6 +5,7 @@
 // (os prédios já fecham a rua). Servidor e cliente usam as mesmas contas.
 import type { CarMotion, CarState } from "./physics.ts";
 import { nearestSample, type Track } from "./track.ts";
+import { GROUND, STRUCTURES, locate } from "./levels.ts";
 import { isOnRoad } from "./world.ts";
 
 export interface Corridor {
@@ -22,9 +23,22 @@ const MEDIAN_WINDOW = 20;
 /** Folga além da beira da rua (m): o `isOnRoad` já conta 1 m de calçada. */
 const SLACK = 0;
 
-/** Quantos metros de rua (ou da pista do autódromo) há saindo da amostra para o lado `side`. */
-function reach(x: number, z: number, nx: number, nz: number) {
+/**
+ * Quantos metros de rua (ou da pista do autódromo) há saindo da amostra para o
+ * lado `side`, no nível dela: em cima de uma obra de arte, até o guarda-corpo
+ * (as ruas de baixo não contam).
+ */
+function reach(x: number, z: number, nx: number, nz: number, level = GROUND) {
   let d = 0;
+  if (level >= 0) {
+    const st = STRUCTURES[level];
+    while (d < MAX_REACH) {
+      const loc = locate(st, x + nx * (d + 1), z + nz * (d + 1), 4);
+      if (!loc || Math.abs(loc.u) > st.half) break;
+      d += 1;
+    }
+    return d;
+  }
   while (d < MAX_REACH && isOnRoad(x + nx * (d + 1), z + nz * (d + 1))) d += 1;
   return d;
 }
@@ -48,8 +62,9 @@ export function trackCorridor(track: Track): Corridor {
   for (let i = 0; i < n; i++) {
     const s = samples[i];
     // Esquerda de quem corre: (tz, −tx).
-    raw.left[i] = reach(s.x, s.z, s.tz, -s.tx);
-    raw.right[i] = reach(s.x, s.z, -s.tz, s.tx);
+    const level = track.levels?.[i] ?? GROUND;
+    raw.left[i] = reach(s.x, s.z, s.tz, -s.tx, level);
+    raw.right[i] = reach(s.x, s.z, -s.tz, s.tx, level);
   }
   const min = track.width / 2;
   const left = new Float32Array(n);

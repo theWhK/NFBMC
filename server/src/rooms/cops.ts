@@ -108,7 +108,7 @@ export const createCopBrain = (): CopBrain => ({
 });
 
 /** Decide acelerar/virar neste tick. Retorna também se a viatura deve usar o "turbo". */
-export function copInput(brain: CopBrain, cop: CarState, spec: CarSpec, target: CarState, stars: number, dt: number): { input: DriveInput; boost: boolean } {
+export function copInput(brain: CopBrain, cop: CarState, spec: CarSpec, target: CarState, stars: number, dt: number, sameLevel = true): { input: DriveInput; boost: boolean } {
   const distance = Math.hypot(target.x - cop.x, target.z - cop.z);
 
   // Desatolar: bateu e parou → ré virando por um tempo.
@@ -130,7 +130,8 @@ export function copInput(brain: CopBrain, cop: CarState, spec: CarSpec, target: 
   brain.sightCheckIn -= dt;
   if (brain.sightCheckIn <= 0) {
     brain.sightCheckIn = 0.25;
-    brain.seesTarget = brain.roadOnlyFor <= 0
+    // Alvo em outro nível (na ponte, com a viatura embaixo): vai pelas ruas até a rampa.
+    brain.seesTarget = brain.roadOnlyFor <= 0 && sameLevel
       && (distance < 20 || (distance < 170 && lineOfSight(cop.x, cop.z, target.x, target.z)));
   }
 
