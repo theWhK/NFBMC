@@ -13,6 +13,10 @@ export * from "./tuning.ts";
 export * from "./speedtrap.ts";
 export * from "./drag.ts";
 export * from "./props.ts";
+// Campo e aeroporto: gerados a partir do mapa, entram na colisão ao carregar.
+export * from "./lots.ts";
+export * from "./rural.ts";
+export * from "./airport.ts";
 
 import type { Tune } from "./tuning.ts";
 import { RACES, type RaceId } from "./world.ts";

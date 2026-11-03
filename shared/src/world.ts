@@ -575,7 +575,7 @@ function autodromoClearance(x: number, z: number) {
  */
 export function isOnRoad(x: number, z: number, level: number = GROUND) {
   if (level >= 0) return true;
-  return roadClearance(x, z, GROUND) <= 1 || autodromoClearance(x, z) <= 1 || onApron(x, z) || onAirportApron(x, z) || onPaved(x, z);
+  return roadClearance(x, z, GROUND) <= 1 || autodromoClearance(x, z) <= 1 || onApron(x, z) || onAirportApron(x, z) || onExtraPaved(x, z) || onPaved(x, z);
 }
 
 /** Chão asfaltado que vem de outros arquivos (a pista dos boxes do autódromo, em props.ts). */
@@ -1746,3 +1746,59 @@ export const STANDS: StandSpot[] = LANDMARKS.filter((l) => l.kind !== "garagem")
     landmark: l.id,
   };
 });
+
+// --- Obstáculos e pisos de fora (fazendas, aeroporto) ---------------------------
+
+/** Pisos extras que contam como rua (pátio e taxiway do aeroporto): ver `addSolids`. */
+const extraPaved: Box[] = [];
+
+function onExtraPaved(x: number, z: number) {
+  for (const b of extraPaved) {
+    const reach = (b.w + b.d) / 2 + 1;
+    if (Math.abs(b.x - x) < reach && Math.abs(b.z - z) < reach && insideBox(b, x, z, 0.5)) return true;
+  }
+  return false;
+}
+
+/**
+ * Coisas geradas fora daqui a partir do mapa (rural.ts, airport.ts), sempre
+ * iguais no servidor e no cliente: `solids` entram na colisão e na linha de
+ * visão (sem entrar em BUILDINGS, que o cliente desenha como prédio comum;
+ * cada caixa até ~50 m), `clear` tira as árvores e os prédios comuns que
+ * ficaram dentro dessas áreas, `trees` são árvores novas (com colisão; o
+ * cliente desenha junto com as outras) e `paved` são pisos que contam como rua.
+ */
+export function addSolids(extra: { solids?: Building[]; clear?: Box[]; trees?: Tree[]; paved?: Box[] }) {
+  for (const area of extra.clear ?? []) {
+    const reach = Math.hypot(area.w, area.d) / 2 + 2;
+    for (let i = TREES.length - 1; i >= 0; i--) {
+      const t = TREES[i];
+      if (Math.abs(t.x - area.x) > reach || Math.abs(t.z - area.z) > reach || !insideBox(area, t.x, t.z, 1)) continue;
+      TREES.splice(i, 1);
+      const list = treeGrid.get(cellKey(t.x, t.z));
+      if (list) list.splice(list.indexOf(t), 1);
+    }
+    for (let i = BUILDINGS.length - 1; i >= 0; i--) {
+      const b = BUILDINGS[i];
+      if (b.kind === "landmark" || Math.abs(b.x - area.x) > reach + 40 || Math.abs(b.z - area.z) > reach + 40) continue;
+      if (!overlaps({ ...area, height: 0, kind: "house", tint: 0, front: 1 }, b, 1)) continue;
+      BUILDINGS.splice(i, 1);
+      const list = city.buildingGrid.get(cellKey(b.x, b.z));
+      if (list) list.splice(list.indexOf(b), 1);
+    }
+  }
+  for (const b of extra.solids ?? []) {
+    const k = cellKey(b.x, b.z);
+    const list = city.buildingGrid.get(k);
+    if (list) list.push(b);
+    else city.buildingGrid.set(k, [b]);
+  }
+  for (const t of extra.trees ?? []) {
+    TREES.push(t);
+    const k = cellKey(t.x, t.z);
+    const list = treeGrid.get(k);
+    if (list) list.push(t);
+    else treeGrid.set(k, [t]);
+  }
+  extraPaved.push(...(extra.paved ?? []));
+}
