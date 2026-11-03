@@ -861,6 +861,23 @@ button.link {
   font-size: 1.15rem;
 }
 
+/* Gráficos avançados (Opções): os ajustes um pouco recuados e menores. */
+.gfx-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 14px;
+  border-left: 2px solid rgba(255, 122, 0, 0.5);
+}
+
+.gfx-advanced[hidden] {
+  display: none;
+}
+
+.mw-list.sub .gfx-advanced button {
+  font-size: 0.95rem;
+}
+
 .mw-hint {
   position: absolute;
   left: 36px;
@@ -2867,38 +2884,6 @@ body.overlay-open #topbar {
   visibility: hidden;
 }
 
-#resume-count {
-  position: fixed;
-  inset: 0;
-  z-index: 34;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  font: 9rem var(--hud);
-  color: var(--mustard);
-  text-shadow: 0 6px 0 #000, 0 0 30px rgba(0, 0, 0, 0.7);
-  background: rgba(10, 8, 6, 0.35);
-}
-
-#resume-count[hidden] {
-  display: none;
-}
-
-#resume-count.pop {
-  animation: resume-pop 0.5s ease-out;
-}
-
-@keyframes resume-pop {
-  from {
-    transform: scale(1.8);
-    opacity: 0;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
 
 /* --- Celular: botões maiores e HUD sem brigar com os polegares --------------- */
 
@@ -2985,10 +2970,6 @@ body.touch #dash {
   body.touch #hud,
   body.touch #world-hud {
     top: max(8px, env(safe-area-inset-top));
-  }
-
-  #resume-count {
-    font-size: 6rem;
   }
 
   .pause {
@@ -4161,4 +4142,17 @@ body:has(.menu-board:not([hidden])) .now-playing {
     padding: 5px 8px;
     font-size: 0.78rem;
   }
+}
+
+/* Opções na pausa: o painel das Opções do menu, encaixado no lugar da lista. */
+.pause #pause-options-slot .mw-screen {
+  position: static;
+  width: min(460px, 86vw);
+  max-height: calc(100vh - 220px);
+  margin-top: 8px;
+}
+
+.pause #pause-options-slot .volume input:focus-visible {
+  outline: 2px solid var(--mustard);
+  outline-offset: 2px;
 }

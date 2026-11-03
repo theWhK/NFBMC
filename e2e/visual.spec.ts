@@ -21,7 +21,7 @@ test("3D: menu, garagem e cidade desenham sem erros", async ({ page }) => {
   await page.getByTestId("world-button").click();
   // Com WebGL, o status não tem o aviso "sem 3D".
   await expect(page.getByTestId("status")).toHaveText("Conectado");
-  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode()), { timeout: 30_000 }).toBe("world");
   await page.keyboard.down("ArrowUp");
   await page.waitForTimeout(1500);
   await page.keyboard.up("ArrowUp");
@@ -46,7 +46,8 @@ test("3D: menu, garagem e cidade desenham sem erros", async ({ page }) => {
 // Cinemáticas do modo história: com WebGL, tudo que é apresentação vira cena 3D
 // (faixas de cinema, legenda, personagens e voz); Enter passa de plano, Esc pula tudo.
 test("3D: cinemáticas do modo história (prólogo e salto da ponte)", async ({ page }) => {
-  test.setTimeout(150_000);
+  // Longo: o prólogo inteiro, a fuga e o epílogo, com o 3D desenhado na CPU no CI.
+  test.setTimeout(300_000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
@@ -79,17 +80,17 @@ test("3D: cinemáticas do modo história (prólogo e salto da ponte)", async ({ 
   await page.getByTestId("name-input").fill("Will");
   await page.getByTestId("story-menu").click();
   await page.getByTestId("story-challenge").click();
-  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode()), { timeout: 30_000 }).toBe("world");
   await page.evaluate(() => window.__nfbmc!.send("debugMove", { x: -450, z: -484 }));
-  await expect(page.getByTestId("cine")).toContainText("ponte inacabada", { timeout: 15_000 });
+  await expect(page.getByTestId("cine")).toContainText("ponte inacabada", { timeout: 30_000 });
   // Os planos passam sozinhos (o salto inteiro roda) até o Cross-fit na beira.
   await expect(page.getByTestId("cine")).toContainText("Pode correr", { timeout: 45_000 });
   await page.getByTestId("cine-skip").click();
   // Depois, o epílogo, também em cinemática.
-  await expect(page.getByTestId("cine")).toContainText("Mia Marmita", { timeout: 15_000 });
+  await expect(page.getByTestId("cine")).toContainText("Mia Marmita", { timeout: 30_000 });
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("cine")).toBeHidden();
-  await expect(page.getByTestId("story-target")).toContainText("Número 1");
+  await expect(page.getByTestId("story-target")).toContainText("Número 1", { timeout: 15_000 });
 
   expect(errors).toEqual([]);
 });
@@ -132,7 +133,7 @@ test("3D: apresentação, provocação e derrota do rival em cinemática", async
 // detalhados montados perto da câmera) e a troca para o quadrinho pelas Opções.
 // A alta (sombras, oclusão e bloom) é pesada demais para o 3D desenhado na CPU.
 test("3D: visual realista com detalhes de perto e troca para o quadrinho", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
@@ -146,7 +147,7 @@ test("3D: visual realista com detalhes de perto e troca para o quadrinho", async
   await expect(page.getByTestId("opt-quality")).toContainText("médio (reflexos");
   await page.getByTestId("name-input").fill("Will");
   await page.getByTestId("world-button").click();
-  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode())).toBe("world");
+  await expect.poll(() => page.evaluate(() => window.__nfbmc?.mode()), { timeout: 30_000 }).toBe("world");
   // Anda um pouco: os blocos detalhados em volta vão sendo montados, um por quadro.
   await page.keyboard.down("ArrowUp");
   await page.waitForTimeout(2500);
@@ -168,6 +169,7 @@ test("3D: visual realista com detalhes de perto e troca para o quadrinho", async
 
 // Arrancada: a pista do drag (faixas, semáforo e chegada) monta na cena 3D.
 test("3D: arrancada do aeroporto desenha a pista e larga sem erros", async ({ page }) => {
+  test.setTimeout(120_000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
@@ -181,9 +183,35 @@ test("3D: arrancada do aeroporto desenha a pista e larga sem erros", async ({ pa
   await expect(page.getByTestId("status")).toHaveText("Conectado");
   await page.getByTestId("start-button").click();
   await page.keyboard.down("ArrowUp");
-  await expect.poll(() => page.evaluate(() => window.__nfbmc!.phase()), { timeout: 15_000 }).toBe("racing");
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.phase()), { timeout: 30_000 }).toBe("racing");
   await page.keyboard.press("KeyE");
   await page.waitForTimeout(1500);
   await page.keyboard.up("ArrowUp");
+  expect(errors).toEqual([]);
+});
+
+test("3D: gráficos avançados mexem num ajuste por vez e o preset desfaz", async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  // Médio → baixo: sem sombras nos dois (ligar sombra recompila a cena, lento no 3D por CPU).
+  await page.addInitScript(() => localStorage.setItem("nfbmc:quality", "medio"));
+  await page.goto("/");
+  await page.getByTestId("options-menu").click();
+  await expect(page.getByTestId("opt-quality")).toContainText("médio (reflexos");
+  await page.getByTestId("opt-advanced").click();
+  await expect(page.getByTestId("gfx-shadows")).toHaveText("Sombras: desligadas");
+  await expect(page.getByTestId("gfx-speedBlur")).toHaveText("Borrão de velocidade: ligado");
+  // Detalhe da cidade: até 190 m → até 340 m; o preset vira "personalizado" e fica salvo.
+  await page.getByTestId("gfx-detail").click();
+  await expect(page.getByTestId("gfx-detail")).toHaveText("Detalhe da cidade: até 340 m");
+  await expect(page.getByTestId("opt-quality")).toContainText("personalizado");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nfbmc:graphics")!))).toEqual({ detail: 340 });
+  // Escolher um preset (médio → baixo) desfaz os ajustes.
+  await page.getByTestId("opt-quality").click();
+  await expect(page.getByTestId("opt-quality")).toContainText("baixo (mais leve)");
+  await expect(page.getByTestId("opt-quality")).not.toContainText("personalizado");
+  await expect(page.getByTestId("gfx-detail")).toHaveText("Detalhe da cidade: simples");
+  expect(await page.evaluate(() => localStorage.getItem("nfbmc:graphics"))).toBeNull();
   expect(errors).toEqual([]);
 });

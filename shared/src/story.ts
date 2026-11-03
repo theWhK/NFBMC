@@ -84,6 +84,23 @@ export interface Rival {
 
 /** Carros com que você começa a carreira. */
 export const STARTER_CARS = ["uno", "fusca"];
+/**
+ * Carros que não são de nenhum rival: chegam na garagem conforme você avança
+ * na Lista Gorda (stage = quantos rivais já venceu).
+ */
+export const PROGRESS_CARS: { car: string; stage: number }[] = [
+  { car: "etios", stage: 1 },
+];
+
+/** Carros de avanço já liberados até este ponto da carreira. */
+export const progressCars = (stage: number) => PROGRESS_CARS.filter((p) => p.stage <= stage).map((p) => p.car);
+
+/** Garante os carros de avanço na garagem (salvos antigos não tinham). */
+export function withProgressCars(story: StoryProgress): StoryProgress {
+  const missing = progressCars(story.stage).filter((car) => !story.unlocked.includes(car));
+  return missing.length ? { ...story, unlocked: [...story.unlocked, ...missing] } : story;
+}
+
 /** O seu carro, roubado no prólogo e recuperado no final. */
 export const HERO_CAR = "m3";
 
@@ -476,6 +493,7 @@ export function defeatRival(story: StoryProgress): StoryProgress {
   unlocked.add(rival.car);
   if (rival.bonusCar) unlocked.add(rival.bonusCar);
   if (rival.rank === 1) unlocked.add(HERO_CAR);
+  for (const car of progressCars(story.stage + 1)) unlocked.add(car);
   return { ...story, stage: story.stage + 1, wins: 0, escapes: 0, unlocked: [...unlocked] };
 }
 
