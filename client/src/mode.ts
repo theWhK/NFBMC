@@ -40,4 +40,18 @@ export interface PlayerSnapshot {
   /** Cilindro de nitro (0 a 1) e se está ligado agora. */
   nitro: number;
   boost: boolean;
+  /** Nível: -1 = chão; senão a ponte, viaduto ou túnel (índice em STRUCTURES). */
+  level: number;
+  /** Câmbio manual (E/Q). */
+  manual: boolean;
+  /** Corrida: arrancada (largou, reação, queimou, notas da largada e das trocas) e progresso. */
+  launched?: boolean;
+  reaction?: number;
+  jumped?: boolean;
+  launchGrade?: string;
+  shiftGrade?: string;
+  shifts?: number;
+  progress?: number;
+  finishTime?: number;
+  trapTotal?: number;
 }

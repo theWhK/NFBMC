@@ -4,11 +4,13 @@
 import {
   NOS_LEVELS,
   NOS_REFILL_SECONDS,
+  GROUND,
   ROADS,
   TRAFFIC_SIZE,
   carHalfSize,
   carSpec,
   createMotion,
+  levelOnRoad,
   nearestRoad,
   nearestSample,
   type CarBody,
@@ -76,8 +78,9 @@ export class Motions {
     this.map.delete(id);
   }
 
-  reset(id: string) {
-    this.map.set(id, createMotion());
+  /** Movimento zerado; `level` = nível em que o carro ficou (ver `resetToRoad`). */
+  reset(id: string, level = GROUND) {
+    this.map.set(id, { ...createMotion(), level });
   }
 }
 
@@ -92,20 +95,24 @@ export function carBody(car: CarState, motion: CarMotion, carId: string | null):
 /**
  * Coloca o carro de volta no meio da rua mais próxima (ou da pista, numa
  * corrida), parado e de frente para o sentido da rua mais parecido com o que
- * ele apontava. Para quando o carro empaca de lado numa parede.
+ * ele apontava. Para quando o carro empaca de lado numa parede. Devolve o
+ * nível em que ele ficou (em cima da ponte, se estava nela).
  */
-export function resetToRoad(car: CarState, track?: Track) {
+export function resetToRoad(car: CarState, track?: Track, level = GROUND): number {
   let x: number;
   let z: number;
   let dirX: number;
   let dirZ: number;
+  let newLevel = GROUND;
   if (track) {
-    const sample = track.samples[nearestSample(track, car.x, car.z).index];
+    const at = nearestSample(track, car.x, car.z).index;
+    const sample = track.samples[at];
     ({ x, z } = sample);
     dirX = sample.tx;
     dirZ = sample.tz;
+    newLevel = track.levels?.[at] ?? GROUND;
   } else {
-    const { road, index } = nearestRoad(car.x, car.z);
+    const { road, index } = nearestRoad(car.x, car.z, level);
     const points = ROADS[road].points;
     const [ax, az] = points[index];
     const [bx, bz] = points[Math.min(points.length - 1, index + 1)];
@@ -116,6 +123,7 @@ export function resetToRoad(car: CarState, track?: Track) {
     z = az + (bz - az) * t;
     dirX = (bx - ax) / len;
     dirZ = (bz - az) / len;
+    newLevel = levelOnRoad(ROADS[road].structure, x, z);
   }
   // Mão da rua mais parecida com para onde o carro apontava.
   if (Math.sin(car.heading) * dirX + Math.cos(car.heading) * dirZ < 0) {
@@ -126,4 +134,5 @@ export function resetToRoad(car: CarState, track?: Track) {
   car.z = z;
   car.heading = Math.atan2(dirX, dirZ);
   car.speed = 0;
+  return newLevel;
 }

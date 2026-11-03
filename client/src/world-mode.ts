@@ -14,6 +14,8 @@ import {
   RACES,
   RACE_IDS,
   raceMarker,
+  raceSeats,
+  raceSummary,
   type Difficulty,
   type GoRaceMessage,
   type InputMessage,
@@ -62,6 +64,8 @@ export class WorldMode {
   /** Bairro onde o carro estava no quadro anterior (para mostrar a placa ao trocar). */
   private district: string | null = null;
 
+  /** Dentro da garagem (animação e oficina): o próprio carro some da cena; quem anda é o carro de cena. */
+  hideSelf = false;
   /** Parou no pátio de uma garagem e apertou Enter: abre a oficina. */
   private onGarage: (name: string) => void;
   /** Ganchos do modo história (calorias ganhas e fugas da Vigilância). */
@@ -153,7 +157,8 @@ export class WorldMode {
     this.ctx.sound.click();
     this.room.send("startRace", {
       raceId,
-      bots: this.bots,
+      // A arrancada é de dois: o que sobrar de vaga vira bot (o servidor confere).
+      bots: Math.min(this.bots, raceSeats(raceId) - 1),
       difficulty: ui.markerDifficulty.value as Difficulty,
     });
     ui.startRace.blur();
@@ -197,19 +202,20 @@ export class WorldMode {
     const alone = !!room.state.solo;
     room.state.players?.forEach((p, id) => {
       const name = alone && id === room.sessionId ? "" : p.name;
-      cars.set(id, { name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible: true });
+      const visible = !(this.hideSelf && id === room.sessionId);
+      cars.set(id, { name, color: p.color, car: p.car, x: p.x, z: p.z, heading: p.heading, speed: p.speed, boost: p.boost, rpm: p.rpm, visible, level: p.level });
     });
     room.state.traffic?.forEach((n, id) => {
       cars.set(`npc:${id}`, {
         name: "", color: n.color, x: n.x, z: n.z, heading: n.heading,
-        speed: n.speed, boost: 0, visible: true, traffic: n.kind as TrafficKind,
+        speed: n.speed, boost: 0, visible: true, traffic: n.kind as TrafficKind, level: n.level,
       });
     });
     room.state.cops?.forEach((c, id) => {
       const crossfit = c.car === CROSSFIT_CAR;
       cars.set(`cop:${id}`, {
         name: crossfit ? "🏋️ Sgt. Cross-fit" : "🚨 Vigilância", color: crossfit ? "#9be22d" : "#f4f4f0", x: c.x, z: c.z, heading: c.heading,
-        speed: c.speed, boost: c.boost, visible: true, cop: true, car: c.car,
+        speed: c.speed, boost: c.boost, visible: true, cop: true, car: c.car, level: c.level,
       });
     });
     const me = room.state.players?.get(room.sessionId);
@@ -292,18 +298,28 @@ export class WorldMode {
     if (raceId) {
       const race = RACES[raceId];
       const marker = raceMarker(raceId);
-      const people = [...room.state.players.values()].filter((p) => Math.hypot(p.x - marker.x, p.z - marker.z) <= MARKER_RADIUS);
-      const bots = Math.min(this.bots, MAX_PLAYERS - people.length);
+      // Speedtrap: só quem dispara vai (desafio solo). Arrancada: você e o mais perto.
+      const seats = raceSeats(raceId);
+      const others = [...room.state.players.entries()]
+        .filter(([id, p]) => id !== room.sessionId && Math.hypot(p.x - marker.x, p.z - marker.z) <= MARKER_RADIUS)
+        .map(([, p]) => p)
+        .sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z));
+      const people = [me, ...others].slice(0, seats);
+      const solo = race.kind === "radar";
+      const bots = solo ? 0 : Math.min(this.bots, seats - people.length);
       ui.markerTitle.textContent = race.name;
-      ui.markerInfo.textContent = `${race.laps} voltas · ${(race.track.length / 1000).toFixed(1).replace(".", ",")} km por volta`;
+      ui.markerInfo.textContent = raceSummary(raceId);
       setHtml(
         ui.markerPeople,
-        `No ponto: ${people.map((p) => `<span class="dot" style="background:${p.color}"></span>${escapeHtml(p.name)}`).join(", ")}` +
-          (bots > 0 ? ` + 🤖 ${bots} (${DIFFICULTY_LABELS[ui.markerDifficulty.value as Difficulty]})` : ""),
+        solo
+          ? "Desafio solo: bata a meta de velocidade somada nos radares (bronze já vence)."
+          : `No ponto: ${people.map((p) => `<span class="dot" style="background:${p.color}"></span>${escapeHtml(p.name)}`).join(", ")}` +
+            (bots > 0 ? ` + 🤖 ${bots} (${DIFFICULTY_LABELS[ui.markerDifficulty.value as Difficulty]})` : ""),
       );
+      for (const el of [ui.markerBots, ui.markerDifficulty]) (el.closest(".setting") as HTMLElement).hidden = solo;
       ui.markerBots.textContent = String(bots);
       ui.markerBotsMinus.disabled = bots <= 0;
-      ui.markerBotsPlus.disabled = bots >= MAX_PLAYERS - people.length;
+      ui.markerBotsPlus.disabled = bots >= seats - people.length;
       ui.startRace.disabled = this.calling || myCops.length > 0;
       ui.startRace.textContent = myCops.length > 0
         ? "Despiste a Vigilância primeiro!"
@@ -367,6 +383,11 @@ export class WorldMode {
     this.room.send("shift", { direction });
   }
 
+  /** Câmbio trocado nas Opções (pela pausa): vale na hora. */
+  sendGearbox(manual: boolean) {
+    this.room.send("gearbox", { manual });
+  }
+
   /** Sala de um jogador só: dá para pausar (o servidor para a simulação). */
   pausable() {
     return !!this.room.state.pausable;
@@ -398,7 +419,7 @@ export class WorldMode {
     this.room.state.players?.forEach((p, id) => {
       result[id] = {
         name: p.name, car: p.car, gear: p.gear, rpm: p.rpm, bot: false, x: p.x, z: p.z, speed: p.speed, racing: false,
-        lap: 0, place: 0, calories: p.calories, finished: false, nitro: p.nitro, boost: p.boost > 0,
+        lap: 0, place: 0, calories: p.calories, finished: false, nitro: p.nitro, boost: p.boost > 0, level: p.level, manual: p.manual,
       };
     });
     return result;

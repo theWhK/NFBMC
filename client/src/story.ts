@@ -11,6 +11,7 @@ import {
   finalePending,
   newStory,
   storyFinished,
+  withProgressCars,
   type ComicPanel,
   type Rival,
   type StoryProgress,
@@ -24,7 +25,7 @@ const STORY_KEY = "nfbmc:story";
 export function loadStory(): StoryProgress {
   try {
     const saved = JSON.parse(localStorage.getItem(STORY_KEY) ?? "null");
-    if (saved && typeof saved.stage === "number") return { ...newStory(), ...saved };
+    if (saved && typeof saved.stage === "number") return withProgressCars({ ...newStory(), ...saved });
   } catch {
     // Sem localStorage ou salvo quebrado: começa do zero.
   }

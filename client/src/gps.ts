@@ -37,9 +37,9 @@ export function createGps(onChange: () => void) {
   let rerouteAt = 0;
   let guidance: GpsGuidance | null = null;
 
-  const plan = (x: number, z: number) => {
+  const plan = (x: number, z: number, level = -1) => {
     if (!target) return;
-    route = [...routeBetween(x, z, target.x, target.z), [target.x, target.z]];
+    route = [...routeBetween(x, z, target.x, target.z, level), [target.x, target.z]];
     cumulative = [0];
     for (let i = 1; i < route.length; i++) {
       cumulative.push(cumulative[i - 1] + Math.hypot(route[i][0] - route[i - 1][0], route[i][1] - route[i - 1][1]));
@@ -115,7 +115,7 @@ export function createGps(onChange: () => void) {
      * A cada quadro, com a posição do carro: acompanha a rota, recalcula se
      * saiu dela e devolve true quando chegou.
      */
-    update(x: number, z: number, heading: number, now: number): boolean {
+    update(x: number, z: number, heading: number, now: number, level = -1): boolean {
       if (!target) return false;
       if (Math.hypot(target.x - x, target.z - z) < ARRIVE) {
         target = null;
@@ -124,12 +124,12 @@ export function createGps(onChange: () => void) {
         onChange();
         return true;
       }
-      if (route.length < 2) plan(x, z);
+      if (route.length < 2) plan(x, z, level);
       const here = locate(x, z);
       if (here.distance > OFF_ROUTE && now > rerouteAt) {
         // Saiu da rota: recalcula (no máximo uma vez por segundo).
         rerouteAt = now + 1000;
-        plan(x, z);
+        plan(x, z, level);
       } else if (here.index !== progress) {
         progress = here.index;
       }

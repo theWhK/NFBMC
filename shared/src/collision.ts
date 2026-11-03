@@ -4,6 +4,7 @@
 // atrito no ponto de contato e giro quando a batida é fora do centro. Sem dano:
 // é arcade.
 import type { CarMotion, CarState } from "./physics.ts";
+import { surfaceY } from "./levels.ts";
 
 export interface CarBody {
   car: CarState;
@@ -92,6 +93,14 @@ function applyVelocity(body: CarBody, dv: Vec) {
  * Resolve as colisões entre todos os carros. Devolve as batidas (para sons,
  * nível de procurado etc.).
  */
+/** Os dois carros estão na mesma altura (mesmo nível, ou níveis que se encontram na ponta da obra)? */
+function sameLevel(a: CarBody, b: CarBody) {
+  const la = a.motion.level ?? -1;
+  const lb = b.motion.level ?? -1;
+  if (la === lb) return true;
+  return Math.abs(surfaceY(a.car.x, a.car.z, la) - surfaceY(b.car.x, b.car.z, lb)) < 2.5;
+}
+
 export function collideCars(bodies: CarBody[]): Impact[] {
   const impacts: Impact[] = [];
   for (let i = 0; i < bodies.length; i++) {
@@ -101,6 +110,8 @@ export function collideCars(bodies: CarBody[]): Impact[] {
       // Filtro rápido: longe demais para se tocar.
       const reach = Math.hypot(a.halfLength, a.halfWidth) + Math.hypot(b.halfLength, b.halfWidth);
       if (Math.abs(a.car.x - b.car.x) > reach || Math.abs(a.car.z - b.car.z) > reach) continue;
+      // Níveis diferentes (um na ponte, o outro embaixo): não se tocam.
+      if (!sameLevel(a, b)) continue;
       const hit = overlap(a, b);
       if (!hit) continue;
       const { normal: n, depth, contact } = hit;

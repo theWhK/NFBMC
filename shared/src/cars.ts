@@ -18,7 +18,7 @@ export const CATEGORY_LABELS: Record<CarCategory, string> = {
 
 /** Formato da carroceria: o cliente desenha cada um de um jeito. */
 export type BodyStyle =
-  | "fusca" | "uno" | "gol" | "sedan" | "hatch" | "opala" | "muscle"
+  | "fusca" | "uno" | "gol" | "etios" | "sedan" | "hatch" | "opala" | "muscle"
   | "supra" | "skyline" | "porsche" | "wedge" | "ferrari" | "veyron" | "hyper" | "a3" | "m3";
 
 /** Comprimento e largura (m) de cada carroceria: o desenho e a colisão usam os mesmos. */
@@ -26,6 +26,7 @@ export const BODY_SIZE: Record<BodyStyle, { length: number; width: number }> = {
   fusca: { length: 4.05, width: 1.55 },
   uno: { length: 3.65, width: 1.55 },
   gol: { length: 3.8, width: 1.6 },
+  etios: { length: 3.78, width: 1.7 },
   sedan: { length: 4.5, width: 1.75 },
   hatch: { length: 4.2, width: 1.78 },
   opala: { length: 4.8, width: 1.8 },
@@ -132,6 +133,13 @@ const CARS_LIST: CarSpec[] = [
     color: "#c1121f", mass: 900, torque: 128, peakRpm: 3000, idleRpm: 850, redline: 6200,
     gears: [3.45, 1.94, 1.29, 0.97, 0.8], finalDrive: 4.24, wheelRadius: 0.29, dragArea: 0.66, brake: 8.5, turn: 2.6, understeer: 0.3,
     engine: { cylinders: 4, layout: "linha", liters: 1.8, aspiration: "aspirado", exhaust: "esportivo" },
+  },
+  {
+    id: "etios", name: "Etios PF", inspired: "Toyota Etios 1.5 (hatch)", category: "popular", body: "etios",
+    food: "O prato feito dos carros: arroz, feijão, bife e salada. Sem tempero, sem susto e nunca quebra. Vem com a marmita no teto.",
+    color: "#c9c3b4", mass: 990, torque: 144, peakRpm: 4800, idleRpm: 800, redline: 6200,
+    gears: [3.55, 1.9, 1.31, 1.03, 0.82], finalDrive: 4.31, wheelRadius: 0.29, dragArea: 0.67, brake: 8.5, turn: 2.6, understeer: 0.3,
+    engine: { cylinders: 4, layout: "linha", liters: 1.5, aspiration: "aspirado", exhaust: "fabrica" },
   },
   {
     id: "civic", name: "Civic Sushi", inspired: "Honda Civic Si", category: "sedan", body: "sedan",

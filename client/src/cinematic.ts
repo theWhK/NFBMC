@@ -136,7 +136,8 @@ function layout(): Layout {
   for (const road of ROADS) {
     const [a, b] = [road.points[0], road.points[road.points.length - 1]];
     const straight = Math.hypot(b[0] - a[0], b[1] - a[1]) / road.length;
-    if (road.length < 150 || straight < 0.995) continue;
+    // Pontes, viadutos e túneis não servem de cenário (a cena fica no chão).
+    if (road.length < 150 || straight < 0.995 || road.structure >= 0) continue;
     const mid = Math.hypot((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
     const score = mid - road.length * 0.3 - (road.kind === "avenida" ? 120 : 0);
     if (!best || score < best.score) best = { points: [a, b], score };

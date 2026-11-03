@@ -7,17 +7,23 @@ import * as THREE from "three";
 import { makeFlag, FLAG_STRIPES } from "./flag.ts";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
+  AIRPORT,
   DISTRICTS,
   LAKE,
   QUAY_Z,
   RACES,
   RACE_IDS,
+  RIVER,
+  RIVER_WATER_DROP,
   ROADS,
+  ROUNDABOUTS,
   districtAt,
   heightAt,
   insideBuilding,
   isOnRoad,
   raceMarker,
+  riverAt,
+  roundaboutIsland,
   WORLD_BOUNDS,
   pointOnTrack,
   seeded,
@@ -26,9 +32,10 @@ import {
 import { bake, makeBurger } from "./models.ts";
 import { buildTrackMesh } from "./track-mesh.ts";
 import { buildLandmarks } from "./landmarks.ts";
-import { TILE, addChunk, byTile } from "./chunks.ts";
+import { TILE, addChunk, addLodChunk, byTile } from "./chunks.ts";
 import { buildBuildings, buildingMaterial } from "./buildings.ts";
-import { buildStreets } from "./streets.ts";
+import { Bucket, buildStreets, streetMaterial } from "./streets.ts";
+import { buildStructures, buildTunnelBerms, insideTunnelCut, nearStructure, tunnelCutSquares } from "./structures.ts";
 import { buildTrees } from "./trees.ts";
 import { buildFarms } from "./farms.ts";
 import { buildAirport } from "./airport.ts";
@@ -139,9 +146,40 @@ function buildSkyline(scene: THREE.Scene) {
   scene.add(mesh);
 }
 
+/** Cor da margem do rio: areia e cascalho perto da água, lama embaixo dela. */
+const BANK_SAND = new THREE.Color("#bba985");
+const BANK_MUD = new THREE.Color("#6e6452");
+
+/** Distância do eixo até onde a água encosta no barranco (a calha do terrain.ts). */
+const waterline = (half: number) => 0.74 * half + 2.4;
+
+/**
+ * Quadrados da grade do relevo em volta do rio (a calha tem ~3 m de fundo e
+ * poucas dezenas de metros de largura: a grade de 20 m não desenha ela).
+ */
+function riverSquares(originX: number, originZ: number, step: number) {
+  const keys = new Set<string>();
+  const pts = riverPolyline();
+  for (const p of pts) {
+    const reach = p.half + 14;
+    for (let u = -reach; u <= reach + 1e-6; u += 4) {
+      const x = p.x + p.lx * u;
+      const z = p.z + p.lz * u;
+      if (z < QUAY_Z) continue;
+      keys.add(`${Math.floor((x - originX) / step)},${Math.floor((z - originZ) / step)}`);
+    }
+  }
+  return keys;
+}
+
 /**
  * Chão com relevo, em blocos (para a cena poder esconder os longe), tingido
  * pela cor de cada bairro. Vai um pouco além dos limites do mapa, sob a neblina.
+ *
+ * A grade é de 20 m; perto do rio e das galerias dos túneis os quadrados viram
+ * uma grade fina (4 m), para a calha do rio aparecer e para o relevo não entrar
+ * na galeria (as células de dentro dela são puladas). Na beira de um quadrado
+ * fino que encosta num grosso, a altura segue a reta do grosso (sem fresta).
  */
 function buildTerrain(scene: THREE.Scene) {
   const material = surface(new THREE.MeshLambertMaterial({ color: "#ffffff", map: groundTexture, vertexColors: true }), {
@@ -150,40 +188,158 @@ function buildTerrain(scene: THREE.Scene) {
   const step = 20;
   const size = 500;
   const margin = 700;
+  const fine = 5;
+  const originX = WORLD_BOUNDS.minX - margin;
+  const originZ = QUAY_Z;
+  const refined = new Set<string>([...tunnelCutSquares(originX, originZ, step), ...riverSquares(originX, originZ, step)]);
+  const isFine = (i: number, j: number) => refined.has(`${i},${j}`);
   const colors = new Map(DISTRICTS.map((d) => [d.id, new THREE.Color(d.ground)]));
   const outside = new THREE.Color("#6b7337");
-  for (let x0 = WORLD_BOUNDS.minX - margin; x0 < WORLD_BOUNDS.maxX + margin; x0 += size) {
-    for (let z0 = QUAY_Z; z0 < WORLD_BOUNDS.maxZ + margin; z0 += size) {
+  const c = new THREE.Color();
+  const tint = (x: number, z: number): [number, number, number] => {
+    const inside = x >= WORLD_BOUNDS.minX && x <= WORLD_BOUNDS.maxX && z <= WORLD_BOUNDS.maxZ;
+    c.copy(inside ? colors.get(districtAt(x, z))! : outside);
+    const r = riverAt(x, z);
+    if (r.distance < r.half + 16) {
+      const wl = waterline(r.half);
+      // Areia e cascalho na margem; lama embaixo da água.
+      const sand = smoothstep(r.half + 16, wl + 4, r.distance);
+      c.lerp(BANK_SAND, sand * 0.85);
+      if (r.distance < wl + 1) c.lerp(BANK_MUD, smoothstep(wl + 1, wl - 3, r.distance));
+    }
+    return [c.r, c.g, c.b];
+  };
+  const normalAt = (x: number, z: number) => {
+    const e = 1;
+    const gx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e);
+    const gz = (heightAt(x, z + e) - heightAt(x, z - e)) / (2 * e);
+    const l = Math.hypot(gx, 1, gz);
+    return [-gx / l, 1 / l, -gz / l];
+  };
+  for (let x0 = originX; x0 < WORLD_BOUNDS.maxX + margin; x0 += size) {
+    for (let z0 = originZ; z0 < WORLD_BOUNDS.maxZ + margin; z0 += size) {
       const n = size / step;
       const positions: number[] = [];
+      const normals: number[] = [];
       const uvs: number[] = [];
       const tints: number[] = [];
       const indices: number[] = [];
+      const vertex = (x: number, y: number, z: number) => {
+        positions.push(x, y - 0.25, z);
+        normals.push(...normalAt(x, z));
+        uvs.push(x, -z);
+        tints.push(...tint(x, z));
+        return positions.length / 3 - 1;
+      };
+      const corner = new Float32Array((n + 1) * (n + 1));
       for (let i = 0; i <= n; i++) {
         for (let j = 0; j <= n; j++) {
           const x = x0 + i * step;
           const z = z0 + j * step;
-          positions.push(x, heightAt(x, z) - 0.25, z);
-          uvs.push(x, -z);
-          const inside = x >= WORLD_BOUNDS.minX && x <= WORLD_BOUNDS.maxX && z <= WORLD_BOUNDS.maxZ;
-          const c = inside ? colors.get(districtAt(x, z))! : outside;
-          tints.push(c.r, c.g, c.b);
-          if (i < n && j < n) {
-            const a = i * (n + 1) + j;
-            const b = a + n + 1;
+          corner[i * (n + 1) + j] = heightAt(x, z);
+          vertex(x, corner[i * (n + 1) + j], z);
+        }
+      }
+      const gi0 = Math.round((x0 - originX) / step);
+      const gj0 = Math.round((z0 - originZ) / step);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          const a = i * (n + 1) + j;
+          const b = a + n + 1;
+          const gi = gi0 + i;
+          const gj = gj0 + j;
+          if (!isFine(gi, gj)) {
             indices.push(a, a + 1, b, b, a + 1, b + 1);
+            continue;
+          }
+          // Quadrado fino: grade de 4 m, sem as células de dentro da galeria.
+          const sx = x0 + i * step;
+          const sz = z0 + j * step;
+          const h00 = corner[a];
+          const h01 = corner[a + 1];
+          const h10 = corner[b];
+          const h11 = corner[b + 1];
+          const left = !isFine(gi - 1, gj);
+          const right = !isFine(gi + 1, gj);
+          const down = !isFine(gi, gj - 1);
+          const up = !isFine(gi, gj + 1);
+          const ids: number[] = [];
+          for (let p = 0; p <= fine; p++) {
+            for (let q = 0; q <= fine; q++) {
+              const fx = p / fine;
+              const fz = q / fine;
+              const x = sx + fx * step;
+              const z = sz + fz * step;
+              let h: number;
+              if (p === 0 && left) h = h00 + (h01 - h00) * fz;
+              else if (p === fine && right) h = h10 + (h11 - h10) * fz;
+              else if (q === 0 && down) h = h00 + (h10 - h00) * fx;
+              else if (q === fine && up) h = h01 + (h11 - h01) * fx;
+              else h = heightAt(x, z);
+              ids.push(vertex(x, h, z));
+            }
+          }
+          const cell = step / fine;
+          for (let p = 0; p < fine; p++) {
+            for (let q = 0; q < fine; q++) {
+              const cx = sx + p * cell;
+              const cz = sz + q * cell;
+              if (
+                insideTunnelCut(cx + cell / 2, cz + cell / 2, 0.2) || insideTunnelCut(cx, cz, 0.2) || insideTunnelCut(cx + cell, cz, 0.2) ||
+                insideTunnelCut(cx, cz + cell, 0.2) || insideTunnelCut(cx + cell, cz + cell, 0.2)
+              ) continue;
+              const k = p * (fine + 1) + q;
+              indices.push(ids[k], ids[k + 1], ids[k + fine + 1], ids[k + fine + 1], ids[k + 1], ids[k + fine + 2]);
+            }
           }
         }
       }
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
       geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       geometry.setAttribute("color", new THREE.Float32BufferAttribute(tints, 3));
       geometry.setIndex(indices);
-      geometry.computeVertexNormals();
       addChunk(scene, new THREE.Mesh(geometry, material), [x0 + size / 2, z0 + size / 2], size * 0.71);
     }
   }
+  // A costura em volta das galerias dos túneis.
+  buildTunnelBerms(scene, material, tint);
+}
+
+/** 0 em `a`, 1 em `b` (suave). */
+function smoothstep(a: number, b: number, v: number) {
+  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+/** Eixo do Rio Banha a cada ~8 m (com um trecho antes da nascente, onde o vale some): posição, lado, meia largura e várzea. */
+function riverPolyline() {
+  const src = RIVER.points;
+  const [x0, z0] = src[0];
+  const [x1, z1] = src[1];
+  const l = Math.hypot(x0 - x1, z0 - z1);
+  const pts: [number, number][] = [[x0 + ((x0 - x1) / l) * 160, z0 + ((z0 - z1) / l) * 160], ...src];
+  const widths = [RIVER.width[0], ...RIVER.width];
+  const floors = [RIVER.floor[0], ...RIVER.floor];
+  const out: { x: number; z: number; lx: number; lz: number; half: number; floor: number }[] = [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [ax, az] = pts[i];
+    const [bx, bz] = pts[i + 1];
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 8));
+    for (let k = 0; k < steps || (i === pts.length - 2 && k === steps); k++) {
+      const t = k / steps;
+      out.push({ x: ax + (bx - ax) * t, z: az + (bz - az) * t, lx: 0, lz: 0, half: (widths[i] + (widths[i + 1] - widths[i]) * t) / 2, floor: floors[i] + (floors[i + 1] - floors[i]) * t });
+    }
+  }
+  out.forEach((p, k) => {
+    const a = out[Math.max(0, k - 1)];
+    const b = out[Math.min(out.length - 1, k + 1)];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    p.lx = (b.z - a.z) / len;
+    p.lz = -(b.x - a.x) / len;
+  });
+  return out;
 }
 
 /** Chão dos bairros (em tons de cinza; a cor do bairro tinge por cima): manchas e tufos. */
@@ -326,14 +482,274 @@ function buildClouds() {
   return group;
 }
 
-/** Chão dos bairros, ruas com calçada, faixa tracejada e o mar. */
+/** Material da água (lago e rio): reflete o céu quebrado pelas ondinhas. */
+let waterMaterial: THREE.Material | null = null;
+const water = () =>
+  (waterMaterial ??= surface(new THREE.MeshLambertMaterial({ color: "#2f7aa0", emissive: "#3a6a8a", emissiveIntensity: 0.4, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), {
+    roughness: 0.08, normalMap: waterNormal, normalScale: 0.3, envMapIntensity: 1.6,
+  }));
+
+/** Altura da água do rio no ponto do eixo (no fim ela encontra o nível do mar). */
+function riverWaterY(z: number, floor: number) {
+  const y = floor - RIVER_WATER_DROP;
+  const toSea = smoothstep(QUAY_Z + 90, QUAY_Z, z);
+  return y + (-0.6 - y) * toSea;
+}
+
+/**
+ * Rio Banha: a lâmina d'água ao longo do eixo, um pouco mais larga que a calha
+ * (as bordas ficam debaixo do barranco, então só aparece onde o vale é mais
+ * fundo que a água), e as pedras da margem (de perto).
+ */
+function buildRiver(scene: THREE.Scene) {
+  const pts = riverPolyline().filter((p) => p.z > QUAY_Z - 1);
+  const pieces: (typeof pts)[] = [];
+  for (let k = 0; k < pts.length - 1; k += 30) pieces.push(pts.slice(k, Math.min(pts.length, k + 31)));
+  const stone = new THREE.MeshLambertMaterial({ color: "#8d877c", flatShading: true });
+  const rock = new THREE.DodecahedronGeometry(1, 0);
+  for (const [n, part] of pieces.entries()) {
+    const b = new Bucket();
+    let prev = -1;
+    let along = 0;
+    part.forEach((p, k) => {
+      if (k > 0) along += Math.hypot(p.x - part[k - 1].x, p.z - part[k - 1].z);
+      const y = riverWaterY(p.z, p.floor);
+      const w = p.half + 5;
+      const first = b.vertex(p.x - p.lx * w, y, p.z - p.lz * w, [0, 1, 0], -w / 14, along / 14, [1, 1, 1]);
+      b.vertex(p.x, y, p.z, [0, 1, 0], 0, along / 14, [1, 1, 1]);
+      b.vertex(p.x + p.lx * w, y, p.z + p.lz * w, [0, 1, 0], w / 14, along / 14, [1, 1, 1]);
+      if (prev >= 0) {
+        b.quad(prev, prev + 1, first + 1, first);
+        b.quad(prev + 1, prev + 2, first + 2, first + 1);
+      }
+      prev = first;
+    });
+    const xs = part.map((p) => p.x);
+    const zs = part.map((p) => p.z);
+    const center: [number, number] = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2];
+    const radius = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs)) / 2 + 50;
+    const mesh = b.mesh(water());
+    mesh.userData.noShadow = true;
+    addChunk(scene, mesh, center, radius);
+    // Pedras na beira d'água (só de perto).
+    addLodChunk(scene, center, radius, null, () => {
+      const random = seeded(700 + n);
+      const parts: THREE.BufferGeometry[] = [];
+      for (const p of part) {
+        for (const side of [-1, 1]) {
+          if (random() < 0.45) continue;
+          const d = side * (waterline(p.half) + (random() - 0.3) * 3);
+          const x = p.x + p.lx * d + (random() - 0.5) * 4;
+          const z = p.z + p.lz * d + (random() - 0.5) * 4;
+          const r = 0.35 + random() ** 2 * 1.3;
+          const g = rock.clone();
+          g.scale(r * (0.8 + random() * 0.6), r * (0.45 + random() * 0.3), r * (0.8 + random() * 0.6));
+          g.rotateY(random() * Math.PI * 2);
+          g.translate(x, Math.max(heightAt(x, z), riverWaterY(p.z, p.floor)) - 0.25 - r * 0.15, z);
+          parts.push(g);
+        }
+      }
+      const mesh = new THREE.Mesh(mergeGeometries(parts), stone);
+      mesh.geometry.computeBoundingSphere();
+      return mesh;
+    });
+  }
+}
+
+/**
+ * Ilhas das rotatórias: canteiro de grama com meio-fio de granito. No meio da
+ * Rotatória do Hambúrguer fica a estátua (buildStatues); na Praça do Yakisoba,
+ * um chafariz; na Rotatória da Coxinha, a coxinha gigante.
+ */
+function buildRoundabouts(scene: THREE.Scene) {
+  const grass = streetMaterial("grama");
+  const granite = new THREE.MeshLambertMaterial({ color: "#a9a59c" });
+  const curbTone = [0.42, 0.41, 0.39] as [number, number, number];
+  const grassTone = [0.8, 0.86, 0.72] as [number, number, number];
+  for (const ra of ROUNDABOUTS) {
+    // Raio da ilha (onde a física empurra o carro para fora), menos a calçada da rotatória.
+    let island = 0;
+    for (let r = 0; r < ra.r; r += 0.25) if (roundaboutIsland(ra.x + r, ra.z)) island = r;
+    const R = island - 2;
+    if (R < 4) continue;
+    const group = new THREE.Group();
+    const b = new Bucket();
+    const curb = new Bucket();
+    const segs = 64;
+    const rings = Math.ceil(R / 3);
+    const lift = 0.38;
+    const ring = (radius: number, k: number) => {
+      const a = (k / segs) * Math.PI * 2;
+      return [ra.x + Math.cos(a) * radius, ra.z + Math.sin(a) * radius] as const;
+    };
+    // Grama (anéis da borda até o meio).
+    const center = b.vertex(ra.x, heightAt(ra.x, ra.z) + lift, ra.z, [0, 1, 0], ra.x, ra.z, grassTone);
+    let prev: number[] = [];
+    for (let q = 1; q <= rings; q++) {
+      const radius = (R * q) / rings;
+      const row: number[] = [];
+      for (let k = 0; k < segs; k++) {
+        const [x, z] = ring(radius, k);
+        row.push(b.vertex(x, heightAt(x, z) + lift, z, [0, 1, 0], x, z, grassTone));
+      }
+      for (let k = 0; k < segs; k++) {
+        const k1 = (k + 1) % segs;
+        if (q === 1) b.tri(center, row[k], row[k1]);
+        else b.quad(prev[k], prev[k1], row[k1], row[k]);
+      }
+      prev = row;
+    }
+    // Meio-fio de granito em volta (face de fora, topo e face de dentro).
+    const faces: [number, number, number, number, [number, number, number]][] = [
+      [R + 0.3, -0.3, R + 0.3, lift + 0.12, [1, 0, 0]],
+      [R + 0.3, lift + 0.12, R, lift + 0.12, [0, 1, 0]],
+      [R, lift + 0.12, R, lift - 0.05, [-1, 0, 0]],
+    ];
+    for (const [r0, y0, r1, y1, n] of faces) {
+      let last = -1;
+      for (let k = 0; k <= segs; k++) {
+        const a = (k / segs) * Math.PI * 2;
+        const cx = Math.cos(a);
+        const cz = Math.sin(a);
+        const normal: [number, number, number] = [cx * n[0], n[1], cz * n[0]];
+        const [x0, z0] = [ra.x + cx * r0, ra.z + cz * r0];
+        const [x1, z1] = [ra.x + cx * r1, ra.z + cz * r1];
+        const v = curb.vertex(x0, heightAt(x0, z0) + y0, z0, normal, (k / segs) * Math.PI * 2 * R, 0, curbTone);
+        curb.vertex(x1, heightAt(x1, z1) + y1, z1, normal, (k / segs) * Math.PI * 2 * R, 0.3, curbTone);
+        if (last >= 0) curb.quad(last, last + 1, v + 1, v);
+        last = v;
+      }
+    }
+    group.add(b.mesh(grass), curb.mesh(streetMaterial("meiofio")));
+    const y = heightAt(ra.x, ra.z) + lift;
+    if (ra.id === "LR") {
+      // Chafariz: tanque redondo com água, a coluna e o "jato" (cone claro).
+      const basin = Math.min(13, R - 5);
+      const wall = new THREE.Mesh(new THREE.CylinderGeometry(basin, basin + 0.3, 1.1, 40, 1, true), granite);
+      wall.position.set(ra.x, y + 0.25, ra.z);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(basin + 0.15, 0.3, 6, 40).rotateX(Math.PI / 2), granite);
+      rim.position.set(ra.x, y + 0.8, ra.z);
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(basin, 40).rotateX(-Math.PI / 2), water());
+      pool.position.set(ra.x, y + 0.55, ra.z);
+      const column = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 3.2, 16), granite);
+      column.position.set(ra.x, y + 1.6, ra.z);
+      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 1.2, 0.8, 24), granite);
+      bowl.position.set(ra.x, y + 3.4, ra.z);
+      const jet = new THREE.Mesh(
+        new THREE.ConeGeometry(2.6, 5.5, 20, 1, true),
+        new THREE.MeshLambertMaterial({ color: "#e8f4ff", transparent: true, opacity: 0.45, emissive: "#9fc4e0", emissiveIntensity: 0.4, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      jet.position.set(ra.x, y + 6.4, ra.z);
+      jet.rotation.x = Math.PI;
+      group.add(wall, rim, pool, column, bowl, jet);
+    } else if (ra.id === "RJ") {
+      // A coxinha gigante, num pedestal.
+      const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.6, 1.6, 24), granite);
+      pedestal.position.set(ra.x, y + 0.3, ra.z);
+      const profile: THREE.Vector2[] = [];
+      for (let k = 0; k <= 20; k++) {
+        const t = k / 20;
+        // Gota: barriga redonda embaixo, a ponta em cima.
+        const r = 2.6 * Math.sin(Math.PI * Math.pow(t, 0.75)) * (1 - 0.35 * t);
+        profile.push(new THREE.Vector2(Math.max(0.001, r), t * 6.2));
+      }
+      const coxinha = new THREE.Mesh(new THREE.LatheGeometry(profile, 28), new THREE.MeshLambertMaterial({ color: "#c47a2c" }));
+      coxinha.position.set(ra.x, y + 1.1, ra.z);
+      group.add(pedestal, coxinha);
+    } else {
+      // Pedestal da estátua do hambúrguer.
+      const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(9, 9.6, 2.2, 40), granite);
+      pedestal.position.set(ra.x, y + 0.3, ra.z);
+      group.add(pedestal);
+    }
+    addChunk(scene, group, [ra.x, ra.z], R + 20);
+  }
+}
+
+/** Topo do pedestal da estátua do meio da Rotatória do Hambúrguer. */
+const STATUE_LIFT = 0.38 + 1.4;
+
+/**
+ * Pátio dos aviões do aeroporto: laje de concreto plana, com as linhas
+ * amarelas de táxi, as faixas de parada e as caixas das vagas (os prédios e os
+ * aviões são de outro arquivo).
+ */
+function buildApron(scene: THREE.Scene) {
+  const { minX, maxX, minZ, maxZ } = AIRPORT.apron;
+  const slab = new Bucket();
+  const tone: [number, number, number] = [0.6, 0.59, 0.56];
+  const cell = 20;
+  const nx = Math.ceil((maxX - minX) / cell);
+  const nz = Math.ceil((maxZ - minZ) / cell);
+  const ids: number[] = [];
+  for (let i = 0; i <= nx; i++) {
+    for (let j = 0; j <= nz; j++) {
+      const x = minX + ((maxX - minX) * i) / nx;
+      const z = minZ + ((maxZ - minZ) * j) / nz;
+      const v = 0.92 + 0.12 * Math.sin(x * 0.07 + z * 0.03) * Math.sin(z * 0.05 - x * 0.02);
+      ids.push(slab.vertex(x, heightAt(x, z) + 0.04, z, [0, 1, 0], x * 0.5, z * 0.5, [tone[0] * v, tone[1] * v, tone[2] * v]));
+    }
+  }
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    const a = i * (nz + 1) + j;
+    slab.quad(ids[a], ids[a + 1], ids[a + nz + 2], ids[a + nz + 1]);
+  }
+  // Beirada da laje até o chão.
+  const corners: [number, number][] = [[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ]];
+  corners.forEach(([ax, az], k) => {
+    const [bx, bz] = corners[(k + 1) % 4];
+    const n: [number, number, number] = [Math.sign(bz - az), 0, -Math.sign(bx - ax)];
+    const v = slab.vertex(ax, 0.04, az, n, 0, 0, tone);
+    slab.vertex(bx, 0.04, bz, n, 1, 0, tone);
+    slab.vertex(bx, -0.4, bz, n, 1, 0.4, tone);
+    slab.vertex(ax, -0.4, az, n, 0, 0.4, tone);
+    slab.quad(v, v + 1, v + 2, v + 3);
+  });
+  // Pintura: retângulos achatados no chão.
+  const paint = new Bucket();
+  const yellow: [number, number, number] = [0.87, 0.47, 0.01];
+  const white: [number, number, number] = [0.89, 0.88, 0.84];
+  const red: [number, number, number] = [0.6, 0.05, 0.04];
+  const rect = (x0: number, z0: number, x1: number, z1: number, color: [number, number, number]) => {
+    const y = 0.075;
+    const v = paint.vertex(x0, y, z0, [0, 1, 0], x0, z0, color);
+    paint.vertex(x1, y, z0, [0, 1, 0], x1, z0, color);
+    paint.vertex(x1, y, z1, [0, 1, 0], x1, z1, color);
+    paint.vertex(x0, y, z1, [0, 1, 0], x0, z1, color);
+    paint.quad(v, v + 1, v + 2, v + 3);
+  };
+  // Linha de táxi ao longo do pátio e a borda de segurança.
+  rect(minX + 8, minZ + 20, maxX - 8, minZ + 20.3, yellow);
+  rect(minX + 4, minZ + 4, maxX - 4, minZ + 4.2, yellow);
+  rect(minX + 4, minZ + 4.5, maxX - 4, minZ + 4.7, yellow);
+  // Vagas: linha de entrada, barra de parada e o contorno de segurança (vermelho).
+  for (let x = minX + 60; x <= maxX - 50; x += 85) {
+    rect(x - 0.15, minZ + 20, x + 0.15, maxZ - 26, yellow);
+    rect(x - 4, maxZ - 26.3, x + 4, maxZ - 25.7, yellow);
+    for (const dx of [-30, 30]) rect(x + dx - 0.2, minZ + 34, x + dx + 0.2, maxZ - 8, red);
+    rect(x - 30, maxZ - 8.2, x + 30, maxZ - 7.8, red);
+    // Marcas de pneu de nariz (tracinhos brancos) perto da parada.
+    for (let k = 0; k < 4; k++) rect(x - 1.2, maxZ - 30 - k * 3, x + 1.2, maxZ - 29.6 - k * 3, white);
+  }
+  const group = new THREE.Group();
+  group.add(slab.mesh(streetMaterial("concreto")), paint.mesh(streetMaterial("tinta")));
+  addChunk(scene, group, [(minX + maxX) / 2, (minZ + maxZ) / 2], Math.hypot(maxX - minX, maxZ - minZ) / 2 + 20);
+}
+
+/** Chão dos bairros, ruas com calçada, faixa tracejada, as obras de arte, o rio, o lago e o mar. */
 function buildGround(scene: THREE.Scene) {
+  // As ruas primeiro: elas dizem onde começa o tabuleiro de cada obra (o relevo recorta em volta das galerias).
+  buildStreets(scene);
+
   // Chão de cada bairro, com a sua cor e o relevo.
   buildTerrain(scene);
 
-  buildStreets(scene);
+  buildStructures(scene);
+  buildRiver(scene);
+  buildRoundabouts(scene);
+  buildApron(scene);
 
-  // O mar, ao sul do cais, e o muro do cais.
+  // O mar, ao sul do cais, e o muro do cais (aberto na foz do rio).
   const sea = new THREE.Mesh(
     new THREE.PlaneGeometry(WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 6000, 3000).rotateX(-Math.PI / 2),
     surface(new THREE.MeshLambertMaterial({ color: "#2b6a8f", emissive: "#3a5a7a", emissiveIntensity: 0.35 }), {
@@ -344,23 +760,26 @@ function buildGround(scene: THREE.Scene) {
   scaleUv(sea.geometry, (WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 6000) / 14, 3000 / 14);
   sea.position.set(0, -0.6, QUAY_Z - 1500);
   scene.add(sea);
-  const quay = new THREE.Mesh(new THREE.BoxGeometry(WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX + 40, 1.6, 2), new THREE.MeshLambertMaterial({ color: "#6b6258" }));
-  quay.position.set(0, 0.2, QUAY_Z - 1);
-  scene.add(quay);
+  const mouth = riverAt(RIVER.points[RIVER.points.length - 2][0], QUAY_Z);
+  const mouthX = RIVER.points.reduce((best, p) => (Math.abs(p[1] - QUAY_Z) < Math.abs(best[1] - QUAY_Z) ? p : best))[0];
+  const gap = mouth.half + 6;
+  const quayMaterial = new THREE.MeshLambertMaterial({ color: "#6b6258" });
+  const west = WORLD_BOUNDS.minX - 20;
+  const east = WORLD_BOUNDS.maxX + 20;
+  for (const [a, b] of [[west, mouthX - gap], [mouthX + gap, east]]) {
+    const quay = new THREE.Mesh(new THREE.BoxGeometry(b - a, 1.6, 2), quayMaterial);
+    quay.position.set((a + b) / 2, 0.2, QUAY_Z - 1);
+    scene.add(quay);
+  }
 
   // Lago do parque, com uma borda de areia.
   const shore = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: "#cdb380" }));
   shore.scale.set(LAKE.rx + 4, 1, LAKE.rz + 4);
-  shore.position.set(LAKE.x, 0.01, LAKE.z);
-  const lake = new THREE.Mesh(
-    new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2),
-    surface(new THREE.MeshLambertMaterial({ color: "#2f7aa0", emissive: "#3a6a8a", emissiveIntensity: 0.4, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), {
-      roughness: 0.08, normalMap: waterNormal, normalScale: 0.3, envMapIntensity: 1.6,
-    }),
-  );
+  shore.position.set(LAKE.x, heightAt(LAKE.x, LAKE.z) + 0.01, LAKE.z);
+  const lake = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2), water());
   scaleUv(lake.geometry, LAKE.rx / 5, LAKE.rz / 5);
   lake.scale.set(LAKE.rx, 1, LAKE.rz);
-  lake.position.set(LAKE.x, 0.03, LAKE.z);
+  lake.position.set(LAKE.x, heightAt(LAKE.x, LAKE.z) + 0.03, LAKE.z);
   scene.add(shore, lake);
 }
 
@@ -399,7 +818,8 @@ function buildLamps(scene: THREE.Scene) {
   /** Pé do poste e para onde fica a rua (a luminária aponta para lá). */
   const spots: { x: number; y: number; z: number; facing: number }[] = [];
   for (const road of ROADS) {
-    if (road.kind === "viela") continue;
+    // Viela não tem poste; no aeroporto a iluminação é outra; nas obras de arte os postes são do structures.ts.
+    if (road.kind === "viela" || road.kind === "pista" || road.kind === "taxiway" || road.structure >= 0) continue;
     let side = 1;
     for (let i = 6; i < road.points.length - 6; i += 12) {
       side = -side;
@@ -409,6 +829,8 @@ function buildLamps(scene: THREE.Scene) {
       const offset = side * (road.width / 2 + 1.8);
       const lx = x + ((nz - z) / len) * offset;
       const lz = z - ((nx - x) / len) * offset;
+      // Nada de poste furando o viaduto de cima nem em cima da galeria de um túnel.
+      if (nearStructure(lx, lz, 3) || roundaboutIsland(lx, lz, 1)) continue;
       spots.push({ x: lx, y: heightAt(lx, lz), z: lz, facing: Math.atan2(x - lx, z - lz) });
     }
   }
@@ -545,12 +967,20 @@ function buildBillboards(scene: THREE.Scene) {
   });
 }
 
-/** Hambúrgueres gigantes de estátua: na beira do lago e no meio do autódromo. */
+/** Estátuas de hambúrguer: [x, z, tamanho, altura da base acima do chão]. */
+const STATUES: [number, number, number, number][] = [
+  // No meio da Rotatória do Hambúrguer, em cima do pedestal.
+  [ROUNDABOUTS[0].x, ROUNDABOUTS[0].z, 14, STATUE_LIFT],
+  // No meio do autódromo.
+  [400, 425, 14, 0],
+];
+
+/** Hambúrgueres gigantes de estátua: no meio da Rotatória do Hambúrguer e no meio do autódromo. */
 function buildStatues(scene: THREE.Scene) {
-  for (const [x, z, size] of [[400, 40, 16], [400, 425, 14]] as const) {
+  for (const [x, z, size, lift] of STATUES) {
     const statue = bake(makeBurger());
     statue.scale.setScalar(size);
-    statue.position.set(x, 0, z);
+    statue.position.set(x, heightAt(x, z) + lift, z);
     statue.rotation.y = x * 0.01;
     scene.add(statue);
   }
@@ -581,7 +1011,7 @@ function buildFlags(scene: THREE.Scene) {
       break;
     }
   }
-  for (const [x, z, size] of [[400, 40, 16], [400, 425, 14]] as const) {
+  for (const [x, z, size] of STATUES) {
     for (let k = 0; k < 4; k++) {
       const angle = (k / 4) * Math.PI * 2 + 0.4;
       const r = size * 1.1;
@@ -629,7 +1059,7 @@ function stationTexture() {
  */
 function roadsideSpots(seed: number, count: number, kinds: string[], offset: number, footprint: number, accept?: (x: number, z: number) => boolean) {
   const random = seeded(seed);
-  const roads = ROADS.filter((r) => kinds.includes(r.kind) && r.points.length > 12);
+  const roads = ROADS.filter((r) => kinds.includes(r.kind) && r.points.length > 12 && r.structure < 0);
   const spots: { x: number; z: number; facing: number }[] = [];
   for (let tries = 0; tries < count * 40 && spots.length < count && roads.length; tries++) {
     const road = roads[Math.floor(random() * roads.length)];
@@ -644,6 +1074,8 @@ function roadsideSpots(seed: number, count: number, kinds: string[], offset: num
     const sx = x + ox * d;
     const sz = z + oz * d;
     if (accept && !accept(sx, sz)) continue;
+    // Nem debaixo de viaduto, nem em cima da galeria de túnel, nem na ilha de uma rotatória.
+    if (nearStructure(sx, sz, footprint + 2) || roundaboutIsland(sx, sz, footprint + 4)) continue;
     // O "terreno" inteiro do enfeite tem que estar livre.
     let free = true;
     for (const [px, pz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) {
@@ -770,7 +1202,7 @@ function buildProps(scene: THREE.Scene) {
     const x = WORLD_BOUNDS.minX + random() * (WORLD_BOUNDS.maxX - WORLD_BOUNDS.minX);
     const z = WORLD_BOUNDS.minZ + random() * (WORLD_BOUNDS.maxZ - WORLD_BOUNDS.minZ);
     const district = districtAt(x, z);
-    if ((district !== "serra" && district !== "morro") || heightAt(x, z) < 30 || isOnRoad(x, z) || insideBuilding(x, z)) continue;
+    if ((district !== "serra" && district !== "morro") || heightAt(x, z) < 30 || isOnRoad(x, z) || insideBuilding(x, z) || nearStructure(x, z, 8)) continue;
     if (towers.some(([tx, tz]) => Math.hypot(tx - x, tz - z) < 300)) continue;
     towers.push([x, z]);
     const g = new THREE.Group();

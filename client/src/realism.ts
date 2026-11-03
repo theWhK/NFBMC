@@ -9,6 +9,8 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
+import { speedBlurPass } from "./speed-blur.ts";
+
 /**
  * Environment map do céu: o mesmo shader do céu numa esfera, mais o chão
  * escuro embaixo (o reflexo da metade de baixo de um carro é o chão, não o céu).
@@ -30,11 +32,15 @@ export function skyEnvironment(renderer: THREE.WebGLRenderer, skyMaterial: THREE
   return target.texture;
 }
 
-/** Pós-processamento da qualidade alta. A oclusão pode ser desligada sozinha se o FPS cair. */
+/**
+ * Pós-processamento do realista: oclusão, brilho e o borrão de velocidade, cada
+ * um ligado pela regulagem dos gráficos. A oclusão pode sair sozinha se o FPS cair.
+ */
 export class RealPass {
   private composer: EffectComposer;
   private ao: GTAOPass;
   private bloom: UnrealBloomPass;
+  private blur = speedBlurPass();
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     // Alvo com multiamostragem: sem ela, o pós-processamento perde o antisserrilhado.
@@ -48,6 +54,7 @@ export class RealPass {
     this.composer.addPass(this.ao);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.55, 0.92);
     this.composer.addPass(this.bloom);
+    this.composer.addPass(this.blur);
     this.composer.addPass(new OutputPass());
   }
 
@@ -59,9 +66,20 @@ export class RealPass {
     this.ao.enabled = on;
   }
 
+  set glow(on: boolean) {
+    this.bloom.enabled = on;
+  }
+
+  /** Força do borrão de velocidade (0 = desligado, sem custo). */
+  set speedBlur(strength: number) {
+    this.blur.enabled = strength >= 0.01;
+    this.blur.uniforms.strength.value = strength;
+  }
+
   setSize(width: number, height: number, pixelRatio: number) {
     this.composer.setPixelRatio(pixelRatio);
     this.composer.setSize(width, height);
+    this.blur.uniforms.aspect.value = width / Math.max(1, height);
   }
 
   render() {

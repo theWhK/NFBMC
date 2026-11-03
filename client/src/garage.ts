@@ -16,6 +16,7 @@ import {
   PART_INFO,
   PLAYER_CARS,
   PLAYER_COLORS,
+  PROGRESS_CARS,
   RIVALS_LADDER,
   STARTER_CARS,
   carSpec,
@@ -72,6 +73,8 @@ const handling = (spec: CarSpec) => (spec.turn / 2.6) * (spec.grip ?? 1) * (1.2 
 function careerSource(car: string) {
   if (STARTER_CARS.includes(car)) return "começa liberado";
   if (car === HERO_CAR) return "volta para você no fim da Lista Gorda";
+  const progress = PROGRESS_CARS.find((p) => p.car === car);
+  if (progress) return `chega na garagem depois de vencer ${progress.stage === 1 ? "o primeiro rival" : `${progress.stage} rivais`} da Lista Gorda`;
   const rival = RIVALS_LADDER.find((r) => r.car === car || r.bonusCar === car);
   return rival ? `ganha vencendo o #${rival.rank} ${rival.name}` : "não aparece na carreira";
 }

@@ -12,6 +12,8 @@ import {
   raceMarker,
   type RaceId,
   type Track,
+  RIVER,
+  STRUCTURES,
 } from "@nfbmc/shared";
 
 import type { GpsTarget } from "./gps.ts";
@@ -23,6 +25,10 @@ export interface TachoData {
   gear: number;
   car: string;
   manual: boolean;
+  /** Arrancada: faixa verde da largada (rpm), desenhada no conta-giros. */
+  zone?: [number, number];
+  /** Arrancada: giro ideal da troca (a marca verde; a luz acende perto dela). */
+  shiftAt?: number;
 }
 
 /**
@@ -39,7 +45,7 @@ export function createTacho(canvas: HTMLCanvasElement) {
   const start = Math.PI * 0.75;
   const sweep = Math.PI * 1.5;
 
-  return ({ speed, rpm, gear, car, manual }: TachoData) => {
+  return ({ speed, rpm, gear, car, manual, zone, shiftAt }: TachoData) => {
     const spec = carSpec(car);
     const max = Math.ceil((spec.redline + 1000) / 1000) * 1000;
     const angle = (value: number) => start + (value / max) * sweep;
@@ -56,6 +62,24 @@ export function createTacho(canvas: HTMLCanvasElement) {
     ctx.strokeStyle = "#c1121f";
     ctx.lineWidth = 7;
     ctx.stroke();
+
+    // Arrancada: faixa verde da largada e a marca do giro ideal de troca.
+    if (zone) {
+      ctx.beginPath();
+      ctx.arc(c, c, radius - 4, angle(zone[0]), angle(zone[1]));
+      ctx.strokeStyle = "#3ddc4a";
+      ctx.lineWidth = 9;
+      ctx.stroke();
+    }
+    if (shiftAt) {
+      const a = angle(shiftAt);
+      ctx.strokeStyle = "#7dff6a";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(c + Math.cos(a) * (radius - 20), c + Math.sin(a) * (radius - 20));
+      ctx.lineTo(c + Math.cos(a) * (radius + 6), c + Math.sin(a) * (radius + 6));
+      ctx.stroke();
+    }
 
     // Marcações a cada 1000 rpm (números) e a cada 500 (tracinhos).
     ctx.textAlign = "center";
@@ -98,7 +122,7 @@ export function createTacho(canvas: HTMLCanvasElement) {
     ctx.fill();
 
     // Luz de troca: acende perto da faixa vermelha e pisca no limitador.
-    const shiftNow = rpm > spec.redline * 0.9;
+    const shiftNow = shiftAt ? rpm >= shiftAt - spec.redline * 0.04 : rpm > spec.redline * 0.9;
     const blink = rpm >= spec.redline - 300 && Math.floor(performance.now() / 80) % 2 === 0;
     ctx.beginPath();
     ctx.arc(c, c - radius * 0.55, 7, 0, Math.PI * 2);
@@ -114,7 +138,7 @@ export function createTacho(canvas: HTMLCanvasElement) {
     ctx.fillText("KM/H", c, c + 70);
     ctx.font = "26px 'Russo One', sans-serif";
     ctx.fillStyle = gear < 0 ? "#ff9a1f" : "#ffffff";
-    ctx.fillText(gear < 0 ? "R" : String(gear), c, c - 26);
+    ctx.fillText(gear < 0 ? "R" : gear === 0 ? "N" : String(gear), c, c - 26);
     ctx.font = "11px 'Russo One', sans-serif";
     ctx.fillStyle = "rgba(245, 235, 224, 0.7)";
     ctx.fillText(manual ? "MANUAL" : "AUTO", c, c - 8);
@@ -170,6 +194,51 @@ function drawPin(ctx: CanvasRenderingContext2D, x: number, y: number, size: numb
   ctx.restore();
 }
 
+/** Rio Banha: um traço por trecho, com a largura de cada ponto. */
+function drawRiver(ctx: CanvasRenderingContext2D, toMap: (x: number, z: number) => [number, number], scale: number) {
+  ctx.strokeStyle = "#2f7aa0";
+  ctx.lineCap = "round";
+  for (let i = 1; i < RIVER.points.length; i++) {
+    ctx.lineWidth = Math.max(2, ((RIVER.width[i - 1] + RIVER.width[i]) / 2) * scale);
+    ctx.beginPath();
+    ctx.moveTo(...toMap(...RIVER.points[i - 1]));
+    ctx.lineTo(...toMap(...RIVER.points[i]));
+    ctx.stroke();
+  }
+}
+
+/**
+ * Pontes e viadutos por cima de tudo (com sombra, para ver que passam por cima)
+ * e túneis tracejados (por baixo do morro).
+ */
+function drawStructures(ctx: CanvasRenderingContext2D, toMap: (x: number, z: number) => [number, number], scale: number, fill: string) {
+  ctx.lineJoin = "round";
+  ctx.lineCap = "butt";
+  for (const st of STRUCTURES) {
+    const width = Math.max(2, st.width * scale);
+    const trace = () => {
+      ctx.beginPath();
+      for (const [x, z] of st.points) ctx.lineTo(...toMap(x, z));
+      ctx.stroke();
+    };
+    if (st.kind === "tunel") {
+      ctx.setLineDash([Math.max(3, 8 * scale), Math.max(3, 6 * scale)]);
+      ctx.strokeStyle = "rgba(20, 16, 12, 0.75)";
+      ctx.lineWidth = width;
+      trace();
+      ctx.setLineDash([]);
+      continue;
+    }
+    ctx.strokeStyle = "rgba(10, 8, 6, 0.9)";
+    ctx.lineWidth = width + 4;
+    trace();
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = width;
+    trace();
+  }
+  ctx.lineCap = "round";
+}
+
 /** Minimapa redondo: ruas, traçado, pontos de encontro e carros. */
 /** Retângulo de cada rua, para o minimapa pular as que estão fora da vista. */
 const ROAD_BOXES = ROADS.map((road) => {
@@ -218,6 +287,7 @@ export function createMinimap(canvas: HTMLCanvasElement) {
     ctx.beginPath();
     ctx.ellipse(...toMap(LAKE.x, LAKE.z), LAKE.rx * scale, LAKE.rz * scale, 0, 0, Math.PI * 2);
     ctx.fill();
+    drawRiver(ctx, toMap, scale);
     // Ruas, com a largura de cada uma.
     ctx.strokeStyle = "#6b6156";
     ctx.lineJoin = "round";
@@ -226,11 +296,13 @@ export function createMinimap(canvas: HTMLCanvasElement) {
       // Só as ruas que aparecem no círculo (a cidade grande tem centenas).
       const box = ROAD_BOXES[i];
       if (box.maxX < view.x - view.radius || box.minX > view.x + view.radius || box.maxZ < view.z - view.radius || box.minZ > view.z + view.radius) continue;
+      if (road.structure >= 0) continue;
       ctx.lineWidth = Math.max(1.5, road.width * scale);
       ctx.beginPath();
       for (const [x, z] of road.points) ctx.lineTo(...toMap(x, z));
       ctx.stroke();
     }
+    drawStructures(ctx, toMap, scale, "#7d7266");
     drawTrack(RACES.autodromo.track, scale, toMap, "#5b5148", RACES.autodromo.track.width);
     if (race) {
       drawTrack(RACES[race].track, scale, toMap, "#ff9a1f", 7 / scale);
@@ -438,6 +510,7 @@ export function createFullMap(canvas: HTMLCanvasElement, onPick?: (pick: MapPick
     ctx.beginPath();
     ctx.ellipse(...toMap(LAKE.x, LAKE.z), LAKE.rx * s, LAKE.rz * s, 0, 0, Math.PI * 2);
     ctx.fill();
+    drawRiver(ctx, toMap, s);
 
     // Ruas: borda escura e asfalto por cima.
     ctx.lineJoin = "round";
@@ -445,6 +518,7 @@ export function createFullMap(canvas: HTMLCanvasElement, onPick?: (pick: MapPick
     for (const [color, extra] of [["#1b1714", 4], ["#5b5148", 0]] as const) {
       ctx.strokeStyle = color;
       for (const road of ROADS) {
+        if (road.structure >= 0) continue;
         ctx.lineWidth = Math.max(2, road.width * s) + extra;
         ctx.beginPath();
         for (const [x, z] of road.points) ctx.lineTo(...toMap(x, z));
@@ -459,8 +533,24 @@ export function createFullMap(canvas: HTMLCanvasElement, onPick?: (pick: MapPick
       ctx.closePath();
       ctx.stroke();
     };
+    drawStructures(ctx, toMap, s, "#6e6358");
     drawTrack(RACES.autodromo.track, "#5b5148", Math.max(2, RACES.autodromo.track.width * s));
     if (race) drawTrack(RACES[race].track, "#ff9a1f", Math.max(3, 5 * s));
+    // Nomes das obras de arte (com zoom).
+    if (zoom >= 1.6) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `${Math.round(9 + zoom * 1.5)}px 'Russo One', sans-serif`;
+      for (const st of STRUCTURES) {
+        const [x, z] = st.points[Math.floor(st.points.length / 2)];
+        const [mx, my] = toMap(x, z);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(10, 8, 6, 0.85)";
+        ctx.strokeText(st.name, mx, my - 12);
+        ctx.fillStyle = "#ffe3b0";
+        ctx.fillText(st.name, mx, my - 12);
+      }
+    }
 
     // Nomes dos bairros.
     ctx.textAlign = "center";
