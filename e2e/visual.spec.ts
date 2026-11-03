@@ -216,6 +216,29 @@ test("3D: entrar e sair da garagem com a animação e o interior", async ({ page
   expect(errors).toEqual([]);
 });
 
+// Arrancada: a pista do drag (faixas, semáforo e chegada) monta na cena 3D.
+test("3D: arrancada do aeroporto desenha a pista e larga sem erros", async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => {
+    if (m.type() === "error") errors.push(m.text());
+  });
+  await page.goto("/");
+  await page.getByTestId("name-input").fill("Will");
+  await page.getByTestId("quick-menu").click();
+  await page.getByTestId("quick-track").selectOption("arrancada");
+  await page.getByTestId("solo-button").click();
+  await expect(page.getByTestId("status")).toHaveText("Conectado");
+  await page.getByTestId("start-button").click();
+  await page.keyboard.down("ArrowUp");
+  await expect.poll(() => page.evaluate(() => window.__nfbmc!.phase()), { timeout: 30_000 }).toBe("racing");
+  await page.keyboard.press("KeyE");
+  await page.waitForTimeout(1500);
+  await page.keyboard.up("ArrowUp");
+  expect(errors).toEqual([]);
+});
+
 test("3D: gráficos avançados mexem num ajuste por vez e o preset desfaz", async ({ page }) => {
   test.setTimeout(120_000);
   const errors: string[] = [];

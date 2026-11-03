@@ -17,6 +17,8 @@ import {
   isOnRoad,
   isRaceId,
   raceMarker,
+  raceSeats,
+  RACES,
   bustFine,
   escapeCash,
   garageAt,
@@ -331,8 +333,22 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       return;
     }
 
-    const participants = [...this.state.players.keys()].filter(near).slice(0, MAX_PLAYERS);
-    const bots = typeof message.bots === "number" ? clamp(Math.round(message.bots), 0, MAX_PLAYERS - participants.length) : 3;
+    // Speedtrap é desafio solo (contra as metas): vai só quem disparou; quem
+    // mais estiver no ponto continua no mundo e dispara o seu quando quiser.
+    // Arrancada é de dois: quem disparou e quem estiver mais perto dele no ponto.
+    const me = this.state.players.get(client.sessionId)!;
+    const others = [...this.state.players.keys()]
+      .filter((id) => id !== client.sessionId && near(id))
+      .sort((a, b) => {
+        const pa = this.state.players.get(a)!;
+        const pb = this.state.players.get(b)!;
+        return Math.hypot(pa.x - me.x, pa.z - me.z) - Math.hypot(pb.x - me.x, pb.z - me.z);
+      });
+    const seats = raceSeats(raceId);
+    const participants = [client.sessionId, ...others].slice(0, seats);
+    const bots = RACES[raceId].kind === "radar" ? 0 : typeof message.bots === "number"
+      ? clamp(Math.round(message.bots), 0, seats - participants.length)
+      : Math.min(3, seats - participants.length);
     await this.launchRace(participants, raceId, bots, isDifficulty(message.difficulty) ? message.difficulty : "medio");
   }
 
@@ -372,6 +388,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     if (this.state.solo || typeof to !== "string" || to === from || !isRaceId(message?.raceId)) return;
     const target = this.state.players.get(to);
     if (!target) return;
+    // Speedtrap é desafio solo: não serve para pega.
+    if (RACES[message.raceId].kind === "radar") return this.notice(from, "Speedtrap é desafio solo: escolha outra corrida para o pega.");
     const busy = this.busyReason(from, true) ?? this.busyReason(to, false);
     if (busy) return this.notice(from, busy);
     const pending = [...this.invites.values()];

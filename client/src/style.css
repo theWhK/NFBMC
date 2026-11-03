@@ -3449,6 +3449,54 @@ body.touch:has(#marker-panel:not([hidden])) #dash {
   }
 }
 
+/* Arrancada: a nota da largada e das trocas, grande e rápida no meio da tela. */
+#drag-grade {
+  position: fixed;
+  left: 50%;
+  top: 30%;
+  z-index: 19;
+  pointer-events: none;
+  transform: translateX(-50%);
+  font: 2.4rem var(--hud);
+  color: #fff;
+  text-shadow: 0 3px 0 #000;
+  white-space: nowrap;
+  animation: drag-grade 1.1s ease-out forwards;
+}
+
+#drag-grade[hidden] {
+  display: none;
+}
+
+#drag-grade.perfeita {
+  color: #7dff6a;
+}
+
+#drag-grade.boa {
+  color: #ffd23f;
+}
+
+#drag-grade.ruim {
+  color: #ff5c5c;
+}
+
+@keyframes drag-grade {
+  0% {
+    transform: translateX(-50%) scale(1.4);
+    opacity: 0;
+  }
+  15% {
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 #results.radar-off .trap-col {
   display: none;
 }

@@ -42,4 +42,14 @@ export interface PlayerSnapshot {
   boost: boolean;
   /** Câmbio manual (E/Q). */
   manual: boolean;
+  /** Corrida: arrancada (largou, reação, queimou, notas da largada e das trocas) e progresso. */
+  launched?: boolean;
+  reaction?: number;
+  jumped?: boolean;
+  launchGrade?: string;
+  shiftGrade?: string;
+  shifts?: number;
+  progress?: number;
+  finishTime?: number;
+  trapTotal?: number;
 }

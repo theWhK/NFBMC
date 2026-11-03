@@ -14,6 +14,8 @@ import {
   RACES,
   RACE_IDS,
   raceMarker,
+  raceSeats,
+  raceSummary,
   type Difficulty,
   type GoRaceMessage,
   type InputMessage,
@@ -155,7 +157,8 @@ export class WorldMode {
     this.ctx.sound.click();
     this.room.send("startRace", {
       raceId,
-      bots: this.bots,
+      // A arrancada é de dois: o que sobrar de vaga vira bot (o servidor confere).
+      bots: Math.min(this.bots, raceSeats(raceId) - 1),
       difficulty: ui.markerDifficulty.value as Difficulty,
     });
     ui.startRace.blur();
@@ -295,18 +298,28 @@ export class WorldMode {
     if (raceId) {
       const race = RACES[raceId];
       const marker = raceMarker(raceId);
-      const people = [...room.state.players.values()].filter((p) => Math.hypot(p.x - marker.x, p.z - marker.z) <= MARKER_RADIUS);
-      const bots = Math.min(this.bots, MAX_PLAYERS - people.length);
+      // Speedtrap: só quem dispara vai (desafio solo). Arrancada: você e o mais perto.
+      const seats = raceSeats(raceId);
+      const others = [...room.state.players.entries()]
+        .filter(([id, p]) => id !== room.sessionId && Math.hypot(p.x - marker.x, p.z - marker.z) <= MARKER_RADIUS)
+        .map(([, p]) => p)
+        .sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z));
+      const people = [me, ...others].slice(0, seats);
+      const solo = race.kind === "radar";
+      const bots = solo ? 0 : Math.min(this.bots, seats - people.length);
       ui.markerTitle.textContent = race.name;
-      ui.markerInfo.textContent = `${race.laps} voltas · ${(race.track.length / 1000).toFixed(1).replace(".", ",")} km por volta`;
+      ui.markerInfo.textContent = raceSummary(raceId);
       setHtml(
         ui.markerPeople,
-        `No ponto: ${people.map((p) => `<span class="dot" style="background:${p.color}"></span>${escapeHtml(p.name)}`).join(", ")}` +
-          (bots > 0 ? ` + 🤖 ${bots} (${DIFFICULTY_LABELS[ui.markerDifficulty.value as Difficulty]})` : ""),
+        solo
+          ? "Desafio solo: bata a meta de velocidade somada nos radares (bronze já vence)."
+          : `No ponto: ${people.map((p) => `<span class="dot" style="background:${p.color}"></span>${escapeHtml(p.name)}`).join(", ")}` +
+            (bots > 0 ? ` + 🤖 ${bots} (${DIFFICULTY_LABELS[ui.markerDifficulty.value as Difficulty]})` : ""),
       );
+      for (const el of [ui.markerBots, ui.markerDifficulty]) (el.closest(".setting") as HTMLElement).hidden = solo;
       ui.markerBots.textContent = String(bots);
       ui.markerBotsMinus.disabled = bots <= 0;
-      ui.markerBotsPlus.disabled = bots >= MAX_PLAYERS - people.length;
+      ui.markerBotsPlus.disabled = bots >= seats - people.length;
       ui.startRace.disabled = this.calling || myCops.length > 0;
       ui.startRace.textContent = myCops.length > 0
         ? "Despiste a Vigilância primeiro!"
