@@ -167,27 +167,27 @@ test("3D: visual realista com detalhes de perto e troca para o quadrinho", async
 });
 
 test("3D: gráficos avançados mexem num ajuste por vez e o preset desfaz", async ({ page }) => {
+  test.setTimeout(120_000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  // Ultra → alto: as sombras continuam ligadas (sem recompilar a cena, que é lento no 3D por CPU).
-  await page.addInitScript(() => localStorage.setItem("nfbmc:quality", "ultra"));
+  // Médio → baixo: sem sombras nos dois (ligar sombra recompila a cena, lento no 3D por CPU).
+  await page.addInitScript(() => localStorage.setItem("nfbmc:quality", "medio"));
   await page.goto("/");
   await page.getByTestId("options-menu").click();
-  await expect(page.getByTestId("opt-quality")).toContainText("ultra");
+  await expect(page.getByTestId("opt-quality")).toContainText("médio (reflexos");
   await page.getByTestId("opt-advanced").click();
-  await expect(page.getByTestId("gfx-shadows")).toHaveText("Sombras: altas");
+  await expect(page.getByTestId("gfx-shadows")).toHaveText("Sombras: desligadas");
   await expect(page.getByTestId("gfx-speedBlur")).toHaveText("Borrão de velocidade: ligado");
-  // Detalhe da cidade: até 480 m → simples; o preset vira "personalizado" e fica salvo.
+  // Detalhe da cidade: até 190 m → até 340 m; o preset vira "personalizado" e fica salvo.
   await page.getByTestId("gfx-detail").click();
-  await expect(page.getByTestId("gfx-detail")).toHaveText("Detalhe da cidade: simples");
-  await expect(page.getByTestId("opt-quality")).toContainText("personalizado");
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nfbmc:graphics")!))).toEqual({ detail: 0 });
-  // Escolher um preset (ultra → alto) desfaz os ajustes.
-  await page.getByTestId("opt-quality").click();
-  await expect(page.getByTestId("opt-quality")).toContainText("alto (sombras e brilho)");
-  await expect(page.getByTestId("opt-quality")).not.toContainText("personalizado");
-  await expect(page.getByTestId("gfx-shadows")).toHaveText("Sombras: médias");
   await expect(page.getByTestId("gfx-detail")).toHaveText("Detalhe da cidade: até 340 m");
+  await expect(page.getByTestId("opt-quality")).toContainText("personalizado");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nfbmc:graphics")!))).toEqual({ detail: 340 });
+  // Escolher um preset (médio → baixo) desfaz os ajustes.
+  await page.getByTestId("opt-quality").click();
+  await expect(page.getByTestId("opt-quality")).toContainText("baixo (mais leve)");
+  await expect(page.getByTestId("opt-quality")).not.toContainText("personalizado");
+  await expect(page.getByTestId("gfx-detail")).toHaveText("Detalhe da cidade: simples");
   expect(await page.evaluate(() => localStorage.getItem("nfbmc:graphics"))).toBeNull();
   expect(errors).toEqual([]);
 });
