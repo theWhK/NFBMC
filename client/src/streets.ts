@@ -26,7 +26,7 @@
 // 200 m com nível de detalhe (`addLodChunk`), montados só quando a câmera chega
 // perto.
 import * as THREE from "three";
-import { DISTRICTS, NAV, ROADS, districtAt, heightAt, type DistrictId, type Road } from "@nfbmc/shared";
+import { DISTRICTS, NAV, ROADS, STRUCTURES, districtAt, heightAt, type DistrictId, type Road } from "@nfbmc/shared";
 
 import { DETAIL_TILE, TILE, addChunk, addLodChunk } from "./chunks.ts";
 import { surface } from "./look.ts";
@@ -107,8 +107,8 @@ function groundNormal(x: number, z: number): Rgb {
 
 // --- Construtor de malhas (arrays) ------------------------------------------------
 
-/** Vértices e triângulos de um material num bloco. */
-class Bucket {
+/** Vértices e triângulos de um material num bloco (as obras de arte, em structures.ts, usam também). */
+export class Bucket {
   pos = new Float32Array(3 * 256);
   nor = new Float32Array(3 * 256);
   uv = new Float32Array(2 * 256);
@@ -240,7 +240,7 @@ function materials() {
 
 // --- Estilo de cada rua ----------------------------------------------------------
 
-type Marks = "avenida" | "rua" | "rodovia" | "pista" | null;
+type Marks = "avenida" | "rua" | "rodovia" | "pista" | "taxiway" | null;
 
 interface Style {
   pave: Pave;
@@ -303,6 +303,11 @@ function styleOf(road: Road, index: number, district: DistrictId): Style {
   switch (road.kind) {
     case "pista":
       Object.assign(style, { pave: "concreto", tone: TONES.pista, wear: 0, curb: false, walk: null, verge: 4, vergeTone: lin("#7f8a4c"), marks: "pista", zebra: 0, lanes: [], priority: 6, uvScale: 0.5 });
+      break;
+    case "taxiway":
+      // Pista de táxi: o mesmo concreto da pista de pouso, sem meio-fio nem
+      // calçada, com a linha amarela no eixo e as bordas amarelas.
+      Object.assign(style, { pave: "concreto", tone: scale(TONES.pista, 1.04), wear: 0, curb: false, walk: null, verge: 3, vergeTone: lin("#7f8a4c"), marks: "taxiway", zebra: 0, lanes: [], priority: 5.5, uvScale: 0.5 });
       break;
     case "rodovia":
       Object.assign(style, {
@@ -562,7 +567,11 @@ const segs: number[] = [];
 function indexSegments() {
   for (const lay of LAYS) {
     const pts = lay.road.points;
+    const st = lay.road.structure >= 0 ? STRUCTURES[lay.road.structure] : null;
     for (let i = 1; i < pts.length; i++) {
+      // Trecho de obra de arte fora do chão (viaduto lá em cima, túnel lá
+      // embaixo): a calçada das ruas do chão não desvia dele.
+      if (st && offGround(st, pts[i - 1]) && offGround(st, pts[i])) continue;
       const id = segs.length / 5;
       segs.push(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], lay.index);
       const reach = lay.half + 8;
@@ -580,6 +589,20 @@ function indexSegments() {
       }
     }
   }
+}
+
+/** O ponto da obra está fora do chão (mais de 30 cm acima ou abaixo)? */
+function offGround(st: (typeof STRUCTURES)[number], p: [number, number]) {
+  let best = 0;
+  let bd = Infinity;
+  for (let k = 0; k < st.points.length; k++) {
+    const d = (st.points[k][0] - p[0]) ** 2 + (st.points[k][1] - p[1]) ** 2;
+    if (d < bd) {
+      bd = d;
+      best = k;
+    }
+  }
+  return Math.abs(st.y[best] - st.ground[best]) > 0.3;
 }
 
 const NODE_POS = new Map(NAV.map((n) => [n.id, [n.x, n.z] as [number, number]]));
@@ -845,7 +868,7 @@ interface Corner {
 const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 function cornerRadius(a: Style, b: Style) {
-  const kinds = [a, b].map((s) => (s.marks === "pista" ? 15 : s.marks === "rodovia" ? 9 : s.pave === "terra" ? 6 : s.priority >= 4 ? 6 : s.priority >= 3 ? 4.5 : 3.2));
+  const kinds = [a, b].map((s) => (s.marks === "pista" ? 15 : s.marks === "taxiway" ? 12 : s.marks === "rodovia" ? 9 : s.pave === "terra" ? 6 : s.priority >= 4 ? 6 : s.priority >= 3 ? 4.5 : 3.2));
   let r = Math.max(...kinds);
   if (a.curb && b.curb && a.walk && b.walk) r = Math.max(r, Math.max(a.walkWidth, b.walkWidth) + 1);
   return r;
@@ -1092,6 +1115,8 @@ function buildJunction(j: Junction, profiles: Profile[]) {
 // --- Trecho de rua -------------------------------------------------------------------
 
 function buildRoad(lay: Lay, prof: Profile) {
+  // Pontes, viadutos e túneis: o tabuleiro é desenhado em structures.ts (só os cruzamentos das pontas ficam aqui).
+  if (lay.road.structure >= 0) return;
   const { style } = lay;
   const s0 = lay.ends[0].trim;
   const s1 = lay.len - lay.ends[1].trim;
@@ -1272,6 +1297,14 @@ function buildMarkings(lay: Lay, B: Buckets) {
       case "pista":
         buildRunway(lay, B);
         break;
+      case "taxiway":
+        // Eixo amarelo e as bordas em linha dupla amarela.
+        line(lay, B, s0, s1, 0, 0.3, YELLOW);
+        for (const side of [-1, 1]) {
+          line(lay, B, s0, s1, side * (a - 0.5), 0.15, YELLOW);
+          line(lay, B, s0, s1, side * (a - 0.85), 0.15, YELLOW);
+        }
+        break;
     }
   }
   // Perto dos cruzamentos: faixa de pedestre, linha de retenção e PARE.
@@ -1364,6 +1397,7 @@ function roadDecal(lay: Lay, name: DecalName, s: number, u: number, w: number, l
 }
 
 function planDecals(lay: Lay) {
+  if (lay.road.structure >= 0) return;
   const { style } = lay;
   const random = rng(lay.index * 4099 + 23);
   const a = lay.inner;
@@ -1381,6 +1415,11 @@ function planDecals(lay: Lay) {
   const asphalt = style.pave === "asfalto";
   const wear = style.wear;
 
+  if (style.marks === "taxiway") {
+    scatter(40, 0.5, (s) => roadDecal(lay, "borracha", s, (random() - 0.5) * 4, pick(1.5, 3), pick(6, 14), { rotate: (random() - 0.5) * 0.05 }));
+    scatter(50, 0.4, (s) => roadDecal(lay, "oleo", s, (random() - 0.5) * a, pick(1, 2), pick(1.5, 3), { rotate: random() * Math.PI }));
+    return;
+  }
   if (style.marks === "pista") {
     for (const end of [0, 1] as const) {
       for (let k = 0; k < 26; k++) {
@@ -1549,6 +1588,18 @@ function buildDetail(decals: Decal[], studs: Stud[]) {
 
 // --- Montagem ----------------------------------------------------------------------
 
+/**
+ * Pontes, viadutos e túneis: quanto do começo (ponta A) e do fim (ponta B) da
+ * obra é o cruzamento das pontas (m). O tabuleiro (structures.ts) começa e
+ * termina aí, casando com a boca do cruzamento. Preenchido pelo `buildStreets`.
+ */
+export const STRUCTURE_ENDS = new Map<number, [number, number]>();
+
+/** Materiais das ruas (o tabuleiro das obras usa os mesmos). */
+export function streetMaterial(key: "asfalto" | "paralelepipedo" | "concreto" | "tinta" | "meiofio" | "grama") {
+  return materials()[key];
+}
+
 /** Pavimento, meio-fio, calçadas e faixas de todas as ruas (e dos cruzamentos), e os detalhes de perto. */
 export function buildStreets(scene: THREE.Scene) {
   const m = materials();
@@ -1560,6 +1611,15 @@ export function buildStreets(scene: THREE.Scene) {
   const junctions = NAV.map(planJunction).filter((j): j is Junction => j !== null);
   const profiles = LAYS.map(profileOf);
   for (const j of junctions) buildJunction(j, profiles);
+  // Onde o tabuleiro de cada obra começa e termina (a boca dos cruzamentos das pontas), no sentido A→B da obra.
+  STRUCTURE_ENDS.clear();
+  for (const lay of LAYS) {
+    if (lay.road.structure < 0) continue;
+    const st = STRUCTURES[lay.road.structure];
+    const [px, pz] = lay.road.points[0];
+    const same = Math.hypot(px - st.points[0][0], pz - st.points[0][1]) < 1;
+    STRUCTURE_ENDS.set(st.id, same ? [lay.ends[0].trim, lay.ends[1].trim] : [lay.ends[1].trim, lay.ends[0].trim]);
+  }
   for (const lay of LAYS) buildRoad(lay, profiles[lay.index]);
   normals.clear();
 
