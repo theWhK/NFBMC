@@ -128,7 +128,7 @@ docker run --rm -p 2567:2567 nfbmc
 
 Lista para conferir (marcada pelo Will):
 
-- [ ] Último dump do banco da prod copiado para fora da VM (fica fora do repo: tem os tokens dos jogadores)
+- Banco da prod descartado de propósito: as fichas dos jogadores não foram guardadas
 - [ ] Trabalho não enviado na dev conferido (`git log --branches --not --remotes` e `git status` nos worktrees do usuário `claude`)
 - [ ] VMs 120 e 121 destruídas com os discos (`qm destroy <id> --purge --destroy-unreferenced-disks 1`)
 - [ ] Bridges `vmbr1`/`vmbr2` tiradas do `/etc/network/interfaces` e `/usr/local/sbin/nfbmc-fw.sh` apagado
