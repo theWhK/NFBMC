@@ -1,0 +1,21 @@
+# Trecho que estava em /etc/network/interfaces do host Proxmox (whkserver).
+# Duas bridges sem porta física: a prod em vmbr1 e a dev em vmbr2.
+# O nfbmc-fw.sh dá NAT para a internet e bloqueia LAN, Tailscale (100.64/10) e o próprio host.
+
+auto vmbr1
+iface vmbr1 inet static
+    address 10.10.10.1/24
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+    post-up   /usr/local/sbin/nfbmc-fw.sh up   vmbr1 10.10.10.0/24
+    post-down /usr/local/sbin/nfbmc-fw.sh down vmbr1 10.10.10.0/24
+
+auto vmbr2
+iface vmbr2 inet static
+    address 10.10.20.1/24
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+    post-up   /usr/local/sbin/nfbmc-fw.sh up   vmbr2 10.10.20.0/24
+    post-down /usr/local/sbin/nfbmc-fw.sh down vmbr2 10.10.20.0/24

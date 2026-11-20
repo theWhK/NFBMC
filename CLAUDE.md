@@ -2,6 +2,8 @@
 
 Jogo de browser multiplayer, paródia de Need for Speed com tema de comida, para um grupo pequeno de amigos não técnicos. Eles entram por https://nfbmc.willianhideki.com.br, sem login e sem instalar nada.
 
+> **Arquivado em 2026-11-20.** A prod, a dev e o site não existem mais. Antes de qualquer trabalho de infra, leia [docs/infra.md](docs/infra.md).
+
 Fale com o Will em português do Brasil. Comentários de código, títulos e descrições de PR também em português.
 
 ## Regras (não negociáveis)
