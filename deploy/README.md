@@ -1,5 +1,7 @@
 # Deploy na nfbmc-prod
 
+> Projeto arquivado: a VM não existe mais. Para reconstruir a infra antes deste passo (rede, VM, Tailscale, tunnel), veja [docs/infra.md](../docs/infra.md).
+
 Passos feitos **pelo Will**, uma vez. O agente nunca tem acesso à prod nem a estes segredos.
 
 Pré-requisitos já feitos no bootstrap: Docker instalado, usuário de sistema `deploy` (sem login, no grupo `docker`) dono de `/opt/nfbmc`.
